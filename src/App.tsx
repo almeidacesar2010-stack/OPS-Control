@@ -434,8 +434,13 @@ function AppContent() {
           username: data.username || user.email?.split('@')[0] || ''
         });
       } else {
-        // Bootstrap first user as admin if it's the owner email
-        if (user.email === "almeidacesar2010@gmail.com") {
+        // If document doesn't exist and it's not the owner, it means the user was deleted
+        if (user.email !== "almeidacesar2010@gmail.com") {
+          console.warn("User document not found. Signing out...");
+          signOut(auth);
+          setGlobalError("Sua conta foi desativada ou removida.");
+        } else {
+          // Bootstrap first user as admin if it's the owner email
           console.log("Bootstrapping owner as admin...");
           setCurrentUserRole('admin');
           setDoc(userRef, {

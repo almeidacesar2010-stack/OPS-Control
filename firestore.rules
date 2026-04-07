@@ -65,7 +65,7 @@ service cloud.firestore {
     match /serviceOrders/{osId} {
       allow read: if isAuthenticated();
       allow create: if isAuthenticated() && isValidServiceOrder(request.resource.data);
-      allow update: if isAuthenticated() && (isDocOwner() || isAdmin()) && isValidServiceOrder(request.resource.data);
+      allow update: if isAuthenticated() && isValidServiceOrder(request.resource.data);
       allow delete: if isAdmin();
     }
 

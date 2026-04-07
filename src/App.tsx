@@ -269,6 +269,7 @@ function AppContent() {
   const [selectedMonth, setSelectedMonth] = useState<Date | null>(null);
   const [isAuthReady, setIsAuthReady] = useState(false);
   const [globalError, setGlobalError] = useState<string | null>(null);
+  const [loginError, setLoginError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [inProgressSearchTerm, setInProgressSearchTerm] = useState('');
   const [completedSearchTerm, setCompletedSearchTerm] = useState('');
@@ -554,6 +555,7 @@ function AppContent() {
     if (isSubmitting) return;
     setIsSubmitting(true);
     setGlobalError(null);
+    setLoginError(null);
     
     try {
       if (authForm.username && authForm.password) {
@@ -567,16 +569,16 @@ function AppContent() {
         
         if (!userDoc.exists() && email !== "almeidacesar2010@gmail.com") {
           await signOut(auth);
-          setGlobalError('Não existe cadastro para este usuário ou sua conta foi removida.');
+          setLoginError('Não existe cadastro para este usuário ou sua conta foi removida.');
           return;
         }
       }
     } catch (error: any) {
       console.error('Login error:', error);
       if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential') {
-        setGlobalError('Usuário ou senha incorretos.');
+        setLoginError('Usuário ou senha incorretos.');
       } else {
-        setGlobalError('Erro ao entrar. Verifique seu usuário e senha.');
+        setLoginError('Erro ao entrar. Verifique seu usuário e senha.');
       }
     } finally {
       setIsSubmitting(false);
@@ -1212,7 +1214,7 @@ function AppContent() {
     );
   }
 
-  if (!user) {
+  if (!user || loginError) {
     return (
       <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex flex-col items-center justify-center p-4 transition-colors duration-300">
         <motion.div 
@@ -1228,6 +1230,21 @@ function AppContent() {
             Entre na sua conta de equipe
           </p>
 
+          {loginError && (
+            <motion.div 
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              className="mb-6 p-4 bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-900/30 rounded-xl"
+            >
+              <div className="flex items-center gap-3">
+                <AlertCircle className="w-5 h-5 text-red-600 dark:text-red-400" />
+                <p className="text-xs font-black text-red-600 dark:text-red-400 uppercase tracking-tight leading-tight">
+                  {loginError}
+                </p>
+              </div>
+            </motion.div>
+          )}
+
           <form onSubmit={handleLogin} className="space-y-4">
             <div>
               <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-1 ml-1">Usuário</label>
@@ -1236,7 +1253,10 @@ function AppContent() {
                 required
                 className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all font-bold text-slate-900 dark:text-white placeholder:text-slate-300 dark:placeholder:text-slate-600"
                 value={authForm.username}
-                onChange={(e) => setAuthForm({ ...authForm, username: e.target.value })}
+                onChange={(e) => {
+                  setAuthForm({ ...authForm, username: e.target.value });
+                  if (loginError) setLoginError(null);
+                }}
               />
             </div>
             <div>
@@ -1246,7 +1266,10 @@ function AppContent() {
                 required
                 className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all font-bold text-slate-900 dark:text-white placeholder:text-slate-300 dark:placeholder:text-slate-600"
                 value={authForm.password}
-                onChange={(e) => setAuthForm({ ...authForm, password: e.target.value })}
+                onChange={(e) => {
+                  setAuthForm({ ...authForm, password: e.target.value });
+                  if (loginError) setLoginError(null);
+                }}
               />
             </div>
             <button

@@ -11,6 +11,7 @@ import {
   updateDoc,
   doc,
   deleteDoc,
+  getDoc,
   getDocFromServer,
   writeBatch
 } from 'firebase/firestore';
@@ -438,7 +439,7 @@ function AppContent() {
         if (user.email !== "almeidacesar2010@gmail.com") {
           console.warn("User document not found. Signing out...");
           signOut(auth);
-          setGlobalError("Sua conta foi desativada ou removida.");
+          setGlobalError("Sua conta não existe mais no sistema.");
         } else {
           // Bootstrap first user as admin if it's the owner email
           console.log("Bootstrapping owner as admin...");
@@ -552,15 +553,31 @@ function AppContent() {
     if (e) e.preventDefault();
     if (isSubmitting) return;
     setIsSubmitting(true);
+    setGlobalError(null);
+    
     try {
       if (authForm.username && authForm.password) {
         // Use username as email internally
         const email = authForm.username.includes('@') ? authForm.username : `${authForm.username}@oeg.local`;
-        await signInWithEmailAndPassword(auth, email, authForm.password);
+        const userCredential = await signInWithEmailAndPassword(auth, email, authForm.password);
+        
+        // Check if user exists in Firestore immediately
+        const userRef = doc(db, 'users', userCredential.user.uid);
+        const userDoc = await getDoc(userRef);
+        
+        if (!userDoc.exists() && email !== "almeidacesar2010@gmail.com") {
+          await signOut(auth);
+          setGlobalError('Não existe cadastro para este usuário ou sua conta foi removida.');
+          return;
+        }
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Login error:', error);
-      setGlobalError('Erro ao entrar. Verifique seu usuário e senha.');
+      if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential') {
+        setGlobalError('Usuário ou senha incorretos.');
+      } else {
+        setGlobalError('Erro ao entrar. Verifique seu usuário e senha.');
+      }
     } finally {
       setIsSubmitting(false);
     }

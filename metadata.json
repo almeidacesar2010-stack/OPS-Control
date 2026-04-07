@@ -1,0 +1,5 @@
+{
+  "name": "Ops Control",
+  "description": "Sistema de controle de operações OEG para PCP, com gestão de clientes, ordens de serviço e dashboards de produtividade.",
+  "requestFramePermissions": []
+}

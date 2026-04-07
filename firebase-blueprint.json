@@ -1,0 +1,117 @@
+{
+  "entities": {
+    "serviceOrder": {
+      "title": "Service Order",
+      "description": "Represents a maintenance service order for an equipment.",
+      "type": "object",
+      "properties": {
+        "equipmentNumber": {
+          "type": "string",
+          "description": "The unique identifier of the equipment."
+        },
+        "family": {
+          "type": "string",
+          "description": "The family of the equipment (e.g., Torno, Fresa)."
+        },
+        "clientId": {
+          "type": "string",
+          "description": "The ID of the client associated with this OS."
+        },
+        "startDate": {
+          "type": "string",
+          "format": "date-time",
+          "description": "The start date of the maintenance."
+        },
+        "endDate": {
+          "type": "string",
+          "format": "date-time",
+          "description": "The end date of the maintenance."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["Em Andamento", "Concluído"],
+          "description": "The current status of the OS."
+        },
+        "leadTime": {
+          "type": "number",
+          "description": "Number of days between start and end date."
+        },
+        "userId": {
+          "type": "string",
+          "description": "The UID of the user who created the OS."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "The creation timestamp."
+        }
+      },
+      "required": ["equipmentNumber", "family", "clientId", "startDate", "status", "userId"]
+    },
+    "client": {
+      "title": "Client",
+      "description": "Represents a customer with CNPJ and Reason Social.",
+      "type": "object",
+      "properties": {
+        "cnpj": {
+          "type": "string",
+          "description": "The CNPJ of the client."
+        },
+        "razaoSocial": {
+          "type": "string",
+          "description": "The legal name of the client."
+        },
+        "userId": {
+          "type": "string",
+          "description": "The UID of the user who created the client."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "The creation timestamp."
+        }
+      },
+      "required": ["cnpj", "razaoSocial", "userId"]
+    },
+    "appUser": {
+      "title": "App User",
+      "description": "Represents an authorized user of the system.",
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string",
+          "description": "The email of the user."
+        },
+        "name": {
+          "type": "string",
+          "description": "The name of the user."
+        },
+        "role": {
+          "type": "string",
+          "enum": ["moderator", "admin", "user"],
+          "description": "The role of the user."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "The creation timestamp."
+        }
+      },
+      "required": ["email", "name", "role", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/serviceOrders/{osId}": {
+      "schema": "serviceOrder",
+      "description": "Collection of service orders."
+    },
+    "/clients/{clientId}": {
+      "schema": "client",
+      "description": "Collection of clients."
+    },
+    "/users/{userId}": {
+      "schema": "appUser",
+      "description": "Collection of authorized users."
+    }
+  }
+}

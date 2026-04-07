@@ -293,10 +293,25 @@ function AppContent() {
   const [formData, setFormData] = useState({
     equipmentNumber: '',
     family: '',
+    otherFamily: '',
     clientId: '',
     startDate: format(new Date(), 'yyyy-MM-dd'),
     endDate: '',
     status: 'Em Manutenção' as 'Em Manutenção' | 'Concluído'
+  });
+
+  const [confirmModal, setConfirmModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    onConfirm: () => void;
+    type: 'danger' | 'info';
+  }>({
+    isOpen: false,
+    title: '',
+    message: '',
+    onConfirm: () => {},
+    type: 'info'
   });
 
   const [clientForm, setClientForm] = useState({
@@ -598,14 +613,23 @@ function AppContent() {
     if (!user || isSubmitting) return;
 
     setIsSubmitting(true);
+    setGlobalError(null);
     try {
       const start = parseISO(formData.startDate);
       const end = formData.endDate ? parseISO(formData.endDate) : null;
       const leadTime = end ? differenceInDays(end, start) : undefined;
 
+      const finalFamily = formData.family === 'Outros' ? formData.otherFamily : formData.family;
+
+      if (!finalFamily) {
+        setGlobalError('Por favor, especifique a família do equipamento.');
+        setIsSubmitting(false);
+        return;
+      }
+
       const orderData = {
         equipmentNumber: formData.equipmentNumber,
-        family: formData.family,
+        family: finalFamily,
         clientId: formData.clientId,
         startDate: Timestamp.fromDate(start),
         endDate: end ? Timestamp.fromDate(end) : null,
@@ -617,11 +641,13 @@ function AppContent() {
 
       if (editingOrder) {
         await updateDoc(doc(db, 'serviceOrders', editingOrder.id), orderData);
+        setSuccessMessage('Ordem de serviço atualizada com sucesso!');
       } else {
         await addDoc(collection(db, 'serviceOrders'), {
           ...orderData,
           createdAt: serverTimestamp()
         });
+        setSuccessMessage('Ordem de serviço cadastrada com sucesso!');
       }
 
       setIsModalOpen(false);
@@ -629,13 +655,21 @@ function AppContent() {
       setFormData({
         equipmentNumber: '',
         family: '',
+        otherFamily: '',
         clientId: '',
         startDate: format(new Date(), 'yyyy-MM-dd'),
         endDate: '',
         status: 'Em Manutenção'
       });
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, 'serviceOrders');
+      setTimeout(() => setSuccessMessage(null), 3000);
+    } catch (error: any) {
+      console.error('Error saving order:', error);
+      setGlobalError('Erro ao salvar ordem de serviço. Verifique os dados e tente novamente.');
+      try {
+        handleFirestoreError(error, OperationType.WRITE, 'serviceOrders');
+      } catch (e) {
+        // Expected throw
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -745,7 +779,8 @@ function AppContent() {
         batch.delete(doc(db, 'serviceOrders', o.id));
       });
       await batch.commit();
-      setGlobalError('Ordens de demonstração removidas com sucesso!');
+      setSuccessMessage('Ordens de demonstração removidas com sucesso!');
+      setTimeout(() => setSuccessMessage(null), 3000);
     } catch (error) {
       console.error('Error clearing demo orders:', error);
       handleFirestoreError(error, OperationType.DELETE, 'serviceOrders');
@@ -844,14 +879,16 @@ function AppContent() {
   };
 
   const handleEditOrder = (order: any) => {
+    const isPredefined = ['CCUs', 'Tanques de 1500L', 'Tanques de 5000/5200L'].includes(order.family);
     setEditingOrder(order);
     setFormData({
-      equipmentNumber: order.equipmentNumber,
-      family: order.family,
-      clientId: order.clientId,
+      equipmentNumber: order.equipmentNumber || '',
+      family: isPredefined ? order.family : 'Outros',
+      otherFamily: isPredefined ? '' : order.family,
+      clientId: order.clientId || '',
       startDate: order.startDate?.toDate ? format(order.startDate.toDate(), 'yyyy-MM-dd') : format(new Date(), 'yyyy-MM-dd'),
       endDate: order.endDate?.toDate ? format(order.endDate.toDate(), 'yyyy-MM-dd') : '',
-      status: order.status
+      status: order.status || 'Em Manutenção'
     });
     setModalType('os');
     setAccessError(null);
@@ -876,7 +913,8 @@ function AppContent() {
           count++;
         }
       }
-      setGlobalError(`${count} novos clientes importados com sucesso!`);
+      setSuccessMessage(`${count} novos clientes importados com sucesso!`);
+      setTimeout(() => setSuccessMessage(null), 3000);
     } catch (error) {
       console.error('Error seeding clients:', error);
       setGlobalError('Erro ao importar clientes.');
@@ -991,6 +1029,7 @@ function AppContent() {
     if (updatingStatusId) return;
     
     setUpdatingStatusId(id);
+    setGlobalError(null);
     // Normalize currentStatus to handle variations in casing or accents
     const isCurrentlyCompleted = (currentStatus || '').toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "") === 'concluido';
     const newStatus = isCurrentlyCompleted ? 'Em Manutenção' : 'Concluído';
@@ -1026,18 +1065,38 @@ function AppContent() {
         setTimeout(() => setSuccessMessage(null), 3000);
       }
     } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `serviceOrders/${id}`);
+      console.error('Error updating status:', error);
+      setGlobalError('Erro ao atualizar status da ordem de serviço.');
+      try {
+        handleFirestoreError(error, OperationType.UPDATE, `serviceOrders/${id}`);
+      } catch (e) {}
     } finally {
       setUpdatingStatusId(null);
     }
   };
 
   const handleDeleteOrder = async (id: string) => {
-    try {
-      await deleteDoc(doc(db, 'serviceOrders', id));
-    } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `serviceOrders/${id}`);
-    }
+    setConfirmModal({
+      isOpen: true,
+      title: 'Excluir Ordem de Serviço',
+      message: 'Tem certeza que deseja excluir esta ordem de serviço? Esta ação não pode ser desfeita.',
+      type: 'danger',
+      onConfirm: async () => {
+        try {
+          await deleteDoc(doc(db, 'serviceOrders', id));
+          setSuccessMessage('Ordem de serviço excluída com sucesso!');
+          setTimeout(() => setSuccessMessage(null), 3000);
+        } catch (error) {
+          console.error('Error deleting order:', error);
+          setGlobalError('Erro ao excluir ordem de serviço.');
+          try {
+            handleFirestoreError(error, OperationType.DELETE, `serviceOrders/${id}`);
+          } catch (e) {}
+        } finally {
+          setConfirmModal(prev => ({ ...prev, isOpen: false }));
+        }
+      }
+    });
   };
 
   // Dashboard Calculations (Strictly by month for stats)
@@ -1567,7 +1626,21 @@ function AppContent() {
               
               {activeTab === 'orders' && (
                 <button
-                  onClick={() => { setModalType('os'); setAccessError(null); setIsModalOpen(true); }}
+                  onClick={() => { 
+                    setEditingOrder(null);
+                    setFormData({
+                      equipmentNumber: '',
+                      family: '',
+                      otherFamily: '',
+                      clientId: '',
+                      startDate: format(new Date(), 'yyyy-MM-dd'),
+                      endDate: '',
+                      status: 'Em Manutenção'
+                    });
+                    setModalType('os'); 
+                    setAccessError(null); 
+                    setIsModalOpen(true); 
+                  }}
                   className="btn-primary flex items-center gap-2"
                 >
                   <Plus className="w-5 h-5" />
@@ -2589,7 +2662,8 @@ function AppContent() {
                                     name: profileForm.name,
                                     username: cleanUsername
                                   });
-                                  alert('Perfil atualizado com sucesso!');
+                                  setSuccessMessage('Perfil atualizado com sucesso!');
+                                  setTimeout(() => setSuccessMessage(null), 3000);
                                 } catch (error) {
                                   console.error('Error updating profile:', error);
                                   setGlobalError('Erro ao atualizar perfil');
@@ -2688,10 +2762,25 @@ function AppContent() {
                             <td className="px-8 py-5 text-right">
                               <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-all duration-300">
                                 <button
-                                  onClick={async () => {
-                                    if (window.confirm('Deseja realmente excluir este cliente?')) {
-                                      await deleteDoc(doc(db, 'clients', client.id));
-                                    }
+                                  onClick={() => {
+                                    setConfirmModal({
+                                      isOpen: true,
+                                      title: 'Excluir Cliente',
+                                      message: `Tem certeza que deseja excluir o cliente "${client.razaoSocial}"? Esta ação não pode ser desfeita.`,
+                                      type: 'danger',
+                                      onConfirm: async () => {
+                                        try {
+                                          await deleteDoc(doc(db, 'clients', client.id));
+                                          setSuccessMessage('Cliente excluído com sucesso!');
+                                          setTimeout(() => setSuccessMessage(null), 3000);
+                                        } catch (error) {
+                                          console.error('Error deleting client:', error);
+                                          setGlobalError('Erro ao excluir cliente.');
+                                        } finally {
+                                          setConfirmModal(prev => ({ ...prev, isOpen: false }));
+                                        }
+                                      }
+                                    });
                                   }}
                                   className="p-2.5 text-slate-300 dark:text-slate-600 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/30 rounded-xl transition-all"
                                 >
@@ -2828,9 +2917,24 @@ function AppContent() {
                                   const isModerator = currentUserRole === 'moderator' || isSuperAdmin;
                                   if (!isModerator) return;
                                   
-                                  if (window.confirm('Deseja realmente excluir este acesso?')) {
-                                    await deleteDoc(doc(db, 'users', appUser.id));
-                                  }
+                                  setConfirmModal({
+                                    isOpen: true,
+                                    title: 'Excluir Acesso',
+                                    message: `Tem certeza que deseja excluir o acesso de "${appUser.name}"? Esta ação não pode ser desfeita.`,
+                                    type: 'danger',
+                                    onConfirm: async () => {
+                                      try {
+                                        await deleteDoc(doc(db, 'users', appUser.id));
+                                        setSuccessMessage('Acesso excluído com sucesso!');
+                                        setTimeout(() => setSuccessMessage(null), 3000);
+                                      } catch (error) {
+                                        console.error('Error deleting user:', error);
+                                        setGlobalError('Erro ao excluir acesso.');
+                                      } finally {
+                                        setConfirmModal(prev => ({ ...prev, isOpen: false }));
+                                      }
+                                    }
+                                  });
                                 }}
                                 className="p-2 text-slate-300 dark:text-slate-600 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-xl transition-all opacity-0 group-hover:opacity-100"
                               >
@@ -3062,8 +3166,15 @@ function AppContent() {
                       <select
                         required
                         className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all font-bold text-slate-900 dark:text-white cursor-pointer"
-                        value={formData.family}
-                        onChange={e => setFormData({...formData, family: e.target.value})}
+                        value={['CCUs', 'Tanques de 1500L', 'Tanques de 5000/5200L', ''].includes(formData.family) ? formData.family : 'Outros'}
+                        onChange={e => {
+                          const val = e.target.value;
+                          if (val === 'Outros') {
+                            setFormData({...formData, family: 'Outros', otherFamily: ''});
+                          } else {
+                            setFormData({...formData, family: val, otherFamily: ''});
+                          }
+                        }}
                       >
                         <option value="">Selecione a Família</option>
                         <option value="CCUs">CCUs</option>
@@ -3082,7 +3193,8 @@ function AppContent() {
                         type="text"
                         placeholder="Ex: Torno"
                         className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all font-bold text-slate-900 dark:text-white placeholder:text-slate-300 dark:placeholder:text-slate-600"
-                        onChange={e => setFormData({...formData, family: e.target.value})}
+                        value={formData.otherFamily}
+                        onChange={e => setFormData({...formData, otherFamily: e.target.value})}
                       />
                     </div>
                   )}
@@ -3264,6 +3376,59 @@ function AppContent() {
                   </div>
                 </form>
               )}
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Confirmation Modal */}
+      <AnimatePresence>
+        {confirmModal.isOpen && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
+              className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="relative w-full max-w-md bg-white dark:bg-slate-900 rounded-3xl shadow-2xl overflow-hidden"
+            >
+              <div className="p-8">
+                <div className={cn(
+                  "w-14 h-14 rounded-2xl flex items-center justify-center mb-6",
+                  confirmModal.type === 'danger' ? "bg-rose-50 dark:bg-rose-900/20 text-rose-500" : "bg-blue-50 dark:bg-blue-900/20 text-blue-500"
+                )}>
+                  <AlertCircle className="w-8 h-8" />
+                </div>
+                <h3 className="text-xl font-black text-slate-900 dark:text-white tracking-tight mb-2">
+                  {confirmModal.title}
+                </h3>
+                <p className="text-sm font-bold text-slate-500 dark:text-slate-400 leading-relaxed">
+                  {confirmModal.message}
+                </p>
+              </div>
+              <div className="p-6 bg-slate-50 dark:bg-slate-950/50 flex items-center gap-3">
+                <button
+                  onClick={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
+                  className="flex-1 px-6 py-4 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 font-black uppercase tracking-widest text-xs rounded-2xl transition-all border border-slate-200 dark:border-slate-700"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={confirmModal.onConfirm}
+                  className={cn(
+                    "flex-1 px-6 py-4 text-white font-black uppercase tracking-widest text-xs rounded-2xl transition-all shadow-lg active:scale-95",
+                    confirmModal.type === 'danger' ? "bg-rose-500 hover:bg-rose-600 shadow-rose-200 dark:shadow-none" : "bg-blue-600 hover:bg-blue-700 shadow-blue-200 dark:shadow-none"
+                  )}
+                >
+                  Confirmar
+                </button>
+              </div>
             </motion.div>
           </div>
         )}

@@ -117,6 +117,18 @@ interface ServiceOrder {
   createdAt: Timestamp;
 }
 
+interface AuditLog {
+  id: string;
+  userId: string;
+  userName: string;
+  userEmail: string;
+  action: 'CREATE' | 'UPDATE' | 'DELETE';
+  entity: 'OS' | 'CLIENT' | 'USER' | 'SETTINGS';
+  entityId: string;
+  details: string;
+  timestamp: Timestamp;
+}
+
 enum OperationType {
   CREATE = 'create',
   UPDATE = 'update',
@@ -250,11 +262,12 @@ export default function App() {
 function AppContent() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'orders' | 'clients' | 'access' | 'settings'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'orders' | 'clients' | 'access' | 'settings' | 'audits'>('dashboard');
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
   const [orders, setOrders] = useState<ServiceOrder[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
   const [appUsers, setAppUsers] = useState<AppUser[]>([]);
+  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [currentUserRole, setCurrentUserRole] = useState<'moderator' | 'admin' | 'user'>('user');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalType, setModalType] = useState<'os' | 'client' | 'access'>('os');
@@ -343,6 +356,24 @@ function AppContent() {
     localStorage.setItem('theme', theme);
   }, [theme]);
 
+  const addAuditLog = async (action: 'CREATE' | 'UPDATE' | 'DELETE', entity: 'OS' | 'CLIENT' | 'USER' | 'SETTINGS', entityId: string, details: string) => {
+    try {
+      const currentUserData = appUsers.find(u => u.id === user?.uid);
+      await addDoc(collection(db, 'auditLogs'), {
+        userId: user?.uid,
+        userName: currentUserData?.name || user?.displayName || 'Sistema',
+        userEmail: user?.email || 'N/A',
+        action,
+        entity,
+        entityId,
+        details,
+        timestamp: serverTimestamp()
+      });
+    } catch (error) {
+      console.error('Error adding audit log:', error);
+    }
+  };
+
   // Auth Listener
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
@@ -407,11 +438,29 @@ function AppContent() {
       console.error("Clients listener error:", error);
     });
 
+    // Audit Logs Listener (Moderators only)
+    let unsubAudits = () => {};
+    if (currentUserRole === 'moderator' || user.email === "almeidacesar2010@gmail.com") {
+      const qAudits = query(collection(db, 'auditLogs'));
+      unsubAudits = onSnapshot(qAudits, (snapshot) => {
+        const logs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as AuditLog[];
+        // Sort by timestamp descending
+        setAuditLogs(logs.sort((a, b) => {
+          const tA = a.timestamp?.toMillis ? a.timestamp.toMillis() : 0;
+          const tB = b.timestamp?.toMillis ? b.timestamp.toMillis() : 0;
+          return tB - tA;
+        }));
+      }, (error) => {
+        console.error("Audit logs listener error:", error);
+      });
+    }
+
     return () => {
       unsubOrders();
       unsubClients();
+      unsubAudits();
     };
-  }, [user, isAuthReady]);
+  }, [user, isAuthReady, currentUserRole]);
 
   // Fix orders with missing clients
   useEffect(() => {
@@ -645,13 +694,15 @@ function AppContent() {
       if (editingOrder) {
         console.log('Updating existing order:', editingOrder.id);
         await updateDoc(doc(db, 'serviceOrders', editingOrder.id), orderData);
+        await addAuditLog('UPDATE', 'OS', editingOrder.id, `Atualizou OS #${orderData.equipmentNumber}`);
         setSuccessMessage('Ordem de serviço atualizada com sucesso!');
       } else {
         console.log('Creating new order');
-        await addDoc(collection(db, 'serviceOrders'), {
+        const docRef = await addDoc(collection(db, 'serviceOrders'), {
           ...orderData,
           createdAt: serverTimestamp()
         });
+        await addAuditLog('CREATE', 'OS', docRef.id, `Criou OS #${orderData.equipmentNumber}`);
         setSuccessMessage('Ordem de serviço cadastrada com sucesso!');
       }
 
@@ -799,11 +850,14 @@ function AppContent() {
     if (!user || isSubmitting) return;
     setIsSubmitting(true);
     try {
-      await addDoc(collection(db, 'clients'), {
+      const docRef = await addDoc(collection(db, 'clients'), {
         ...clientForm,
         userId: user.uid,
         createdAt: serverTimestamp()
       });
+      await addAuditLog('CREATE', 'CLIENT', docRef.id, `Cadastrou cliente: ${clientForm.razaoSocial}`);
+      setSuccessMessage('Cliente cadastrado com sucesso!');
+      setTimeout(() => setSuccessMessage(null), 3000);
       setIsModalOpen(false);
       setClientForm({ cnpj: '', razaoSocial: '' });
     } catch (error) {
@@ -857,6 +911,10 @@ function AppContent() {
         createdAt: serverTimestamp()
       });
       console.log('User profile created successfully');
+      
+      await addAuditLog('CREATE', 'USER', userCredential.user.uid, `Criou usuário: ${accessForm.name} (${accessForm.role})`);
+      setSuccessMessage('Usuário cadastrado com sucesso!');
+      setTimeout(() => setSuccessMessage(null), 3000);
       
       setAccessForm({ username: '', password: '', name: '', role: 'user' });
       setIsModalOpen(false);
@@ -1056,6 +1114,8 @@ function AppContent() {
           updatedAt: serverTimestamp()
         });
 
+        await addAuditLog('UPDATE', 'OS', id, `Alterou status da OS #${orderDoc.equipmentNumber} para ${newStatus}`);
+
         // Reset to first page so the user can see the moved item
         setCurrentPage(1);
         
@@ -1088,7 +1148,11 @@ function AppContent() {
       type: 'danger',
       onConfirm: async () => {
         try {
+          const orderToDelete = orders.find(o => o.id === id);
           await deleteDoc(doc(db, 'serviceOrders', id));
+          if (orderToDelete) {
+            await addAuditLog('DELETE', 'OS', id, `Excluiu OS #${orderToDelete.equipmentNumber}`);
+          }
           setSuccessMessage('Ordem de serviço excluída com sucesso!');
           setTimeout(() => setSuccessMessage(null), 3000);
         } catch (error) {
@@ -1472,6 +1536,19 @@ function AppContent() {
                   Configurações
                   {activeTab === 'settings' && <motion.div layoutId="active-pill" className="absolute right-4 w-1.5 h-1.5 bg-blue-600 dark:bg-blue-400 rounded-full" />}
                 </button>
+                <button
+                  onClick={() => setActiveTab('audits')}
+                  className={cn(
+                    "sidebar-item w-full group",
+                    activeTab === 'audits' ? "sidebar-item-active" : "sidebar-item-inactive"
+                  )}
+                >
+                  <div className={cn("p-2 rounded-xl transition-all duration-300", activeTab === 'audits' ? "bg-blue-600 text-white" : "bg-slate-50 dark:bg-slate-800 group-hover:bg-blue-50 dark:group-hover:bg-blue-900/30 group-hover:text-blue-600 dark:group-hover:text-blue-400")}>
+                    <BarChart3 className="w-4 h-4" />
+                  </div>
+                  Auditorias
+                  {activeTab === 'audits' && <motion.div layoutId="active-pill" className="absolute right-4 w-1.5 h-1.5 bg-blue-600 dark:bg-blue-400 rounded-full" />}
+                </button>
               </>
             )}
           </nav>
@@ -1564,7 +1641,8 @@ function AppContent() {
                 {activeTab === 'dashboard' ? 'Painel de Produtividade' : 
                  activeTab === 'orders' ? 'Gestão de OS' :
                  activeTab === 'clients' ? 'Gestão de Clientes' : 
-                 activeTab === 'settings' ? 'Configurações' : 'Gestão de Acessos'}
+                 activeTab === 'settings' ? 'Configurações' : 
+                 activeTab === 'audits' ? 'Auditoria de Sistema' : 'Gestão de Acessos'}
               </motion.h2>
               <div className="flex items-center gap-3 mt-2">
                 <div className="flex -space-x-2">
@@ -2574,6 +2652,7 @@ function AppContent() {
                                   <button 
                                     onClick={async () => {
                                       await setDoc(doc(db, 'settings', 'appConfig'), { logoUrl: null }, { merge: true });
+                                      await addAuditLog('UPDATE', 'SETTINGS', 'appConfig', 'Removeu logo da empresa');
                                     }}
                                     className="absolute -top-3 -right-3 w-8 h-8 bg-rose-500 text-white rounded-full flex items-center justify-center shadow-lg opacity-0 group-hover/logo:opacity-100 transition-all hover:scale-110"
                                   >
@@ -2614,6 +2693,7 @@ function AppContent() {
                                       try {
                                         const base64 = reader.result as string;
                                         await setDoc(doc(db, 'settings', 'appConfig'), { logoUrl: base64 }, { merge: true });
+                                        await addAuditLog('UPDATE', 'SETTINGS', 'appConfig', 'Atualizou logo da empresa');
                                       } catch (error) {
                                         console.error('Error saving logo:', error);
                                         setGlobalError('Erro ao salvar logo');
@@ -2633,7 +2713,10 @@ function AppContent() {
                           <label className="text-[11px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-3 block">Tema do Sistema</label>
                           <div className="flex gap-4 p-2 bg-slate-50 dark:bg-slate-800 rounded-3xl border border-slate-200 dark:border-slate-700 w-fit">
                             <button
-                              onClick={() => setTheme('light')}
+                              onClick={async () => {
+                                setTheme('light');
+                                await addAuditLog('UPDATE', 'SETTINGS', 'theme', 'Alterou tema para Claro');
+                              }}
                               className={cn(
                                 "flex items-center gap-2 px-6 py-3 rounded-2xl font-black text-xs uppercase tracking-widest transition-all",
                                 theme === 'light' 
@@ -2645,7 +2728,10 @@ function AppContent() {
                               Claro
                             </button>
                             <button
-                              onClick={() => setTheme('dark')}
+                              onClick={async () => {
+                                setTheme('dark');
+                                await addAuditLog('UPDATE', 'SETTINGS', 'theme', 'Alterou tema para Escuro');
+                              }}
                               className={cn(
                                 "flex items-center gap-2 px-6 py-3 rounded-2xl font-black text-xs uppercase tracking-widest transition-all",
                                 theme === 'dark' 
@@ -2697,6 +2783,7 @@ function AppContent() {
                                     name: profileForm.name,
                                     username: cleanUsername
                                   });
+                                  await addAuditLog('UPDATE', 'USER', user.uid, `Atualizou próprio perfil: ${profileForm.name}`);
                                   setSuccessMessage('Perfil atualizado com sucesso!');
                                   setTimeout(() => setSuccessMessage(null), 3000);
                                 } catch (error) {
@@ -2727,6 +2814,83 @@ function AppContent() {
                           Para melhores resultados, utilize uma imagem com proporções quadradas ou horizontais curtas.
                         </p>
                       </div>
+                    </div>
+                  </div>
+                </div>
+              ) : activeTab === 'audits' ? (
+                <div className="space-y-6">
+                  <div className="bg-white dark:bg-slate-900 rounded-[40px] border border-slate-200/60 dark:border-slate-800 shadow-sm overflow-hidden transition-all duration-500">
+                    <div className="px-10 py-8 border-b border-slate-100 dark:border-slate-800/50 flex items-center justify-between bg-slate-50/30 dark:bg-slate-800/10">
+                      <div className="flex items-center gap-4">
+                        <div className="w-12 h-12 rounded-2xl flex items-center justify-center shadow-lg bg-indigo-600 text-white">
+                          <BarChart3 className="w-6 h-6" />
+                        </div>
+                        <div>
+                          <h3 className="text-xl font-black text-slate-900 dark:text-white tracking-tight uppercase">Logs de Auditoria</h3>
+                          <p className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mt-0.5">Histórico completo de ações no sistema</p>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left border-collapse">
+                        <thead>
+                          <tr className="bg-slate-50/50 dark:bg-slate-800/30 border-b border-slate-100 dark:border-slate-800/50">
+                            <th className="px-10 py-5 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em]">Data/Hora</th>
+                            <th className="px-10 py-5 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em]">Usuário</th>
+                            <th className="px-10 py-5 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em]">Ação</th>
+                            <th className="px-10 py-5 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em]">Entidade</th>
+                            <th className="px-10 py-5 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em]">Detalhes</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                          {auditLogs.length === 0 ? (
+                            <tr>
+                              <td colSpan={5} className="px-10 py-20 text-center">
+                                <div className="flex flex-col items-center gap-3">
+                                  <div className="w-16 h-16 bg-slate-50 dark:bg-slate-800 rounded-[24px] flex items-center justify-center">
+                                    <ClipboardList className="w-8 h-8 text-slate-200 dark:text-slate-700" />
+                                  </div>
+                                  <p className="text-sm font-black text-slate-300 dark:text-slate-600 uppercase tracking-widest">Nenhum log encontrado</p>
+                                </div>
+                              </td>
+                            </tr>
+                          ) : auditLogs.map((log) => (
+                            <tr key={log.id} className="group hover:bg-slate-50/50 dark:hover:bg-slate-800/20 transition-all duration-300">
+                              <td className="px-10 py-6">
+                                <span className="text-xs font-bold text-slate-500 dark:text-slate-400">
+                                  {log.timestamp?.toDate ? format(log.timestamp.toDate(), 'dd/MM/yyyy HH:mm:ss') : '---'}
+                                </span>
+                              </td>
+                              <td className="px-10 py-6">
+                                <div className="flex flex-col">
+                                  <span className="text-sm font-black text-slate-900 dark:text-white">{log.userName}</span>
+                                  <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest">{log.userEmail}</span>
+                                </div>
+                              </td>
+                              <td className="px-10 py-6">
+                                <span className={cn(
+                                  "px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest border",
+                                  log.action === 'CREATE' ? "bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 border-emerald-100 dark:border-emerald-900/30" :
+                                  log.action === 'UPDATE' ? "bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 border-blue-100 dark:border-blue-900/30" :
+                                  "bg-rose-50 dark:bg-rose-900/30 text-rose-600 dark:text-rose-400 border-rose-100 dark:border-rose-900/30"
+                                )}>
+                                  {log.action}
+                                </span>
+                              </td>
+                              <td className="px-10 py-6">
+                                <span className="text-xs font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest">
+                                  {log.entity}
+                                </span>
+                              </td>
+                              <td className="px-10 py-6">
+                                <span className="text-sm font-bold text-slate-700 dark:text-slate-300">
+                                  {log.details}
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
                     </div>
                   </div>
                 </div>
@@ -2806,6 +2970,7 @@ function AppContent() {
                                       onConfirm: async () => {
                                         try {
                                           await deleteDoc(doc(db, 'clients', client.id));
+                                          await addAuditLog('DELETE', 'CLIENT', client.id, `Excluiu cliente: ${client.razaoSocial}`);
                                           setSuccessMessage('Cliente excluído com sucesso!');
                                           setTimeout(() => setSuccessMessage(null), 3000);
                                         } catch (error) {
@@ -2932,6 +3097,7 @@ function AppContent() {
                                   }
 
                                   await updateDoc(doc(db, 'users', appUser.id), { role: newRole });
+                                  await addAuditLog('UPDATE', 'USER', appUser.id, `Alterou cargo de ${appUser.name} para ${newRole}`);
                                 }}
                                 className={cn(
                                   "inline-flex items-center px-2.5 py-1 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all shadow-sm active:scale-95",
@@ -2960,6 +3126,7 @@ function AppContent() {
                                     onConfirm: async () => {
                                       try {
                                         await deleteDoc(doc(db, 'users', appUser.id));
+                                        await addAuditLog('DELETE', 'USER', appUser.id, `Excluiu usuário: ${appUser.name}`);
                                         setSuccessMessage('Acesso excluído com sucesso!');
                                         setTimeout(() => setSuccessMessage(null), 3000);
                                       } catch (error) {

@@ -63,6 +63,18 @@ service cloud.firestore {
              data.createdAt is timestamp;
     }
 
+    function isValidAuditLog(data) {
+      return data.keys().hasAll(['userId', 'userName', 'userEmail', 'action', 'entity', 'entityId', 'details', 'timestamp']) &&
+             data.userId is string &&
+             data.userName is string &&
+             data.userEmail is string &&
+             data.action in ['CREATE', 'UPDATE', 'DELETE'] &&
+             data.entity in ['OS', 'CLIENT', 'USER', 'SETTINGS'] &&
+             data.entityId is string &&
+             data.details is string &&
+             data.timestamp is timestamp;
+    }
+
     match /serviceOrders/{osId} {
       allow read: if isAuthenticated();
       allow create: if isAuthenticated() && isValidServiceOrder(request.resource.data);
@@ -100,6 +112,12 @@ service cloud.firestore {
     match /settings/{settingId} {
       allow read: if isAuthenticated();
       allow write: if isAdmin();
+    }
+
+    match /auditLogs/{logId} {
+      allow read: if isModerator();
+      allow create: if isAuthenticated() && isValidAuditLog(request.resource.data);
+      allow update, delete: if false;
     }
 
     function isModerator() {

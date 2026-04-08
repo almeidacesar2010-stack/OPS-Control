@@ -35,13 +35,14 @@ service cloud.firestore {
     }
 
     function isValidServiceOrder(data) {
-      return data.keys().hasAll(['equipmentNumber', 'family', 'clientId', 'startDate', 'status', 'userId', 'createdAt']) &&
+      return data.keys().hasAll(['equipmentNumber', 'family', 'clientId', 'startDate', 'status', 'userId']) &&
              data.equipmentNumber is string && data.equipmentNumber.size() > 0 && data.equipmentNumber.size() < 100 &&
              data.family is string && data.family.size() > 0 && data.family.size() < 100 &&
              data.clientId is string && data.clientId.size() > 0 &&
              data.startDate is timestamp &&
              data.status in ['Em Andamento', 'Concluído', 'Em Manutenção'] &&
-             data.createdAt is timestamp &&
+             data.userId is string &&
+             (!('createdAt' in data) || data.createdAt == null || data.createdAt is timestamp) &&
              (!('endDate' in data) || data.endDate == null || data.endDate is timestamp) &&
              (!('leadTime' in data) || data.leadTime == null || data.leadTime is number) &&
              (!('updatedAt' in data) || data.updatedAt == null || data.updatedAt is timestamp);

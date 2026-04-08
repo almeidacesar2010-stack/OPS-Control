@@ -617,7 +617,7 @@ function AppContent() {
     try {
       const start = parseISO(formData.startDate);
       const end = formData.endDate ? parseISO(formData.endDate) : null;
-      const leadTime = end ? differenceInDays(end, start) : undefined;
+      const leadTime = end ? differenceInDays(end, start) : null;
 
       const finalFamily = formData.family === 'Outros' ? formData.otherFamily : formData.family;
 
@@ -639,10 +639,14 @@ function AppContent() {
         updatedAt: serverTimestamp()
       };
 
+      console.log('Attempting to save order with data:', orderData);
+
       if (editingOrder) {
+        console.log('Updating existing order:', editingOrder.id);
         await updateDoc(doc(db, 'serviceOrders', editingOrder.id), orderData);
         setSuccessMessage('Ordem de serviço atualizada com sucesso!');
       } else {
+        console.log('Creating new order');
         await addDoc(collection(db, 'serviceOrders'), {
           ...orderData,
           createdAt: serverTimestamp()

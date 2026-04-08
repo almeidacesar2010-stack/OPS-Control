@@ -80,7 +80,8 @@ import {
   List,
   Loader2,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  Timer
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from './lib/utils';
@@ -2306,6 +2307,13 @@ function AppContent() {
                                               >
                                                 <FileText className="w-4 h-4" />
                                               </button>
+                                              <button 
+                                                onClick={() => handleDeleteOrder(order.id)}
+                                                className="p-2 text-slate-300 dark:text-slate-600 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/30 rounded-xl transition-all"
+                                                title="Excluir OS"
+                                              >
+                                                <Trash2 className="w-4 h-4" />
+                                              </button>
                                             </div>
                                           </div>
                                           
@@ -2325,11 +2333,21 @@ function AppContent() {
                                                 </span>
                                               </div>
                                               {order.status === 'Concluído' && order.endDate && (
-                                                <div className="flex items-center gap-2 text-emerald-500">
-                                                  <CheckCircle2 className="w-4 h-4" />
-                                                  <span className="text-[11px] font-bold uppercase tracking-tighter">
-                                                    {format(order.endDate.toDate(), 'dd/MM/yy')}
-                                                  </span>
+                                                <div className="flex flex-col gap-1">
+                                                  <div className="flex items-center gap-2 text-emerald-500">
+                                                    <CheckCircle2 className="w-4 h-4" />
+                                                    <span className="text-[11px] font-bold uppercase tracking-tighter">
+                                                      {format(order.endDate.toDate(), 'dd/MM/yy')}
+                                                    </span>
+                                                  </div>
+                                                  {order.leadTime !== undefined && order.leadTime !== null && (
+                                                    <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400">
+                                                      <Timer className="w-4 h-4" />
+                                                      <span className="text-[10px] font-black uppercase tracking-widest">
+                                                        {order.leadTime} {order.leadTime === 1 ? 'dia' : 'dias'}
+                                                      </span>
+                                                    </div>
+                                                  )}
                                                 </div>
                                               )}
                                             </div>
@@ -2386,6 +2404,7 @@ function AppContent() {
                                 <th className="px-10 py-5 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em]">Cliente</th>
                                 <th className="px-10 py-5 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em]">Início</th>
                                 <th className="px-10 py-5 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em]">Fim</th>
+                                <th className="px-10 py-5 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em]">Tempo</th>
                                 <th className="px-10 py-5 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em]">Status</th>
                                 <th className="px-10 py-5 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em] text-right">Ações</th>
                               </tr>
@@ -2435,6 +2454,18 @@ function AppContent() {
                                         <Calendar className="w-4 h-4 opacity-50" />
                                         <span className="text-xs font-bold">{order.endDate?.toDate ? format(order.endDate.toDate(), 'dd/MM/yyyy') : '-'}</span>
                                       </div>
+                                    </td>
+                                    <td className="px-10 py-6">
+                                      {order.status === 'Concluído' && order.leadTime !== null && order.leadTime !== undefined ? (
+                                        <div className="flex items-center gap-2 text-slate-600 dark:text-slate-400">
+                                          <Timer className="w-4 h-4 text-blue-500" />
+                                          <span className="text-xs font-black uppercase tracking-tight">
+                                            {order.leadTime} {order.leadTime === 1 ? 'dia' : 'dias'}
+                                          </span>
+                                        </div>
+                                      ) : (
+                                        <span className="text-slate-300 dark:text-slate-700">--</span>
+                                      )}
                                     </td>
                                     <td className="px-10 py-6">
                                       <button 

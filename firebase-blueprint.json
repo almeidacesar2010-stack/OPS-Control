@@ -13,6 +13,10 @@
           "type": "string",
           "description": "The family of the equipment (e.g., Torno, Fresa)."
         },
+        "subFamily": {
+          "type": "string",
+          "description": "The sub-family or model of the equipment (e.g., Mini Container, Cesta 12m)."
+        },
         "clientId": {
           "type": "string",
           "description": "The ID of the client associated with this OS."

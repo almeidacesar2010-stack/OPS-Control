@@ -13,6 +13,7 @@ import {
   deleteDoc,
   getDoc,
   getDocFromServer,
+  getDocs,
   writeBatch
 } from 'firebase/firestore';
 import { 
@@ -70,6 +71,7 @@ import {
   FileText,
   Edit,
   Maximize2,
+  X,
   Upload,
   Search,
   Image as ImageIcon,
@@ -108,6 +110,7 @@ interface ServiceOrder {
   id: string;
   equipmentNumber: string;
   family: string;
+  subFamily?: string;
   clientId: string;
   startDate: Timestamp;
   endDate?: Timestamp;
@@ -174,6 +177,29 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
   console.error('Firestore Error: ', JSON.stringify(errInfo));
   throw new Error(JSON.stringify(errInfo));
 }
+
+const CCU_SUBFAMILIES = [
+  "1.5M TOOL BOX",
+  "3M TOOL BOX",
+  "4M DRUM BASKET",
+  "MINI CONTAINER",
+  "6M BASKET",
+  "8M BASKET",
+  "8M PIPE BASKET",
+  "10.3M BASKET",
+  "10FT DRY",
+  "10FT HH",
+  "10FT OPEN TOP",
+  "10FT REEFER",
+  "12.3M BASKET",
+  "12M BASKET",
+  "14M BASKET",
+  "16.3M BASKET",
+  "20FT DRY",
+  "20FT OPEN TOP",
+  "CUTTING BOX",
+  "SKID GBR"
+];
 
 const PRE_REGISTERED_CLIENTS = [
   "SLB", "BALEEN", "OCEANEERING", "HALLIBURTON", "EQUINOR", "ONESUBSEA", 
@@ -276,6 +302,8 @@ function AppContent() {
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
   const [editingUsername, setEditingUsername] = useState('');
   const [isSeeding, setIsSeeding] = useState(false);
+  const [isCCUModalOpen, setIsCCUModalOpen] = useState(false);
+  const [isSubFamilyModalOpen, setIsSubFamilyModalOpen] = useState(false);
   const [expandedChart, setExpandedChart] = useState<string | null>(null);
   const seedingRef = useRef(false);
   const [accessError, setAccessError] = useState<string | null>(null);
@@ -307,6 +335,7 @@ function AppContent() {
   const [formData, setFormData] = useState({
     equipmentNumber: '',
     family: '',
+    subFamily: '',
     otherFamily: '',
     clientId: '',
     startDate: format(new Date(), 'yyyy-MM-dd'),
@@ -680,6 +709,7 @@ function AppContent() {
       const orderData = {
         equipmentNumber: formData.equipmentNumber,
         family: finalFamily,
+        subFamily: formData.family === 'CCUs' ? formData.subFamily : null,
         clientId: formData.clientId,
         startDate: Timestamp.fromDate(start),
         endDate: end ? Timestamp.fromDate(end) : null,
@@ -711,6 +741,7 @@ function AppContent() {
       setFormData({
         equipmentNumber: '',
         family: '',
+        subFamily: '',
         otherFamily: '',
         clientId: '',
         startDate: format(new Date(), 'yyyy-MM-dd'),
@@ -736,10 +767,20 @@ function AppContent() {
     if (!user || isSubmitting) return;
     
     setIsSubmitting(true);
-    setGlobalError('Gerando dados históricos de demonstração (Jan-Mar 2026)... Por favor, aguarde.');
+    setGlobalError('Limpando e gerando 50 novos dados de demonstração (Jan-Mar 2026)...');
     try {
+      // 1. Clear existing demo orders first
+      const demoOrders = orders.filter(o => (o as any).isDemo);
+      if (demoOrders.length > 0) {
+        const clearBatch = writeBatch(db);
+        demoOrders.forEach(o => {
+          clearBatch.delete(doc(db, 'serviceOrders', o.id));
+        });
+        await clearBatch.commit();
+        console.log("Existing demo orders cleared");
+      }
+
       const batch = writeBatch(db);
-      
       let currentClients = [...clients];
 
       // If no clients exist, seed some first
@@ -759,58 +800,58 @@ function AppContent() {
         currentClients = initialClients as any[];
       }
 
-      // Generate data for January (0), February (1), and March (2)
-      [0, 1, 2].forEach((month) => {
-        // Use a subset of equipments for each month to avoid too many duplicates in the same period
-        // but ensure we cover all families
-        const shuffledEquipments = [...DEMO_EQUIPMENTS].sort(() => 0.5 - Math.random());
-        const selectedEquipments = shuffledEquipments.slice(0, 25); // 25 orders per month
+      // Generate exactly 50 orders total distributed across Jan, Feb, and March 2026
+      for (let i = 0; i < 50; i++) {
+        const month = Math.floor(Math.random() * 3); // 0: Jan, 1: Feb, 2: Mar
+        const equipment = DEMO_EQUIPMENTS[Math.floor(Math.random() * DEMO_EQUIPMENTS.length)];
+        const randomClient = currentClients[Math.floor(Math.random() * currentClients.length)];
+        const startDay = Math.floor(Math.random() * 25) + 1;
+        const duration = Math.floor(Math.random() * 12) + 2; // 2 to 14 days
+        
+        const startDate = new Date(2026, month, startDay);
+        
+        // For Jan and Feb, most should be completed. For March, some still in progress.
+        let isCompleted = true;
+        if (month === 2) { // March
+          isCompleted = Math.random() > 0.4; // 60% completed
+        } else {
+          isCompleted = Math.random() > 0.1; // 90% completed for older months
+        }
 
-        selectedEquipments.forEach((equipment) => {
-          const randomClient = currentClients[Math.floor(Math.random() * currentClients.length)];
-          const startDay = Math.floor(Math.random() * 25) + 1;
-          const duration = Math.floor(Math.random() * 12) + 2; // 2 to 14 days
-          
-          const startDate = new Date(2026, month, startDay);
-          
-          // For Jan and Feb, most should be completed. For March, some still in progress.
-          let isCompleted = true;
-          if (month === 2) { // March
-            isCompleted = Math.random() > 0.4; // 60% completed
-          } else {
-            isCompleted = Math.random() > 0.1; // 90% completed for older months
-          }
+        const endDate = isCompleted ? new Date(2026, month, startDay + duration) : null;
+        const leadTime = endDate ? differenceInDays(endDate, startDate) : null;
 
-          const endDate = isCompleted ? new Date(2026, month, startDay + duration) : null;
-          const leadTime = endDate ? differenceInDays(endDate, startDate) : null;
+        let family = 'CCUs';
+        let subFamily = null;
+        if (equipment.startsWith('OEGU') || equipment.startsWith('STC-5000')) {
+          family = 'Tanques de 5000/5200L';
+        } else if (equipment.startsWith('35') || equipment.startsWith('36')) {
+          family = 'Tanques de 1500L';
+        } else {
+          // It's a CCU, assign a random subFamily
+          subFamily = CCU_SUBFAMILIES[Math.floor(Math.random() * CCU_SUBFAMILIES.length)];
+        }
 
-          let family = 'CCUs';
-          if (equipment.startsWith('OEGU') || equipment.startsWith('STC-5000')) {
-            family = 'Tanques de 5000/5200L';
-          } else if (equipment.startsWith('35') || equipment.startsWith('36')) {
-            family = 'Tanques de 1500L';
-          }
-
-          const newDocRef = doc(collection(db, 'serviceOrders'));
-          batch.set(newDocRef, {
-            equipmentNumber: equipment,
-            family,
-            clientId: randomClient.id,
-            startDate: Timestamp.fromDate(startDate),
-            endDate: endDate ? Timestamp.fromDate(endDate) : null,
-            status: isCompleted ? 'Concluído' : 'Em Manutenção',
-            leadTime: leadTime ?? null,
-            userId: user.uid,
-            isDemo: true,
-            createdAt: serverTimestamp(),
-            updatedAt: serverTimestamp()
-          });
+        const newDocRef = doc(collection(db, 'serviceOrders'));
+        batch.set(newDocRef, {
+          equipmentNumber: equipment,
+          family,
+          subFamily,
+          clientId: randomClient.id,
+          startDate: Timestamp.fromDate(startDate),
+          endDate: endDate ? Timestamp.fromDate(endDate) : null,
+          status: isCompleted ? 'Concluído' : 'Em Manutenção',
+          leadTime: leadTime ?? null,
+          userId: user.uid,
+          isDemo: true,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp()
         });
-      });
+      }
 
       await batch.commit();
-      console.log("Demo orders seeded successfully for multiple months");
-      setSuccessMessage('Dados históricos gerados com sucesso para Jan, Fev e Mar!');
+      console.log("50 Demo orders seeded successfully for Jan-Mar 2026");
+      setSuccessMessage('50 novas demonstrações geradas com sucesso para Jan, Fev e Mar 2026!');
       setTimeout(() => setSuccessMessage(null), 4000);
       setSelectedMonth(new Date(2026, 2, 1)); // Switch to March view
     } catch (error) {
@@ -947,6 +988,7 @@ function AppContent() {
     setFormData({
       equipmentNumber: order.equipmentNumber || '',
       family: isPredefined ? order.family : 'Outros',
+      subFamily: order.subFamily || '',
       otherFamily: isPredefined ? '' : order.family,
       clientId: order.clientId || '',
       startDate: order.startDate?.toDate ? format(order.startDate.toDate(), 'yyyy-MM-dd') : format(new Date(), 'yyyy-MM-dd'),
@@ -1259,12 +1301,43 @@ function AppContent() {
     });
 
     return Object.entries(families)
-      .filter(([name]) => name.length > 0) // Ensure no empty names
+      .filter(([name, data]) => name.length > 0 && data.count > 0) // Only families with orders
       .map(([name, data]) => ({
         name,
         quantidade: data.count,
         leadTimeMedio: data.completedCount > 0 ? Math.round(data.totalLeadTime / data.completedCount) : 0
       }));
+  }, [filteredOrders]);
+
+  const statsBySubFamily = useMemo(() => {
+    const subFamilies: Record<string, { count: number, totalLeadTime: number, completedCount: number }> = {};
+    
+    filteredOrders.filter(o => o.family === 'CCUs' && o.subFamily).forEach(order => {
+      const subName = order.subFamily!;
+      if (!subFamilies[subName]) {
+        subFamilies[subName] = { count: 0, totalLeadTime: 0, completedCount: 0 };
+      }
+      subFamilies[subName].count += 1;
+      
+      if (order.status === 'Concluído') {
+        let leadTime = order.leadTime;
+        if (leadTime === undefined && order.endDate?.toDate && order.startDate?.toDate) {
+          try { leadTime = differenceInDays(order.endDate.toDate(), order.startDate.toDate()); } catch(e) {}
+        }
+        if (leadTime !== undefined) {
+          subFamilies[subName].totalLeadTime += leadTime;
+          subFamilies[subName].completedCount += 1;
+        }
+      }
+    });
+
+    return Object.entries(subFamilies).map(([name, data]) => ({
+      name,
+      quantidade: data.count,
+      leadTimeMedio: data.completedCount > 0 ? Math.round(data.totalLeadTime / data.completedCount) : 0
+    }))
+    .filter(s => s.leadTimeMedio > 0) // Only show those with completed data for better ranking
+    .sort((a, b) => a.leadTimeMedio - b.leadTimeMedio);
   }, [filteredOrders]);
 
   const statsByClient = useMemo(() => {
@@ -1299,7 +1372,7 @@ function AppContent() {
     });
 
     return Object.entries(clientStats)
-      .filter(([name]) => name !== 'Desconhecido' && name.trim() !== '')
+      .filter(([name, data]) => name !== 'Desconhecido' && name.trim() !== '' && data.count > 0)
       .sort((a, b) => b[1].count - a[1].count) // Sort by volume for better readability
       .map(([name, data]) => ({
         name,
@@ -1664,7 +1737,16 @@ function AppContent() {
             <div className="flex items-center gap-6">
               {activeTab === 'dashboard' && (
                 <div className="flex items-center gap-4">
-                  {orders.some(o => (o as any).isDemo) ? (
+                  <button
+                    onClick={seedDemoOrders}
+                    disabled={isSubmitting}
+                    className="flex items-center gap-2 bg-amber-500 hover:bg-amber-600 text-white px-6 py-3 rounded-2xl font-black text-xs uppercase tracking-widest transition-all shadow-2xl shadow-amber-500/20 active:scale-95 disabled:opacity-50"
+                  >
+                    <Plus className="w-4 h-4" />
+                    {isSubmitting ? 'Processando...' : 'Gerar 50 Demos'}
+                  </button>
+                  
+                  {orders.some(o => (o as any).isDemo) && (
                     <button
                       onClick={clearDemoOrders}
                       disabled={isSubmitting}
@@ -1672,15 +1754,6 @@ function AppContent() {
                     >
                       <Trash2 className="w-4 h-4" />
                       Limpar Demo
-                    </button>
-                  ) : (
-                    <button
-                      onClick={seedDemoOrders}
-                      disabled={isSubmitting}
-                      className="flex items-center gap-2 bg-amber-500 hover:bg-amber-600 text-white px-6 py-3 rounded-2xl font-black text-xs uppercase tracking-widest transition-all shadow-2xl shadow-amber-500/20 active:scale-95 disabled:opacity-50"
-                    >
-                      <Plus className="w-4 h-4" />
-                      {isSubmitting ? 'Gerando...' : 'Gerar Demo'}
                     </button>
                   )}
                   <div className="flex items-center gap-3 bg-white dark:bg-slate-900 border border-slate-200/50 dark:border-slate-800/50 rounded-2xl px-5 py-3 shadow-2xl shadow-slate-200/10 dark:shadow-none transition-all duration-500 hover:border-blue-500/30">
@@ -1714,6 +1787,7 @@ function AppContent() {
                     setFormData({
                       equipmentNumber: '',
                       family: '',
+                      subFamily: '',
                       otherFamily: '',
                       clientId: '',
                       startDate: format(new Date(), 'yyyy-MM-dd'),
@@ -1777,7 +1851,9 @@ function AppContent() {
                         <div className="w-14 h-14 bg-blue-50 dark:bg-blue-900/30 rounded-2xl flex items-center justify-center shadow-inner">
                           <ClipboardList className="w-7 h-7 text-blue-600 dark:text-blue-400" />
                         </div>
-                        <span className="text-[10px] font-black text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30 px-3 py-1.5 rounded-full uppercase tracking-[0.2em]">Mensal</span>
+                        <span className="text-[10px] font-black text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30 px-3 py-1.5 rounded-full uppercase tracking-[0.2em]">
+                          {selectedMonth ? 'Mensal' : 'Geral'}
+                        </span>
                       </div>
                       <p className="text-xs font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-2">Total de Ordens</p>
                       <div className="flex items-baseline gap-3">
@@ -1829,8 +1905,10 @@ function AppContent() {
                       </div>
                       <p className="text-xs font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-2">Clientes Ativos</p>
                       <div className="flex items-baseline gap-3">
-                        <p className="text-5xl font-black text-slate-900 dark:text-white tracking-tighter">{clients.length}</p>
-                        <p className="text-sm font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest">Base</p>
+                        <p className="text-5xl font-black text-slate-900 dark:text-white tracking-tighter">{statsByClient.length}</p>
+                        <p className="text-sm font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest">
+                          {selectedMonth ? 'Este Mês' : 'No Período'}
+                        </p>
                       </div>
                     </motion.div>
                   </div>
@@ -1883,6 +1961,59 @@ function AppContent() {
                       );
                     })}
                   </div>
+
+                  {/* CCU Subfamilies Breakdown */}
+                  {statsBySubFamily.length > 0 && (
+                    <motion.div 
+                      initial={{ opacity: 0, y: 20 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="bg-white dark:bg-slate-900 p-8 rounded-[40px] border border-slate-200/50 dark:border-slate-800/50 shadow-sm relative overflow-hidden"
+                    >
+                      <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-blue-500 via-indigo-500 to-purple-600"></div>
+                      <div className="flex items-center justify-between mb-8">
+                        <div className="flex items-center gap-4">
+                          <div className="w-12 h-12 bg-blue-50 dark:bg-blue-900/30 rounded-2xl flex items-center justify-center">
+                            <LayoutGrid className="w-6 h-6 text-blue-600 dark:text-blue-400" />
+                          </div>
+                          <div>
+                            <h3 className="text-lg font-black text-slate-900 dark:text-white tracking-tight uppercase">Top 5 Eficiência CCUs</h3>
+                            <p className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mt-1">Modelos com menor Lead Time Médio</p>
+                          </div>
+                        </div>
+                        <button 
+                          onClick={() => setIsCCUModalOpen(true)}
+                          className="flex items-center gap-2 bg-slate-50 dark:bg-slate-800 hover:bg-blue-50 dark:hover:bg-blue-900/30 text-slate-600 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 px-5 py-2.5 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all border border-slate-100 dark:border-slate-700 shadow-sm active:scale-95"
+                        >
+                          <Maximize2 className="w-4 h-4" />
+                          Ver Detalhes
+                        </button>
+                      </div>
+
+                      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+                        {statsBySubFamily.slice(0, 5).map((sub) => (
+                          <div 
+                            key={sub.name}
+                            className="bg-slate-50/50 dark:bg-slate-800/30 p-5 rounded-3xl border border-slate-100 dark:border-slate-800/50 transition-all hover:border-blue-500/30 group"
+                          >
+                            <p className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-3 truncate">{sub.name}</p>
+                            <div className="flex items-baseline gap-2">
+                              <p className="text-2xl font-black text-slate-900 dark:text-white tracking-tighter group-hover:text-blue-600 transition-colors">{sub.leadTimeMedio}</p>
+                              <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase">dias</p>
+                            </div>
+                            <div className="mt-3 flex items-center gap-2">
+                              <div className="flex-1 h-1 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
+                                <div 
+                                  className="h-full bg-blue-500 rounded-full" 
+                                  style={{ width: `${Math.min(100, (sub.leadTimeMedio / 15) * 100)}%` }}
+                                ></div>
+                              </div>
+                              <span className="text-[9px] font-black text-slate-400 dark:text-slate-500">{sub.quantidade} OS</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </motion.div>
+                  )}
 
                   {/* Charts */}
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
@@ -1948,7 +2079,7 @@ function AppContent() {
                       </div>
                       <div className="h-[320px]">
                         <ResponsiveContainer width="100%" height="100%">
-                          <BarChart data={statsByFamily}>
+                          <BarChart data={statsByFamily.filter(s => s.leadTimeMedio > 0)}>
                             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={theme === 'dark' ? '#1e293b' : '#f1f5f9'} />
                             <XAxis 
                               dataKey="name" 
@@ -2039,7 +2170,7 @@ function AppContent() {
                       </div>
                       <div className="h-[320px]">
                         <ResponsiveContainer width="100%" height="100%">
-                          <BarChart data={statsByClient}>
+                          <BarChart data={statsByClient.filter(s => s.leadTimeMedio > 0)}>
                             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={theme === 'dark' ? '#1e293b' : '#f1f5f9'} />
                             <XAxis 
                               dataKey="name" 
@@ -2399,7 +2530,7 @@ function AppContent() {
                                             {client?.razaoSocial || 'Cliente não encontrado'}
                                           </h5>
                                           <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-6 truncate">
-                                            {order.family}
+                                            {order.family} {order.subFamily ? `• ${order.subFamily}` : ''}
                                           </p>
                                           
                                           <div className="flex items-center justify-between pt-5 border-t border-slate-50 dark:border-slate-800/50">
@@ -2512,9 +2643,16 @@ function AppContent() {
                                       </div>
                                     </td>
                                     <td className="px-10 py-6">
-                                      <span className="px-3 py-1.5 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-xl text-[10px] font-black uppercase tracking-widest border border-slate-200/50 dark:border-slate-700/50">
-                                        {order.family}
-                                      </span>
+                                      <div className="flex flex-col gap-1.5">
+                                        <span className="px-3 py-1.5 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-xl text-[10px] font-black uppercase tracking-widest border border-slate-200/50 dark:border-slate-700/50 w-fit">
+                                          {order.family}
+                                        </span>
+                                        {order.subFamily && (
+                                          <span className="text-[9px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">
+                                            {order.subFamily}
+                                          </span>
+                                        )}
+                                      </div>
                                     </td>
                                     <td className="px-10 py-6">
                                       <div className="flex flex-col">
@@ -2969,13 +3107,26 @@ function AppContent() {
                                       type: 'danger',
                                       onConfirm: async () => {
                                         try {
-                                          await deleteDoc(doc(db, 'clients', client.id));
-                                          await addAuditLog('DELETE', 'CLIENT', client.id, `Excluiu cliente: ${client.razaoSocial}`);
-                                          setSuccessMessage('Cliente excluído com sucesso!');
+                                          // 1. Delete all service orders for this client
+                                          const ordersQuery = query(collection(db, 'serviceOrders'), where('clientId', '==', client.id));
+                                          const ordersSnapshot = await getDocs(ordersQuery);
+                                          
+                                          const batch = writeBatch(db);
+                                          ordersSnapshot.docs.forEach((doc) => {
+                                            batch.delete(doc.ref);
+                                          });
+                                          
+                                          // 2. Delete the client
+                                          batch.delete(doc(db, 'clients', client.id));
+                                          
+                                          await batch.commit();
+                                          
+                                          await addAuditLog('DELETE', 'CLIENT', client.id, `Excluiu cliente: ${client.razaoSocial} e todas as suas OS`);
+                                          setSuccessMessage('Cliente e suas ordens excluídos com sucesso!');
                                           setTimeout(() => setSuccessMessage(null), 3000);
                                         } catch (error) {
-                                          console.error('Error deleting client:', error);
-                                          setGlobalError('Erro ao excluir cliente.');
+                                          console.error('Error deleting client and orders:', error);
+                                          setGlobalError('Erro ao excluir cliente e suas ordens.');
                                         } finally {
                                           setConfirmModal(prev => ({ ...prev, isOpen: false }));
                                         }
@@ -3231,7 +3382,7 @@ function AppContent() {
                         <Bar dataKey="quantidade" fill="#6366f1" radius={[10, 10, 0, 0]} barSize={40} />
                       </BarChart>
                     ) : expandedChart === 'ltFamily' ? (
-                      <BarChart data={statsByFamily}>
+                      <BarChart data={statsByFamily.filter(s => s.leadTimeMedio > 0)}>
                         <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={theme === 'dark' ? '#1e293b' : '#f1f5f9'} />
                         <XAxis 
                           dataKey="name" 
@@ -3247,7 +3398,7 @@ function AppContent() {
                         <Bar dataKey="leadTimeMedio" fill="#f59e0b" radius={[10, 10, 0, 0]} barSize={40} />
                       </BarChart>
                     ) : expandedChart === 'ltClient' ? (
-                      <BarChart data={statsByClient}>
+                      <BarChart data={statsByClient.filter(s => s.leadTimeMedio > 0)}>
                         <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={theme === 'dark' ? '#1e293b' : '#f1f5f9'} />
                         <XAxis 
                           dataKey="name" 
@@ -3372,9 +3523,9 @@ function AppContent() {
                         onChange={e => {
                           const val = e.target.value;
                           if (val === 'Outros') {
-                            setFormData({...formData, family: 'Outros', otherFamily: ''});
+                            setFormData({...formData, family: 'Outros', otherFamily: '', subFamily: ''});
                           } else {
-                            setFormData({...formData, family: val, otherFamily: ''});
+                            setFormData({...formData, family: val, otherFamily: '', subFamily: ''});
                           }
                         }}
                       >
@@ -3385,6 +3536,30 @@ function AppContent() {
                         <option value="Outros">Outros</option>
                       </select>
                     </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-[11px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Subfamília (Modelo)</label>
+                    <button
+                      type="button"
+                      disabled={formData.family !== 'CCUs'}
+                      onClick={() => setIsSubFamilyModalOpen(true)}
+                      className={cn(
+                        "w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none transition-all font-bold text-left flex items-center justify-between group",
+                        formData.family !== 'CCUs' ? "opacity-40 cursor-not-allowed text-slate-400" : "text-slate-900 dark:text-white hover:border-blue-500/50"
+                      )}
+                    >
+                      <span className="truncate">
+                        {formData.subFamily || (formData.family === 'CCUs' ? 'Selecionar Modelo' : 'Não aplicável')}
+                      </span>
+                      <LayoutGrid className={cn(
+                        "w-4 h-4 transition-colors",
+                        formData.family === 'CCUs' ? "text-blue-500" : "text-slate-300 dark:text-slate-700"
+                      )} />
+                    </button>
+                    {formData.family === 'CCUs' && !formData.subFamily && (
+                      <p className="text-[9px] font-bold text-rose-500 uppercase tracking-widest ml-1">Seleção obrigatória para CCUs</p>
+                    )}
                   </div>
 
                   {formData.family === 'Outros' && (
@@ -3630,6 +3805,150 @@ function AppContent() {
                 >
                   Confirmar
                 </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+      {/* SubFamily Selection Modal */}
+      <AnimatePresence>
+        {isSubFamilyModalOpen && (
+          <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsSubFamilyModalOpen(false)}
+              className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="relative w-full max-w-md bg-white dark:bg-slate-900 rounded-[32px] shadow-2xl overflow-hidden border border-slate-200/50 dark:border-slate-800/50"
+            >
+              <div className="p-6 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
+                <div>
+                  <h3 className="text-lg font-black text-slate-900 dark:text-white tracking-tight uppercase">Selecionar Modelo CCU</h3>
+                  <p className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mt-1">Escolha uma subfamília</p>
+                </div>
+                <button 
+                  onClick={() => setIsSubFamilyModalOpen(false)}
+                  className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-all"
+                >
+                  <X className="w-5 h-5 text-slate-400" />
+                </button>
+              </div>
+              
+              <div className="p-4 max-h-[60vh] overflow-y-auto custom-scrollbar">
+                <div className="grid grid-cols-1 gap-2">
+                  {CCU_SUBFAMILIES.map((sub) => (
+                    <button
+                      key={sub}
+                      onClick={() => {
+                        setFormData({ ...formData, subFamily: sub });
+                        setIsSubFamilyModalOpen(false);
+                      }}
+                      className={cn(
+                        "w-full px-4 py-3 rounded-2xl text-left font-bold text-sm transition-all flex items-center justify-between group",
+                        formData.subFamily === sub 
+                          ? "bg-blue-600 text-white shadow-lg shadow-blue-200 dark:shadow-none" 
+                          : "hover:bg-blue-50 dark:hover:bg-blue-900/30 text-slate-700 dark:text-slate-300"
+                      )}
+                    >
+                      <span>{sub}</span>
+                      {formData.subFamily === sub && <Check className="w-4 h-4" />}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              
+              <div className="p-6 bg-slate-50 dark:bg-slate-950/50 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  onClick={() => setIsSubFamilyModalOpen(false)}
+                  className="w-full py-3 bg-slate-900 dark:bg-white text-white dark:text-slate-900 rounded-2xl font-black text-[10px] uppercase tracking-widest active:scale-95 transition-all"
+                >
+                  Fechar
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* CCU Details Modal */}
+      <AnimatePresence>
+        {isCCUModalOpen && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsCCUModalOpen(false)}
+              className="absolute inset-0 bg-slate-900/60 backdrop-blur-md"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="relative w-full max-w-4xl bg-white dark:bg-slate-900 rounded-[48px] shadow-2xl overflow-hidden border border-slate-200/50 dark:border-slate-800/50"
+            >
+              <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-blue-500 via-indigo-500 to-purple-600"></div>
+              
+              <div className="p-10">
+                <div className="flex items-center justify-between mb-10">
+                  <div className="flex items-center gap-5">
+                    <div className="w-14 h-14 bg-blue-50 dark:bg-blue-900/30 rounded-2xl flex items-center justify-center">
+                      <LayoutGrid className="w-7 h-7 text-blue-600 dark:text-blue-400" />
+                    </div>
+                    <div>
+                      <h3 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight uppercase">Detalhamento Completo CCUs</h3>
+                      <p className="text-xs font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mt-1">Lead Time Médio por Subfamília</p>
+                    </div>
+                  </div>
+                  <button 
+                    onClick={() => setIsCCUModalOpen(false)}
+                    className="p-4 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-400 dark:text-slate-500 rounded-2xl transition-all active:scale-95"
+                  >
+                    <X className="w-6 h-6" />
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 max-h-[60vh] overflow-y-auto pr-4 custom-scrollbar">
+                  {statsBySubFamily.map((sub) => (
+                    <div 
+                      key={sub.name}
+                      className="bg-slate-50/50 dark:bg-slate-800/30 p-6 rounded-[32px] border border-slate-100 dark:border-slate-800/50 hover:border-blue-500/30 transition-all group"
+                    >
+                      <div className="flex items-center justify-between mb-4">
+                        <p className="text-[11px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest truncate max-w-[150px]">{sub.name}</p>
+                        <span className="text-[10px] font-black px-2.5 py-1 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-lg uppercase tracking-widest">
+                          {sub.quantidade} OS
+                        </span>
+                      </div>
+                      <div className="flex items-baseline gap-2">
+                        <p className="text-4xl font-black text-slate-900 dark:text-white tracking-tighter group-hover:text-blue-600 transition-colors">{sub.leadTimeMedio}</p>
+                        <p className="text-sm font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest">dias</p>
+                      </div>
+                      <div className="mt-5 h-1.5 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
+                        <motion.div 
+                          initial={{ width: 0 }}
+                          animate={{ width: `${Math.min(100, (sub.leadTimeMedio / 15) * 100)}%` }}
+                          className="h-full bg-gradient-to-r from-blue-500 to-indigo-600 rounded-full"
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="mt-10 pt-8 border-t border-slate-100 dark:border-slate-800/50 flex justify-end">
+                  <button 
+                    onClick={() => setIsCCUModalOpen(false)}
+                    className="bg-slate-900 dark:bg-white text-white dark:text-slate-900 px-10 py-4 rounded-2xl font-black text-xs uppercase tracking-widest hover:opacity-90 transition-all active:scale-95"
+                  >
+                    Fechar Detalhes
+                  </button>
+                </div>
               </div>
             </motion.div>
           </div>

@@ -1123,7 +1123,7 @@ function AppContent() {
       doc.setFontSize(8);
       doc.setTextColor(148, 163, 184);
       const now = format(new Date(), 'dd/MM/yyyy HH:mm');
-      doc.text(`Documento oficial gerado em ${now} • Ops Control Management System`, 105, 287, { align: 'center' });
+      doc.text(`Documento oficial gerado em ${now} • OPS Control Management System`, 105, 287, { align: 'center' });
       doc.text(`Página ${i} de ${pageCount}`, 190, 287, { align: 'right' });
     }
     
@@ -1426,7 +1426,7 @@ function AppContent() {
           <div className="w-16 h-16 bg-blue-600 rounded-full flex items-center justify-center mx-auto mb-6 shadow-lg">
             <span className="text-white font-black text-2xl tracking-tighter">OEG</span>
           </div>
-          <h1 className="text-2xl font-bold text-slate-900 dark:text-white mb-2 text-center tracking-tight">Ops Control</h1>
+          <h1 className="text-2xl font-bold text-slate-900 dark:text-white mb-2 text-center tracking-tight">OPS Control</h1>
           <p className="text-slate-500 dark:text-slate-400 mb-8 text-center font-medium">
             Entre na sua conta de equipe
           </p>
@@ -1536,7 +1536,7 @@ function AppContent() {
               </div>
             )}
             <div className="flex flex-col">
-              <span className="font-black text-slate-900 dark:text-white text-xl tracking-tight leading-none">Ops Control</span>
+              <span className="font-black text-slate-900 dark:text-white text-xl tracking-tight leading-none">OPS Control</span>
               <span className="text-[10px] font-black text-blue-600 dark:text-blue-400 uppercase tracking-[0.2em] mt-1.5 opacity-80">Management</span>
             </div>
           </div>

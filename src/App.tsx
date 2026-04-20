@@ -580,70 +580,6 @@ function AppContent() {
     return () => unsubscribe();
   }, [user]);
 
-  // Auto-seed clients if missing
-  useEffect(() => {
-    const isModerator = currentUserRole === 'moderator' || user?.email === "almeidacesar2010@gmail.com";
-    if (user && isModerator && !loading && !seedingRef.current) {
-      const timeoutId = setTimeout(async () => {
-        // 1. Cleanup duplicates first
-        if (clients.length > 0) {
-          const seen = new Map<string, string>(); // name -> first id
-          const duplicates: string[] = [];
-          
-          clients.forEach(client => {
-            const name = client.razaoSocial.toUpperCase().trim();
-            if (seen.has(name)) {
-              duplicates.push(client.id);
-            } else {
-              seen.set(name, client.id);
-            }
-          });
-
-          if (duplicates.length > 0) {
-            console.log(`Cleaning up ${duplicates.length} duplicate clients...`);
-            const batch = writeBatch(db);
-            duplicates.forEach(id => {
-              batch.delete(doc(db, 'clients', id));
-            });
-            await batch.commit();
-            return; // Exit and let the listener trigger again with clean data
-          }
-        }
-
-        // 2. Check which clients are missing
-        const missingClients = PRE_REGISTERED_CLIENTS.filter(
-          name => !clients.some(c => c.razaoSocial.toUpperCase().trim() === name.toUpperCase().trim())
-        );
-
-        if (missingClients.length > 0 && !seedingRef.current) {
-          seedingRef.current = true;
-          setIsSeeding(true);
-          console.log(`Auto-seeding ${missingClients.length} missing clients...`);
-          try {
-            const batch = writeBatch(db);
-            missingClients.forEach((name) => {
-              const newDocRef = doc(collection(db, 'clients'));
-              batch.set(newDocRef, {
-                cnpj: '00.000.000/0000-00',
-                razaoSocial: name,
-                userId: user.uid,
-                createdAt: serverTimestamp()
-              });
-            });
-            await batch.commit();
-            console.log('Auto-seeding completed successfully');
-          } catch (error) {
-            console.error('Error auto-seeding clients:', error);
-            seedingRef.current = false; // Allow retry on next load if failed
-          } finally {
-            setIsSeeding(false);
-          }
-        }
-      }, 2000); // Wait a bit longer to ensure clients list is fully loaded
-      return () => clearTimeout(timeoutId);
-    }
-  }, [user, currentUserRole, clients.length, loading]);
-
   const handleLogin = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (isSubmitting) return;
@@ -781,24 +717,16 @@ function AppContent() {
       }
 
       const batch = writeBatch(db);
-      let currentClients = [...clients];
+      const currentClients = [...clients];
 
-      // If no clients exist, seed some first
+      // If no clients exist, inform the user they need to add clients first
       if (currentClients.length === 0) {
-        console.log("No clients found, seeding initial clients...");
-        const initialClients = PRE_REGISTERED_CLIENTS.slice(0, 10).map(name => {
-          const clientRef = doc(collection(db, 'clients'));
-          const clientData = {
-            cnpj: Math.floor(Math.random() * 100000000000000).toString().padStart(14, '0'),
-            razaoSocial: name,
-            userId: user.uid,
-            createdAt: serverTimestamp()
-          };
-          batch.set(clientRef, clientData);
-          return { id: clientRef.id, ...clientData };
-        });
-        currentClients = initialClients as any[];
+        setGlobalError("Por favor, cadastre pelo menos um cliente antes de gerar demos.");
+        setIsSubmitting(false);
+        return;
       }
+
+      const clientList = currentClients;
 
       // Generate exactly 50 orders total distributed across Jan, Feb, and March 2026
       for (let i = 0; i < 50; i++) {

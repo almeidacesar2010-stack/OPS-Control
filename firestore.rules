@@ -75,10 +75,25 @@ service cloud.firestore {
              data.timestamp is timestamp;
     }
 
+    function isValidEquipment(data) {
+      return data.keys().hasAll(['tag', 'family', 'userId', 'createdAt']) &&
+             data.tag is string && data.tag.size() > 0 &&
+             data.family is string && data.family.size() > 0 &&
+             data.userId is string &&
+             data.createdAt is timestamp;
+    }
+
     match /serviceOrders/{osId} {
       allow read: if isAuthenticated();
       allow create: if isAuthenticated() && isValidServiceOrder(request.resource.data);
       allow update: if isAuthenticated() && isValidServiceOrder(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /equipments/{equipmentId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidEquipment(request.resource.data);
+      allow update: if isAuthenticated() && (isOwner(request.resource.data.userId) || isAdmin()) && isValidEquipment(request.resource.data);
       allow delete: if isAdmin();
     }
 

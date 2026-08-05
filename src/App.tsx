@@ -74,16 +74,27 @@ import {
   X,
   Upload,
   Search,
+  CheckSquare,
+  Square,
   Image as ImageIcon,
   Sun,
   Moon,
   Check,
   LayoutGrid,
   List,
+  Wrench,
   Loader2,
   ChevronLeft,
   ChevronRight,
-  Timer
+  Timer,
+  Container,
+  Boxes,
+  Package,
+  MoreHorizontal,
+  Hash,
+  AlertTriangle,
+  Eye,
+  Printer
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from './lib/utils';
@@ -106,6 +117,11 @@ interface AppUser {
   createdAt: Timestamp;
 }
 
+interface InspectionCheck {
+  status: 'OK' | 'NA' | 'NC';
+  value?: string;
+}
+
 interface ServiceOrder {
   id: string;
   equipmentNumber: string;
@@ -115,9 +131,34 @@ interface ServiceOrder {
   startDate: Timestamp;
   endDate?: Timestamp;
   status: 'Em Manutenção' | 'Concluído';
+  priority?: 'Baixa' | 'Média' | 'Alta' | 'Urgente';
+  maintenanceScope?: string;
   leadTime?: number;
   userId: string;
   createdAt: Timestamp;
+  createdBy?: string;
+  slingCheck?: InspectionCheck;
+  damagedSlingCheck?: InspectionCheck;
+  excessiveCorrosionCheck?: InspectionCheck;
+  primaryStructureCheck?: InspectionCheck;
+  secondaryStructureCheck?: InspectionCheck;
+  damagedBagCheck?: InspectionCheck;
+  bottomCheck?: InspectionCheck;
+  roofCheck?: InspectionCheck;
+  tieDownPointCheck?: InspectionCheck;
+  doorCheck?: InspectionCheck;
+  lidCheck?: InspectionCheck;
+  leverCheck?: InspectionCheck;
+  leverSupportCheck?: InspectionCheck;
+  roundHeadRivetCheck?: InspectionCheck;
+  clawCheck?: InspectionCheck;
+  retainerCheck?: InspectionCheck;
+  rodCheck?: InspectionCheck;
+  simpleRodSupportCheck?: InspectionCheck;
+  specialRodSupportCheck?: InspectionCheck;
+  rodLockCheck?: InspectionCheck;
+  hingeCheck?: InspectionCheck;
+  reworkCheck?: InspectionCheck;
 }
 
 interface AuditLog {
@@ -126,10 +167,19 @@ interface AuditLog {
   userName: string;
   userEmail: string;
   action: 'CREATE' | 'UPDATE' | 'DELETE';
-  entity: 'OS' | 'CLIENT' | 'USER' | 'SETTINGS';
+  entity: 'OS' | 'CLIENT' | 'USER' | 'SETTINGS' | 'EQUIPMENT';
   entityId: string;
   details: string;
   timestamp: Timestamp;
+}
+
+interface Equipment {
+  id: string;
+  tag: string;
+  family: string;
+  subFamily?: string;
+  userId: string;
+  createdAt: Timestamp;
 }
 
 enum OperationType {
@@ -285,18 +335,195 @@ export default function App() {
   );
 }
 
+const InspectionRow = ({ 
+  label, 
+  value, 
+  onToggle, 
+  onValueChange, 
+  placeholder,
+  okLabel = "OK",
+  ncLabel = "NC",
+  naLabel = "NA"
+}: { 
+  label: string; 
+  value: InspectionCheck; 
+  onToggle: (status: 'OK' | 'NA' | 'NC') => void;
+  onValueChange: (val: string) => void;
+  placeholder?: string;
+  okLabel?: string;
+  ncLabel?: string;
+  naLabel?: string;
+}) => (
+  <div className={cn(
+    "flex flex-col gap-2 p-4 rounded-2xl transition-all duration-300 border",
+    value.status === 'OK' 
+      ? "bg-white dark:bg-slate-900 border-emerald-500/30 shadow-lg shadow-emerald-500/5" 
+      : value.status === 'NC'
+      ? "bg-white dark:bg-slate-900 border-rose-500/30 shadow-lg shadow-rose-500/5"
+      : "bg-slate-50/50 dark:bg-slate-800/30 border-slate-100 dark:border-slate-800"
+  )}>
+    <div className="flex items-center justify-between gap-3">
+      <div className="flex items-center gap-2.5 min-w-0">
+        <div className={cn(
+          "w-7 h-7 rounded-xl flex items-center justify-center shrink-0 transition-all duration-300",
+          value.status === 'OK' 
+            ? "bg-emerald-500 text-white shadow-md shadow-emerald-500/20" 
+            : value.status === 'NC'
+            ? "bg-rose-500 text-white shadow-md shadow-rose-500/20"
+            : "bg-slate-200 dark:bg-slate-800 text-slate-400"
+        )}>
+          {value.status === 'OK' ? <CheckSquare className="w-3.5 h-3.5" /> : value.status === 'NC' ? <AlertTriangle className="w-3.5 h-3.5" /> : <X className="w-3.5 h-3.5" />}
+        </div>
+        <span className={cn(
+          "text-[11px] font-black uppercase tracking-tight transition-colors truncate",
+          value.status === 'OK' ? "text-slate-900 dark:text-white" : value.status === 'NC' ? "text-rose-600 dark:text-rose-400" : "text-slate-400 dark:text-slate-500"
+        )}>
+          {label}
+        </span>
+      </div>
+      <div className="flex bg-slate-100 dark:bg-slate-800/80 p-1 rounded-xl border border-slate-200/50 dark:border-slate-700/50 gap-0.5 shrink-0">
+        <button
+          type="button"
+          onClick={() => onToggle('OK')}
+          className={cn(
+            "px-2.5 py-1 rounded-lg text-[9px] font-black uppercase transition-all duration-200 flex items-center justify-center gap-1 whitespace-nowrap",
+            value.status === 'OK' 
+              ? "bg-emerald-500 text-white shadow-sm" 
+              : "text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+          )}
+        >
+          <CheckSquare className="w-3 h-3" />
+          <span>{okLabel}</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => onToggle('NC')}
+          className={cn(
+            "px-2.5 py-1 rounded-lg text-[9px] font-black uppercase transition-all duration-200 flex items-center justify-center gap-1 whitespace-nowrap",
+            value.status === 'NC' 
+              ? "bg-rose-500 text-white shadow-sm" 
+              : "text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+          )}
+        >
+          <AlertTriangle className="w-3 h-3" />
+          <span>{ncLabel}</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => onToggle('NA')}
+          className={cn(
+            "px-2.5 py-1 rounded-lg text-[9px] font-black uppercase transition-all duration-200 flex items-center justify-center gap-1 whitespace-nowrap",
+            value.status === 'NA' 
+              ? "bg-slate-800 dark:bg-slate-700 text-white shadow-sm" 
+              : "text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+          )}
+        >
+          <X className="w-3 h-3" />
+          <span>{naLabel}</span>
+        </button>
+      </div>
+    </div>
+    <div className="mt-1">
+      <div className="relative">
+        <input
+          type="text"
+          placeholder={placeholder || "Observações do item..."}
+          className="w-full px-3.5 py-2 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700/60 focus:border-blue-500/40 rounded-xl outline-none transition-all font-bold text-xs text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500"
+          value={value.value || ''}
+          onChange={(e) => onValueChange(e.target.value)}
+        />
+        {value.value && (
+          <div className="absolute right-3 top-1/2 -translate-y-1/2">
+            <div className="w-1.5 h-1.5 rounded-full bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.6)]"></div>
+          </div>
+        )}
+      </div>
+    </div>
+  </div>
+);
+
+const DocInspectionTableRow = ({
+  label,
+  value,
+  onToggle,
+  onValueChange,
+  placeholder = "Descreva observações ou 'OK'..."
+}: {
+  label: string;
+  value: InspectionCheck;
+  onToggle: (status: 'OK' | 'NA' | 'NC') => void;
+  onValueChange: (val: string) => void;
+  placeholder?: string;
+}) => (
+  <tr className="hover:bg-slate-50/80 dark:hover:bg-slate-900/60 transition-colors border-b border-slate-200/80 dark:border-slate-800">
+    <td className="py-3 px-4 font-black text-slate-900 dark:text-white uppercase text-xs align-middle">
+      {label}
+    </td>
+    <td className="py-2.5 px-3 text-center align-middle whitespace-nowrap">
+      <div className="inline-flex bg-slate-100 dark:bg-slate-800 p-1 rounded-xl border border-slate-200/80 dark:border-slate-700 shadow-inner gap-1">
+        <button
+          type="button"
+          onClick={() => onToggle('OK')}
+          className={cn(
+            "px-3 py-1 rounded-lg text-xs font-black tracking-wider transition-all cursor-pointer",
+            value?.status === 'OK'
+              ? "bg-emerald-600 text-white shadow-md scale-105"
+              : "text-slate-500 hover:text-emerald-600 dark:text-slate-400"
+          )}
+        >
+          OK
+        </button>
+        <button
+          type="button"
+          onClick={() => onToggle('NC')}
+          className={cn(
+            "px-3 py-1 rounded-lg text-xs font-black tracking-wider transition-all cursor-pointer",
+            value?.status === 'NC'
+              ? "bg-rose-600 text-white shadow-md scale-105"
+              : "text-slate-500 hover:text-rose-600 dark:text-slate-400"
+          )}
+        >
+          NC
+        </button>
+        <button
+          type="button"
+          onClick={() => onToggle('NA')}
+          className={cn(
+            "px-3 py-1 rounded-lg text-xs font-black tracking-wider transition-all cursor-pointer",
+            value?.status === 'NA' || !value?.status
+              ? "bg-slate-700 text-white dark:bg-slate-300 dark:text-slate-900 shadow-md scale-105"
+              : "text-slate-400 hover:text-slate-700 dark:text-slate-500"
+          )}
+        >
+          N/A
+        </button>
+      </div>
+    </td>
+    <td className="py-2 px-3 align-middle">
+      <input
+        type="text"
+        value={value?.value || ''}
+        onChange={(e) => onValueChange(e.target.value)}
+        placeholder={placeholder}
+        className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900/80 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold uppercase tracking-wide text-slate-900 dark:text-slate-100 placeholder:text-slate-300 dark:placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+      />
+    </td>
+  </tr>
+);
+
 function AppContent() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'orders' | 'clients' | 'access' | 'settings' | 'audits'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'orders' | 'clients' | 'equipments' | 'access' | 'settings' | 'audits'>('dashboard');
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
   const [orders, setOrders] = useState<ServiceOrder[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
+  const [equipments, setEquipments] = useState<Equipment[]>([]);
   const [appUsers, setAppUsers] = useState<AppUser[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [currentUserRole, setCurrentUserRole] = useState<'moderator' | 'admin' | 'user'>('user');
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [modalType, setModalType] = useState<'os' | 'client' | 'access'>('os');
+  const [modalType, setModalType] = useState<'os' | 'client' | 'access' | 'equipment'>('os');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [profileForm, setProfileForm] = useState({ name: '', username: '' });
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
@@ -308,6 +535,7 @@ function AppContent() {
   const seedingRef = useRef(false);
   const [accessError, setAccessError] = useState<string | null>(null);
   const [editingOrder, setEditingOrder] = useState<any>(null);
+  const [osModalTab, setOsModalTab] = useState<'view' | 'edit'>('view');
   const [selectedMonth, setSelectedMonth] = useState<Date | null>(null);
   const [isAuthReady, setIsAuthReady] = useState(false);
   const [globalError, setGlobalError] = useState<string | null>(null);
@@ -317,6 +545,7 @@ function AppContent() {
   const [completedSearchTerm, setCompletedSearchTerm] = useState('');
   const [viewMode, setViewMode] = useState<'list' | 'kanban'>('list');
   const [activeOrderSubTab, setActiveOrderSubTab] = useState<'in-progress' | 'completed'>('in-progress');
+  const [osTypeFilter, setOsTypeFilter] = useState<'all' | 'Tanques de 1500L' | 'Tanques de 5000/5200L' | 'CCUs' | 'Outros'>('all');
   const [updatingStatusId, setUpdatingStatusId] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const ITEMS_PER_PAGE = 10;
@@ -340,7 +569,31 @@ function AppContent() {
     clientId: '',
     startDate: format(new Date(), 'yyyy-MM-dd'),
     endDate: '',
-    status: 'Em Manutenção' as 'Em Manutenção' | 'Concluído'
+    status: 'Em Manutenção' as 'Em Manutenção' | 'Concluído',
+    priority: 'Média' as 'Baixa' | 'Média' | 'Alta' | 'Urgente',
+    maintenanceScope: '',
+    slingCheck: { status: 'NA', value: '' } as InspectionCheck,
+    damagedSlingCheck: { status: 'NA', value: '' } as InspectionCheck,
+    excessiveCorrosionCheck: { status: 'NA', value: '' } as InspectionCheck,
+    primaryStructureCheck: { status: 'NA', value: '' } as InspectionCheck,
+    secondaryStructureCheck: { status: 'NA', value: '' } as InspectionCheck,
+    damagedBagCheck: { status: 'NA', value: '' } as InspectionCheck,
+    bottomCheck: { status: 'NA', value: '' } as InspectionCheck,
+    roofCheck: { status: 'NA', value: '' } as InspectionCheck,
+    tieDownPointCheck: { status: 'NA', value: '' } as InspectionCheck,
+    doorCheck: { status: 'NA', value: '' } as InspectionCheck,
+    lidCheck: { status: 'NA', value: '' } as InspectionCheck,
+    leverCheck: { status: 'NA', value: '' } as InspectionCheck,
+    leverSupportCheck: { status: 'NA', value: '' } as InspectionCheck,
+    roundHeadRivetCheck: { status: 'NA', value: '' } as InspectionCheck,
+    clawCheck: { status: 'NA', value: '' } as InspectionCheck,
+    retainerCheck: { status: 'NA', value: '' } as InspectionCheck,
+    rodCheck: { status: 'NA', value: '' } as InspectionCheck,
+    simpleRodSupportCheck: { status: 'NA', value: '' } as InspectionCheck,
+    specialRodSupportCheck: { status: 'NA', value: '' } as InspectionCheck,
+    rodLockCheck: { status: 'NA', value: '' } as InspectionCheck,
+    hingeCheck: { status: 'NA', value: '' } as InspectionCheck,
+    reworkCheck: { status: 'NA', value: '' } as InspectionCheck,
   });
 
   const [confirmModal, setConfirmModal] = useState<{
@@ -360,6 +613,13 @@ function AppContent() {
   const [clientForm, setClientForm] = useState({
     cnpj: '',
     razaoSocial: ''
+  });
+
+  const [equipmentForm, setEquipmentForm] = useState({
+    tag: '',
+    family: '',
+    subFamily: '',
+    otherFamily: ''
   });
 
   const [accessForm, setAccessForm] = useState({
@@ -385,7 +645,7 @@ function AppContent() {
     localStorage.setItem('theme', theme);
   }, [theme]);
 
-  const addAuditLog = async (action: 'CREATE' | 'UPDATE' | 'DELETE', entity: 'OS' | 'CLIENT' | 'USER' | 'SETTINGS', entityId: string, details: string) => {
+  const addAuditLog = async (action: 'CREATE' | 'UPDATE' | 'DELETE', entity: 'OS' | 'CLIENT' | 'USER' | 'SETTINGS' | 'EQUIPMENT', entityId: string, details: string) => {
     try {
       const currentUserData = appUsers.find(u => u.id === user?.uid);
       await addDoc(collection(db, 'auditLogs'), {
@@ -484,10 +744,17 @@ function AppContent() {
       });
     }
 
+    const unsubEquipments = onSnapshot(collection(db, 'equipments'), (snapshot) => {
+      setEquipments(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Equipment[]);
+    }, (error) => {
+      console.error("Equipments listener error:", error);
+    });
+
     return () => {
       unsubOrders();
       unsubClients();
       unsubAudits();
+      unsubEquipments();
     };
   }, [user, isAuthReady, currentUserRole]);
 
@@ -642,6 +909,9 @@ function AppContent() {
         return;
       }
 
+      const currentUserData = appUsers.find(u => u.id === user.uid);
+      const currentUserName = currentUserData?.name || user.displayName || user.email || 'Sistema';
+
       const orderData = {
         equipmentNumber: formData.equipmentNumber,
         family: finalFamily,
@@ -650,9 +920,34 @@ function AppContent() {
         startDate: Timestamp.fromDate(start),
         endDate: end ? Timestamp.fromDate(end) : null,
         status: formData.status,
+        priority: formData.priority,
+        maintenanceScope: formData.maintenanceScope,
         leadTime,
         userId: user.uid,
-        updatedAt: serverTimestamp()
+        updatedAt: serverTimestamp(),
+        createdBy: editingOrder ? (editingOrder.createdBy || currentUserName) : currentUserName,
+        slingCheck: formData.slingCheck,
+        damagedSlingCheck: formData.damagedSlingCheck,
+        excessiveCorrosionCheck: formData.excessiveCorrosionCheck,
+        primaryStructureCheck: formData.primaryStructureCheck,
+        secondaryStructureCheck: formData.secondaryStructureCheck,
+        damagedBagCheck: formData.damagedBagCheck,
+        bottomCheck: formData.bottomCheck,
+        roofCheck: formData.roofCheck,
+        tieDownPointCheck: formData.tieDownPointCheck,
+        doorCheck: formData.doorCheck,
+        lidCheck: formData.lidCheck,
+        leverCheck: formData.leverCheck,
+        leverSupportCheck: formData.leverSupportCheck,
+        roundHeadRivetCheck: formData.roundHeadRivetCheck,
+        clawCheck: formData.clawCheck,
+        retainerCheck: formData.retainerCheck,
+        rodCheck: formData.rodCheck,
+        simpleRodSupportCheck: formData.simpleRodSupportCheck,
+        specialRodSupportCheck: formData.specialRodSupportCheck,
+        rodLockCheck: formData.rodLockCheck,
+        hingeCheck: formData.hingeCheck,
+        reworkCheck: formData.reworkCheck,
       };
 
       console.log('Attempting to save order with data:', orderData);
@@ -682,12 +977,37 @@ function AppContent() {
         clientId: '',
         startDate: format(new Date(), 'yyyy-MM-dd'),
         endDate: '',
-        status: 'Em Manutenção'
+        status: 'Em Manutenção',
+        priority: 'Média' as const,
+        maintenanceScope: '',
+        slingCheck: { status: 'NA', value: '' },
+        damagedSlingCheck: { status: 'NA', value: '' },
+        excessiveCorrosionCheck: { status: 'NA', value: '' },
+        primaryStructureCheck: { status: 'NA', value: '' },
+        secondaryStructureCheck: { status: 'NA', value: '' },
+        damagedBagCheck: { status: 'NA', value: '' },
+        bottomCheck: { status: 'NA', value: '' },
+        roofCheck: { status: 'NA', value: '' },
+        tieDownPointCheck: { status: 'NA', value: '' },
+        doorCheck: { status: 'NA', value: '' },
+        lidCheck: { status: 'NA', value: '' },
+        leverCheck: { status: 'NA', value: '' },
+        leverSupportCheck: { status: 'NA', value: '' },
+        roundHeadRivetCheck: { status: 'NA', value: '' },
+        clawCheck: { status: 'NA', value: '' },
+        retainerCheck: { status: 'NA', value: '' },
+        rodCheck: { status: 'NA', value: '' },
+        simpleRodSupportCheck: { status: 'NA', value: '' },
+        specialRodSupportCheck: { status: 'NA', value: '' },
+        rodLockCheck: { status: 'NA', value: '' },
+        hingeCheck: { status: 'NA', value: '' },
+        reworkCheck: { status: 'NA', value: '' },
       });
       setTimeout(() => setSuccessMessage(null), 3000);
     } catch (error: any) {
       console.error('Error saving order:', error);
-      setGlobalError('Erro ao salvar ordem de serviço. Verifique os dados e tente novamente.');
+      const exactError = error?.message || 'Verifique os dados e tente novamente.';
+      setGlobalError(`Erro ao salvar ordem de serviço: ${exactError}`);
       try {
         handleFirestoreError(error, OperationType.WRITE, 'serviceOrders');
       } catch (e) {
@@ -814,6 +1134,157 @@ function AppContent() {
     }
   };
 
+  const seedRealEquipments = async () => {
+    if (!user || isSubmitting) return;
+    setIsSubmitting(true);
+    setSuccessMessage('Iniciando importação em massa... Aguarde.');
+    
+    try {
+      const batchList: any[] = [];
+      let currentBatch = writeBatch(db);
+      let count = 0;
+
+      const addEquip = (tag: string, family: string) => {
+        // Skip if already in local state to avoid duplicates (though we'll use a better check)
+        if (equipments.some(e => e.tag === tag)) return;
+        
+        const docRef = doc(collection(db, 'equipments'));
+        currentBatch.set(docRef, {
+          tag,
+          family,
+          subFamily: null,
+          userId: user.uid,
+          createdAt: serverTimestamp()
+        });
+        count++;
+        
+        if (count === 450) {
+          batchList.push(currentBatch.commit());
+          currentBatch = writeBatch(db);
+          count = 0;
+        }
+      };
+
+      // Helper for ranges
+      const addRange = (prefix: string, start: number, end: number, family: string, padding: number = 0) => {
+        for (let i = start; i <= end; i++) {
+          const tag = prefix + i.toString().padStart(padding, '0');
+          addEquip(tag, family);
+        }
+      };
+
+      // --- Tanques 1500L ---
+      const tanks1500 = [
+        ...Array.from({length: 17}, (_, i) => (351301 + i).toString()),
+        ...Array.from({length: 10}, (_, i) => (351319 + i).toString()),
+        ...Array.from({length: 28}, (_, i) => (351959 + i).toString()),
+        ...Array.from({length: 17}, (_, i) => (353995 + i).toString()),
+        ...Array.from({length: 7}, (_, i) => (354013 + i).toString()),
+        ...Array.from({length: 7}, (_, i) => (354021 + i).toString()),
+        ...Array.from({length: 7}, (_, i) => (354029 + i).toString()),
+        ...Array.from({length: 11}, (_, i) => (354037 + i).toString()),
+        ...Array.from({length: 2}, (_, i) => (354049 + i).toString()),
+        ...Array.from({length: 31}, (_, i) => (365881 + i).toString()),
+        'CS-12-1501-B', 'CS-12-1502-B', 'CS-12-1504-B', 'CS-12-1505-B', 'CS-12-1507-B', 'CS-12-1508-B'
+      ];
+      tanks1500.forEach(t => addEquip(t, 'Tanques de 1500L'));
+
+      // --- Tanques 5000/5200L ---
+      const specific5000 = ['CS-12-5008-B', 'CS-12-5010-B', 'CS-12-5012-B', 'CS-12-5013-B', 'CS-12-5014-B', 'CS-12-5015-B'];
+      specific5000.forEach(t => addEquip(t, 'Tanques de 5000/5200L'));
+      
+      addRange('HMHU', 120165, 120174, 'Tanques de 5000/5200L');
+      addRange('HMHU', 920251, 920265, 'Tanques de 5000/5200L');
+      addRange('HMHU', 920360, 920379, 'Tanques de 5000/5200L');
+      addRange('HMHU', 920385, 920399, 'Tanques de 5000/5200L');
+      addRange('HMHU', 920445, 920459, 'Tanques de 5000/5200L');
+      addRange('HMHU', 920464, 920478, 'Tanques de 5000/5200L');
+      addRange('HMHU', 920489, 920683, 'Tanques de 5000/5200L');
+      addRange('STC-5000-', 1, 5, 'Tanques de 5000/5200L', 3);
+      addRange('OEGU', 920684, 920918, 'Tanques de 5000/5200L');
+      
+      const mixedOEGU = [
+        920927, 920929, 920930, 920931, 920932, 920933, 920934, 920935, 920936, 920937, 920938, 920939, 920940, 920941, 920942, 920943, 920944, 920945, 920946,
+        920919, 920920, 920921, 920922, 920923, 920924, 920925, 920926, 920928, 920948, 920949, 920950, 920953, 920954, 920955, 920956, 920957, 920958, 920959, 920960,
+        920962, 920963, 920964, 920966, 920967, 920951, 920952, 920961, 920965, 920968, 920947
+      ];
+      mixedOEGU.forEach(n => addEquip('OEGU' + n, 'Tanques de 5000/5200L'));
+      
+      addRange('OEGU', 921033, 921182, 'Tanques de 5000/5200L');
+
+      if (count > 0) {
+        batchList.push(currentBatch.commit());
+      }
+
+      await Promise.all(batchList);
+      await addAuditLog('CREATE', 'SETTINGS', 'bulk_equip', `Realizou importação em massa de ${tanks1500.length + specific5000.length + (920683-920489+1) + (921182-921033+1) + 120} equipamentos`);
+      
+      setSuccessMessage('Importação concluída com sucesso!');
+      setTimeout(() => setSuccessMessage(null), 5000);
+    } catch (error) {
+      console.error('Error seeding real equipments:', error);
+      setGlobalError('Erro na importação. Tente novamente.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleEquipmentSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user || isSubmitting) return;
+    setIsSubmitting(true);
+    try {
+      const familyToSave = equipmentForm.family === 'Outros' ? equipmentForm.otherFamily : equipmentForm.family;
+      const docRef = await addDoc(collection(db, 'equipments'), {
+        tag: equipmentForm.tag,
+        family: familyToSave,
+        subFamily: equipmentForm.subFamily || null,
+        userId: user.uid,
+        createdAt: serverTimestamp()
+      });
+      await addAuditLog('CREATE', 'EQUIPMENT', docRef.id, `Cadastrou equipamento: ${equipmentForm.tag}`);
+      setSuccessMessage('Equipamento cadastrado com sucesso!');
+      setTimeout(() => setSuccessMessage(null), 3000);
+      setIsModalOpen(false);
+      setEquipmentForm({ tag: '', family: '', subFamily: '', otherFamily: '' });
+    } catch (error: any) {
+      console.error('Error saving equipment:', error);
+      setGlobalError('Erro ao cadastrar equipamento. Verifique se você tem permissão.');
+      try {
+        handleFirestoreError(error, OperationType.WRITE, 'equipments');
+      } catch (e) {}
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleDeleteEquipment = async (id: string) => {
+    if (!user) return;
+    
+    const equipment = equipments.find(e => e.id === id);
+    if (!equipment) return;
+
+    setConfirmModal({
+      isOpen: true,
+      title: 'Excluir Equipamento',
+      message: `Tem certeza que deseja excluir o equipamento ${equipment.tag}? Isso não afetará as OS já criadas.`,
+      type: 'danger',
+      onConfirm: async () => {
+        try {
+          await deleteDoc(doc(db, 'equipments', id));
+          await addAuditLog('DELETE', 'EQUIPMENT', id, `Excluiu equipamento: ${equipment.tag}`);
+          setSuccessMessage('Equipamento excluído com sucesso!');
+          setTimeout(() => setSuccessMessage(null), 3000);
+        } catch (error) {
+          console.error('Error deleting equipment:', error);
+          setGlobalError('Erro ao excluir equipamento.');
+        } finally {
+          setConfirmModal(prev => ({ ...prev, isOpen: false }));
+        }
+      }
+    });
+  };
+
   const handleClientSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user || isSubmitting) return;
@@ -829,8 +1300,12 @@ function AppContent() {
       setTimeout(() => setSuccessMessage(null), 3000);
       setIsModalOpen(false);
       setClientForm({ cnpj: '', razaoSocial: '' });
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, 'clients');
+    } catch (error: any) {
+      console.error('Error saving client:', error);
+      setGlobalError('Erro ao cadastrar cliente. Verifique os dados e tente novamente.');
+      try {
+        handleFirestoreError(error, OperationType.WRITE, 'clients');
+      } catch (e) {}
     } finally {
       setIsSubmitting(false);
     }
@@ -910,7 +1385,7 @@ function AppContent() {
     }
   };
 
-  const handleEditOrder = (order: any) => {
+  const handleEditOrder = (order: any, initialTab: 'view' | 'edit' = 'edit') => {
     const isPredefined = ['CCUs', 'Tanques de 1500L', 'Tanques de 5000/5200L'].includes(order.family);
     setEditingOrder(order);
     setFormData({
@@ -921,11 +1396,40 @@ function AppContent() {
       clientId: order.clientId || '',
       startDate: order.startDate?.toDate ? format(order.startDate.toDate(), 'yyyy-MM-dd') : format(new Date(), 'yyyy-MM-dd'),
       endDate: order.endDate?.toDate ? format(order.endDate.toDate(), 'yyyy-MM-dd') : '',
-      status: order.status || 'Em Manutenção'
+      status: order.status || 'Em Manutenção',
+      priority: order.priority || 'Média',
+      maintenanceScope: order.maintenanceScope || '',
+      slingCheck: order.slingCheck || { status: 'NA', value: '' },
+      damagedSlingCheck: order.damagedSlingCheck || { status: 'NA', value: '' },
+      excessiveCorrosionCheck: order.excessiveCorrosionCheck || { status: 'NA', value: '' },
+      primaryStructureCheck: order.primaryStructureCheck || { status: 'NA', value: '' },
+      secondaryStructureCheck: order.secondaryStructureCheck || { status: 'NA', value: '' },
+      damagedBagCheck: order.damagedBagCheck || { status: 'NA', value: '' },
+      bottomCheck: order.bottomCheck || { status: 'NA', value: '' },
+      roofCheck: order.roofCheck || { status: 'NA', value: '' },
+      tieDownPointCheck: order.tieDownPointCheck || { status: 'NA', value: '' },
+      doorCheck: order.doorCheck || { status: 'NA', value: '' },
+      lidCheck: order.lidCheck || { status: 'NA', value: '' },
+      leverCheck: order.leverCheck || { status: 'NA', value: '' },
+      leverSupportCheck: order.leverSupportCheck || { status: 'NA', value: '' },
+      roundHeadRivetCheck: order.roundHeadRivetCheck || { status: 'NA', value: '' },
+      clawCheck: order.clawCheck || { status: 'NA', value: '' },
+      retainerCheck: order.retainerCheck || { status: 'NA', value: '' },
+      rodCheck: order.rodCheck || { status: 'NA', value: '' },
+      simpleRodSupportCheck: order.simpleRodSupportCheck || { status: 'NA', value: '' },
+      specialRodSupportCheck: order.specialRodSupportCheck || { status: 'NA', value: '' },
+      rodLockCheck: order.rodLockCheck || { status: 'NA', value: '' },
+      hingeCheck: order.hingeCheck || { status: 'NA', value: '' },
+      reworkCheck: order.reworkCheck || { status: 'NA', value: '' },
     });
+    setOsModalTab(initialTab);
     setModalType('os');
     setAccessError(null);
     setIsModalOpen(true);
+  };
+
+  const handleViewOrder = (order: any) => {
+    handleEditOrder(order, 'view');
   };
 
   const seedClients = async () => {
@@ -956,103 +1460,399 @@ function AppContent() {
     }
   };
 
-  const generatePDF = (order: any) => {
-    const client = clients.find(c => c.id === order.clientId);
+const generatePDF = (order: any) => {
     const doc = new jsPDF();
-    
-    // Header with background
-    doc.setFillColor(30, 58, 138); // blue-900
-    doc.rect(0, 0, 210, 50, 'F');
-    
+    const client = clients.find(c => c.id === order.clientId);
+    const clientName = order.clientId === 'na' ? 'NÃO DEFINIDO / N/A' : (client?.razaoSocial || 'N/A');
+
+    // --- MODERN PREMIUM TECHNICAL FRAME DESIGN ---
+    // Outer border frame for industrial/aeronautical document feel
+    doc.setDrawColor(226, 232, 240); // slate-200
+    doc.setLineWidth(0.15);
+    doc.rect(8, 8, 194, 281); // 210x297 minus 8mm margins
+
+    // --- TOP MARGIN ACCENT STRIP ---
+    doc.setFillColor(30, 41, 59); // Slate-800 branding color
+    doc.rect(8, 8, 194, 2, 'F');
+
+    // --- DYNAMIC LOGO & HEADER ---
+    const logoX = 14;
+    const logoY = 14;
+    const logoW = 20;
+    const logoH = 20;
+
+    let textStartX = 14;
     if (logoUrl) {
       try {
-        doc.addImage(logoUrl, 'PNG', 15, 10, 30, 30);
+        doc.addImage(logoUrl, 'PNG', logoX, logoY, logoW, logoH);
+        textStartX = 39;
       } catch (e) {
         console.error('Error adding logo to PDF:', e);
       }
     }
-    
-    doc.setTextColor(255, 255, 255);
-    doc.setFontSize(26);
+
     doc.setFont('helvetica', 'bold');
-    doc.text('ORDEM DE SERVIÇO', 105, 25, { align: 'center' });
+    doc.setTextColor(15, 23, 42); // slate-900
+    doc.setFontSize(13);
+    doc.text('RELATÓRIO OPERACIONAL', textStartX, 19);
     
+    doc.setFontSize(7.5);
+    doc.setTextColor(71, 85, 105); // slate-600
+    doc.text('MANUTENÇÃO, INSPEÇÃO & CONTROLE OPERACIONAL DE ATIVOS', textStartX, 24);
+    
+    doc.setFontSize(6.5);
+    doc.setTextColor(148, 163, 184); // slate-400
+    doc.text('SISTEMA DE GESTÃO DE EQUIPAMENTOS INTEGRADO', textStartX, 28.5);
+
+    // --- OS STATUS & IDENTIFICATION BADGE ---
+    doc.setFillColor(248, 250, 252); // slate-50
+    doc.setDrawColor(203, 213, 225); // slate-300
+    doc.setLineWidth(0.15);
+    doc.roundedRect(138, 13, 58, 23, 2, 2, 'FD');
+
+    // Box label
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(6);
+    doc.setTextColor(148, 163, 184);
+    doc.text('IDENTIFICAÇÃO DO ATIVO', 142, 17.5);
+
     doc.setFontSize(10);
-    doc.setFont('helvetica', 'normal');
-    doc.text('OPS CONTROL - SISTEMA DE GESTÃO OPERACIONAL', 105, 35, { align: 'center' });
-    doc.text(`OS #${order.equipmentNumber}`, 105, 42, { align: 'center' });
+    doc.setTextColor(15, 23, 42);
+    doc.text(`#${order.equipmentNumber || '---'}`, 142, 22);
 
-    // Status Badge
-    const statusColor = order.status === 'Concluído' ? [16, 185, 129] : [59, 130, 246];
-    doc.setFillColor(statusColor[0], statusColor[1], statusColor[2]);
-    doc.roundedRect(160, 15, 35, 10, 2, 2, 'F');
-    doc.setTextColor(255, 255, 255);
-    doc.setFontSize(9);
+    // Little separation line inside badge
+    doc.setDrawColor(241, 245, 249);
+    doc.line(142, 24, 191, 24);
+
+    // Status visual
     doc.setFont('helvetica', 'bold');
-    doc.text(order.status.toUpperCase(), 177.5, 21.5, { align: 'center' });
+    doc.setFontSize(6);
+    doc.setTextColor(148, 163, 184);
+    doc.text('STATUS DA ORDEM', 142, 28.5);
 
-    // Main Content
-    let currentY = 65;
+    const isDone = (order.status || '').toLowerCase().includes('concl');
+    if (isDone) {
+      doc.setTextColor(13, 148, 136); // elegant teal-600
+      doc.setFontSize(7.5);
+      doc.text('CONCLUÍDO', 142, 32.5);
+    } else {
+      doc.setTextColor(29, 78, 216); // elegant blue-700
+      doc.setFontSize(7.5);
+      doc.text('EM MANUTENÇÃO', 142, 32.5);
+    }
 
-    // Equipment Info Table
+    // Horizontal separator
+    let currentY = 42;
+    doc.setDrawColor(226, 232, 240);
+    doc.setLineWidth(0.2);
+    doc.line(14, currentY, 196, currentY);
+    currentY += 6;
+
+    // --- PARSING THE VARIABLES SAFELY ---
+    const isSlingNA = order.slingCheck?.status === 'NA';
+    const isSlingNC = order.slingCheck?.status === 'NC';
+    let slingVal = 'NÃO DESIGNADA';
+    if (isSlingNA) {
+      slingVal = 'N/A (SEM ESLINGA)';
+    } else if (isSlingNC) {
+      slingVal = `[NC] ${order.slingCheck?.value || 'NÃO CONFORME'}`;
+    } else {
+      slingVal = order.slingCheck?.value ? `[OK] ${order.slingCheck.value}` : 'OK';
+    }
+    
+    const formattedStartDate = order.startDate?.toDate ? format(order.startDate.toDate(), 'dd/MM/yyyy') : '-';
+    const formattedEndDate = order.endDate?.toDate ? format(order.endDate.toDate(), 'dd/MM/yyyy') : 'EM ANDAMENTO';
+    
+    let leadTimeText = '---';
+    if (order.status === 'Concluído' && order.startDate?.toDate && order.endDate?.toDate) {
+      try {
+        const days = differenceInDays(order.endDate.toDate(), order.startDate.toDate());
+        leadTimeText = `${days} ${days === 1 ? 'DIA' : 'DIAS'}`;
+      } catch (e) {
+        leadTimeText = '---';
+      }
+    }
+
+    // --- I. TECHNICAL PARAMETERS METADATA ---
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8);
+    doc.setTextColor(15, 23, 42); // slate-900
+    doc.text('I. DADOS OPERACIONAIS E DETALHES DO ATIVO', 14, currentY);
+    currentY += 3.5;
+
+    const metaBody = [
+      [
+        'CLIENTE RESTRITO:', clientName.toUpperCase(),
+        'TAG DO ATIVO:', (order.equipmentNumber || 'N/A').toUpperCase()
+      ],
+      [
+        'FAMÍLIA / MODELO:', `${order.family} ${order.subFamily ? `• ${order.subFamily}` : ''}`.toUpperCase(),
+        'Nº DA ESLINGA / CABO:', slingVal.toUpperCase()
+      ],
+      [
+        'GRAU DE PRIORIDADE:', (order.priority || 'MÉDIA').toUpperCase(),
+        'STATUS DO PRODUTO:', order.status.toUpperCase()
+      ],
+      [
+        'REGISTRO DE INÍCIO:', formattedStartDate,
+        'DATA DE FECHAMENTO:', formattedEndDate
+      ],
+      [
+        'LEAD TIME OPERACIONAL:', leadTimeText.toUpperCase(),
+        'RESPONSÁVEL ABERTURA:', (order.createdBy || 'SISTEMA').toUpperCase()
+      ]
+    ];
+
     autoTable(doc, {
       startY: currentY,
-      head: [['INFORMAÇÕES DO EQUIPAMENTO', '']],
-      body: [
-        ['Equipamento:', `#${order.equipmentNumber}`],
-        ['Família:', order.family],
-        ['Status Atual:', order.status]
-      ],
-      theme: 'plain',
-      headStyles: { fillColor: [241, 245, 249], textColor: [30, 41, 59], fontStyle: 'bold', fontSize: 12 },
-      bodyStyles: { fontSize: 10, textColor: [71, 85, 105] },
-      columnStyles: { 0: { fontStyle: 'bold', cellWidth: 50 } }
+      body: metaBody,
+      theme: 'grid',
+      styles: {
+        fontSize: 7,
+        cellPadding: { top: 3.5, bottom: 3.5, left: 4, right: 4 },
+        lineColor: [226, 232, 240], // slate-200 (tidy subtle lines)
+        lineWidth: 0.15,
+        fontStyle: 'bold'
+      },
+      columnStyles: {
+        0: { cellWidth: 38, fontStyle: 'bold', textColor: [100, 116, 139] }, // Label (slate-500)
+        1: { cellWidth: 53, fontStyle: 'bold', textColor: [15, 23, 42] },    // Value (slate-900)
+        2: { cellWidth: 38, fontStyle: 'bold', textColor: [100, 116, 139] }, // Label (slate-500)
+        3: { cellWidth: 53, fontStyle: 'bold', textColor: [15, 23, 42] }     // Value (slate-900)
+      }
     });
 
-    currentY = (doc as any).lastAutoTable.finalY + 15;
+    currentY = (doc as any).lastAutoTable.finalY + 8;
 
-    // Client Info Table
+    // --- II. ESCOPO DO SERVIÇO ---
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8);
+    doc.setTextColor(15, 23, 42); // slate-900
+    doc.text('II. ESCOPO DO SERVIÇO', 14, currentY);
+    currentY += 3.5;
+
     autoTable(doc, {
       startY: currentY,
-      head: [['INFORMAÇÕES DO CLIENTE', '']],
+      head: [['ITEM DE INSPEÇÃO / ROTINA DE SEGURANÇA', 'STATUS (NA | OK | NÃO CONFORME)', 'OBSERVAÇÕES']],
       body: [
-        ['Razão Social:', client?.razaoSocial || 'N/A'],
-        ['CNPJ:', client?.cnpj || 'N/A']
+        ['ESTRUTURA PRIMÁRIA', (order.primaryStructureCheck?.status || 'NA'), (order.primaryStructureCheck?.value || 'SEM OBSERVAÇÕES').toUpperCase()],
+        ['ESTRUTURA SECUNDÁRIA', (order.secondaryStructureCheck?.status || 'NA'), (order.secondaryStructureCheck?.value || 'SEM OBSERVAÇÕES').toUpperCase()],
+        ['BOLSA DE EMPILHADEIRA', (order.damagedBagCheck?.status || 'NA'), (order.damagedBagCheck?.value || 'SEM OBSERVAÇÕES').toUpperCase()],
+        ['FUNDO', (order.bottomCheck?.status || 'NA'), (order.bottomCheck?.value || 'SEM OBSERVAÇÕES').toUpperCase()],
+        ['TETO', (order.roofCheck?.status || 'NA'), (order.roofCheck?.value || 'SEM OBSERVAÇÕES').toUpperCase()],
+        ['PONTO DE AMARRAÇÃO', (order.tieDownPointCheck?.status || 'NA'), (order.tieDownPointCheck?.value || 'SEM OBSERVAÇÕES').toUpperCase()],
+        ['PORTA', (order.doorCheck?.status || 'NA'), (order.doorCheck?.value || 'SEM OBSERVAÇÕES').toUpperCase()],
+        ['TAMPA', (order.lidCheck?.status || 'NA'), (order.lidCheck?.value || 'SEM OBSERVAÇÕES').toUpperCase()]
       ],
-      theme: 'plain',
-      headStyles: { fillColor: [241, 245, 249], textColor: [30, 41, 59], fontStyle: 'bold', fontSize: 12 },
-      bodyStyles: { fontSize: 10, textColor: [71, 85, 105] },
-      columnStyles: { 0: { fontStyle: 'bold', cellWidth: 50 } }
+      theme: 'grid',
+      headStyles: { 
+        fillColor: [30, 41, 59], // Slate-800
+        textColor: [255, 255, 255], 
+        fontStyle: 'bold', 
+        fontSize: 7.5,
+        halign: 'left',
+        cellPadding: { top: 4, bottom: 4, left: 5, right: 5 }
+      },
+      bodyStyles: { 
+        fontSize: 7, 
+        textColor: [51, 65, 85], // Slate-700
+        cellPadding: { top: 4, bottom: 4, left: 5, right: 5 },
+        lineColor: [226, 232, 240], // Slate-200
+        lineWidth: 0.15
+      },
+      columnStyles: { 
+        0: { fontStyle: 'bold', cellWidth: 70, textColor: [15, 23, 42] }, // Checkpoint tag
+        1: { halign: 'center', cellWidth: 45, fontStyle: 'bold' },
+        2: { cellWidth: 67, fontStyle: 'normal', textColor: [71, 85, 105] } // notes tag
+      },
+      didParseCell: (data) => {
+        if (data.section === 'body' && data.column.index === 1) {
+          const val = data.cell.text[0];
+          if (val === 'OK') {
+            data.cell.styles.textColor = [13, 148, 136]; // Real elegant teal-600
+            data.cell.styles.fillColor = [240, 253, 250]; // Teal-50
+          } else if (val === 'NA') {
+            data.cell.styles.textColor = [148, 163, 184]; // Slate-400
+            data.cell.styles.fillColor = [248, 250, 252]; // Slate-50
+          } else {
+            data.cell.styles.textColor = [239, 68, 68]; // Red-500
+            data.cell.styles.fillColor = [254, 242, 242]; // Red-50
+          }
+        }
+      }
     });
 
-    currentY = (doc as any).lastAutoTable.finalY + 15;
+    const isCCU = order.family === 'CCUs' || (order.family || '').toUpperCase().includes('CCU');
 
-    // Timeline Table
+    // --- PAGE 2 FOR CCU COMPONENT PARTS & RETRABALHO / SIGNATURES ---
+    doc.addPage();
+    
+    // Draw outer page-2 boundary frame
+    doc.setDrawColor(226, 232, 240);
+    doc.setLineWidth(0.15);
+    doc.rect(8, 8, 194, 281);
+
+    // Top margin accent bar for page 2
+    doc.setFillColor(30, 41, 59);
+    doc.rect(8, 8, 194, 2, 'F');
+
+    currentY = 18;
+
+    if (isCCU) {
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(8);
+      doc.setTextColor(15, 23, 42); // slate-900
+      doc.text('III. TROCA DE PEÇAS', 14, currentY);
+      currentY += 3.5;
+
+      autoTable(doc, {
+        startY: currentY,
+        head: [['PEÇA / COMPONENTE', 'STATUS (NA | OK | NÃO CONFORME)', 'OBSERVAÇÕES / DETALHES']],
+        body: [
+          ['ALAVANCA', (order.leverCheck?.status || 'NA'), (order.leverCheck?.value || 'SEM OBSERVAÇÕES').toUpperCase()],
+          ['SUPORTE PARA ALAVANCA', (order.leverSupportCheck?.status || 'NA'), (order.leverSupportCheck?.value || 'SEM OBSERVAÇÕES').toUpperCase()],
+          ['REBITE CABEÇA REDONDA', (order.roundHeadRivetCheck?.status || 'NA'), (order.roundHeadRivetCheck?.value || 'SEM OBSERVAÇÕES').toUpperCase()],
+          ['GARRA DO VARÃO', (order.clawCheck?.status || 'NA'), (order.clawCheck?.value || 'SEM OBSERVAÇÕES').toUpperCase()],
+          ['RETAINER', (order.retainerCheck?.status || 'NA'), (order.retainerCheck?.value || 'SEM OBSERVAÇÕES').toUpperCase()],
+          ['VARÃO', (order.rodCheck?.status || 'NA'), (order.rodCheck?.value || 'SEM OBSERVAÇÕES').toUpperCase()],
+          ['ABRAÇADEIRA DO VARÃO SIMPLES', (order.simpleRodSupportCheck?.status || 'NA'), (order.simpleRodSupportCheck?.value || 'SEM OBSERVAÇÕES').toUpperCase()],
+          ['ABRAÇADEIRA DO VARÃO ESPECIAL', (order.specialRodSupportCheck?.status || 'NA'), (order.specialRodSupportCheck?.value || 'SEM OBSERVAÇÕES').toUpperCase()],
+          ['TRAVA DO VARÃO', (order.rodLockCheck?.status || 'NA'), (order.rodLockCheck?.value || 'SEM OBSERVAÇÕES').toUpperCase()],
+          ['DOBRADIÇA', (order.hingeCheck?.status || 'NA'), (order.hingeCheck?.value || 'SEM OBSERVAÇÕES').toUpperCase()]
+        ],
+        theme: 'grid',
+        headStyles: { 
+          fillColor: [30, 41, 59], // Standardized Slate-800 header pattern
+          textColor: [255, 255, 255], 
+          fontStyle: 'bold', 
+          fontSize: 7.5,
+          halign: 'left',
+          cellPadding: { top: 4, bottom: 4, left: 5, right: 5 }
+        },
+        bodyStyles: { 
+          fontSize: 7, 
+          textColor: [51, 65, 85], // Slate-700
+          cellPadding: { top: 4, bottom: 4, left: 5, right: 5 },
+          lineColor: [226, 232, 240], // Slate-200
+          lineWidth: 0.15
+        },
+        columnStyles: { 
+          0: { fontStyle: 'bold', cellWidth: 70, textColor: [15, 23, 42] },
+          1: { halign: 'center', cellWidth: 45, fontStyle: 'bold' },
+          2: { cellWidth: 67, fontStyle: 'normal', textColor: [71, 85, 105] }
+        },
+        didParseCell: (data) => {
+          if (data.section === 'body' && data.column.index === 1) {
+            const val = data.cell.text[0];
+            if (val === 'OK') {
+              data.cell.styles.textColor = [13, 148, 136];
+              data.cell.styles.fillColor = [240, 253, 250];
+            } else if (val === 'NA') {
+              data.cell.styles.textColor = [148, 163, 184];
+              data.cell.styles.fillColor = [248, 250, 252];
+            } else {
+              data.cell.styles.textColor = [239, 68, 68];
+              data.cell.styles.fillColor = [254, 242, 242];
+            }
+          }
+        }
+      });
+
+      currentY = (doc as any).lastAutoTable.finalY + 8;
+    }
+
+    // --- IV. INDICADOR DE RETRABALHO (CONTROLE DE GARGALOS) ---
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8);
+    doc.setTextColor(15, 23, 42); // slate-900
+    doc.text(isCCU ? 'IV. INDICADOR DE RETRABALHO (CONTROLE DE GARGALOS)' : 'III. INDICADOR DE RETRABALHO (CONTROLE DE GARGALOS)', 14, currentY);
+    currentY += 3.5;
+
     autoTable(doc, {
       startY: currentY,
-      head: [['CRONOGRAMA E LEAD TIME', '']],
+      head: [['MÉTRICA OPERACIONAL', 'EXIGE AJUSTE / EXECUTADO?', 'OBSERVAÇÕES / DIRETRIZES DE REPARO']],
       body: [
-        ['Data de Início:', order.startDate?.toDate ? format(order.startDate.toDate(), 'dd/MM/yyyy') : '-'],
-        ['Data de Término:', order.endDate?.toDate ? format(order.endDate.toDate(), 'dd/MM/yyyy') : 'Em andamento'],
-        ['Lead Time Total:', order.leadTime !== undefined ? `${order.leadTime} dias` : 'Calculando...']
+        ['RETRABALHO DE SOLDAGEM / PINTURA', (order.reworkCheck?.status === 'OK' ? 'SIM' : 'NÃO'), (order.reworkCheck?.value || 'SEM OCORRÊNCIAS DE RETRABALHO DE SOLDA OU PINTURA REGISTRADAS').toUpperCase()]
       ],
-      theme: 'plain',
-      headStyles: { fillColor: [241, 245, 249], textColor: [30, 41, 59], fontStyle: 'bold', fontSize: 12 },
-      bodyStyles: { fontSize: 10, textColor: [71, 85, 105] },
-      columnStyles: { 0: { fontStyle: 'bold', cellWidth: 50 } }
+      theme: 'grid',
+      headStyles: { 
+        fillColor: [30, 41, 59], // Standardized Slate-800 header pattern
+        textColor: [255, 255, 255], 
+        fontStyle: 'bold', 
+        fontSize: 7.5,
+        halign: 'left',
+        cellPadding: { top: 4, bottom: 4, left: 5, right: 5 }
+      },
+      bodyStyles: { 
+        fontSize: 7, 
+        textColor: [51, 65, 85], // Slate-700
+        cellPadding: { top: 4, bottom: 4, left: 5, right: 5 },
+        lineColor: [226, 232, 240], // Slate-200
+        lineWidth: 0.15
+      },
+      columnStyles: { 
+        0: { fontStyle: 'bold', cellWidth: 70, textColor: [15, 23, 42] }, // Checkpoint tag
+        1: { halign: 'center', cellWidth: 45, fontStyle: 'bold' },
+        2: { cellWidth: 67, fontStyle: 'normal', textColor: [71, 85, 105] } // notes tag
+      },
+      didParseCell: (data) => {
+        if (data.section === 'body' && data.column.index === 1) {
+          const val = data.cell.text[0];
+          if (val === 'SIM') {
+            data.cell.styles.textColor = [194, 65, 12]; // Amber-700 (Alerting bottleneck!)
+            data.cell.styles.fillColor = [255, 247, 237]; // Amber-50
+          } else {
+            data.cell.styles.textColor = [13, 148, 136]; // Teal-600
+            data.cell.styles.fillColor = [240, 253, 250]; // Teal-50
+          }
+        }
+      }
     });
 
-    // Footer
+    currentY = (doc as any).lastAutoTable.finalY + 12;
+
+    // --- SIGNATURE FOOTER WITH RELATIVE OFFSET CALCULATION (PERFECT SPACING PROTECTION) ---
+    let signatureY = 258;
+    if (currentY > 238) {
+      doc.addPage();
+      currentY = 20;
+      signatureY = 80;
+      
+      // Draw outer page-2 boundary frame
+      doc.setDrawColor(226, 232, 240);
+      doc.setLineWidth(0.15);
+      doc.rect(8, 8, 194, 281);
+
+      // Top margin accent bar for page 2
+      doc.setFillColor(30, 41, 59);
+      doc.rect(8, 8, 194, 2, 'F');
+    } else {
+      signatureY = Math.max(258, currentY + 10);
+    }
+
+    doc.setDrawColor(203, 213, 225); // slate-300 lines
+    doc.setLineWidth(0.3);
+    doc.line(14, signatureY, 90, signatureY);
+    doc.line(120, signatureY, 196, signatureY);
+    
+    doc.setFontSize(6.5);
+    doc.setTextColor(148, 163, 184); // Slate-400
+    doc.setFont('helvetica', 'bold');
+    doc.text('ASSINATURA DO TÉCNICO INSPETOR', 52, signatureY + 4, { align: 'center' });
+    doc.text(`RESPONSÁVEL: ${(order.createdBy || 'SISTEMA').toUpperCase()}`, 52, signatureY + 8, { align: 'center' });
+    doc.text('ASSINATURA DA DIRETORIA / OPERAÇÕES', 158, signatureY + 4, { align: 'center' });
+
+    // --- MULTI-PAGE SECURE LOG FOOTERS ---
     const pageCount = (doc as any).internal.getNumberOfPages();
     for (let i = 1; i <= pageCount; i++) {
       doc.setPage(i);
-      doc.setDrawColor(226, 232, 240);
-      doc.line(20, 280, 190, 280);
-      doc.setFontSize(8);
-      doc.setTextColor(148, 163, 184);
+      doc.setFontSize(6.5);
+      doc.setTextColor(148, 163, 184); // Slate-400
+      doc.setFont('helvetica', 'normal');
       const now = format(new Date(), 'dd/MM/yyyy HH:mm');
-      doc.text(`Documento oficial gerado em ${now} • OPS Control Management System`, 105, 287, { align: 'center' });
-      doc.text(`Página ${i} de ${pageCount}`, 190, 287, { align: 'right' });
+      doc.text(`DOC REF: OS-${order.equipmentNumber || 'SYS'} • EMITIDO EM ${now}`, 14, 286);
+      doc.text(`CONFORMIDADE CRIPTOGRÁFICA INTERNA DE EMISSÃO`, 105, 286, { align: 'center' });
+      doc.text(`PÁGINA ${i} DE ${pageCount}`, 196, 286, { align: 'right' });
     }
     
     doc.save(`OS-${order.equipmentNumber}.pdf`);
@@ -1140,56 +1940,76 @@ function AppContent() {
 
   // Dashboard Calculations (Strictly by month for stats)
   const filteredOrders = useMemo(() => {
-    if (!selectedMonth) return orders;
-
-    const start = startOfMonth(selectedMonth);
-    const end = endOfMonth(selectedMonth);
+    let filtered = orders;
+    if (selectedMonth) {
+      const start = startOfMonth(selectedMonth);
+      const end = endOfMonth(selectedMonth);
+      filtered = filtered.filter(order => {
+        if (!order.startDate?.toDate) return false;
+        try {
+          const orderDate = order.startDate.toDate();
+          return isWithinInterval(orderDate, { start, end });
+        } catch (e) {
+          console.error("Error parsing order date:", e);
+          return false;
+        }
+      });
+    }
     
-    return orders.filter(order => {
-      if (!order.startDate?.toDate) return false;
-      try {
-        const orderDate = order.startDate.toDate();
-        return isWithinInterval(orderDate, { start, end });
-      } catch (e) {
-        console.error("Error parsing order date:", e);
-        return false;
-      }
-    });
-  }, [orders, selectedMonth]);
+    if (osTypeFilter !== 'all') {
+      filtered = filtered.filter(o => o.family === osTypeFilter);
+    }
+    
+    return filtered;
+  }, [orders, selectedMonth, osTypeFilter]);
 
   // UI Display Calculations (Inclusive for Kanban/List)
   const displayOrders = useMemo(() => {
-    if (!selectedMonth) return orders;
+    let filtered = orders;
 
-    const start = startOfMonth(selectedMonth);
-    const end = endOfMonth(selectedMonth);
-    
-    return orders.filter(order => {
-      // 1. Include if it started in this month
-      if (order.startDate?.toDate) {
-        const orderDate = order.startDate.toDate();
-        if (isWithinInterval(orderDate, { start, end })) return true;
-      }
-
-      // 2. Include if it's "Em Manutenção" AND started BEFORE this month
-      // (We don't show future maintenance orders in past months)
-      const statusStr = (order.status || '').toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-      const isMaintenance = statusStr.includes('manutencao') || 
-                           statusStr.includes('andamento') ||
-                           order.status === 'Em Manutenção';
-                           
-      if (isMaintenance && order.startDate?.toDate) {
-        const orderDate = order.startDate.toDate();
-        return orderDate < start;
-      }
+    if (selectedMonth) {
+      const start = startOfMonth(selectedMonth);
+      const end = endOfMonth(selectedMonth);
       
-      return false;
-    });
-  }, [orders, selectedMonth]);
+      filtered = filtered.filter(order => {
+        // 1. Include if it started in this month
+        if (order.startDate?.toDate) {
+          const orderDate = order.startDate.toDate();
+          if (isWithinInterval(orderDate, { start, end })) return true;
+        }
+
+        // 2. Include if it's "Em Manutenção" AND started BEFORE this month
+        // (We don't show future maintenance orders in past months)
+        const statusStr = (order.status || '').toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+        const isMaintenance = statusStr.includes('manutencao') || 
+                             statusStr.includes('andamento') ||
+                             order.status === 'Em Manutenção';
+                             
+        if (isMaintenance && order.startDate?.toDate) {
+          const orderDate = order.startDate.toDate();
+          return orderDate < start;
+        }
+        
+        return false;
+      });
+    }
+
+    if (osTypeFilter !== 'all') {
+      filtered = filtered.filter(o => o.family === osTypeFilter);
+    }
+
+    return filtered;
+  }, [orders, selectedMonth, osTypeFilter]);
 
   useEffect(() => {
     setCurrentPage(1);
   }, [viewMode, activeOrderSubTab, inProgressSearchTerm, completedSearchTerm, selectedMonth]);
+
+  const getFamilyIcon = (family: string, className = "w-4 h-4") => {
+    if (family === 'CCUs') return <LayoutGrid className={className} />;
+    if (family && family.includes('Tanque')) return <Container className={className} />;
+    return <Package className={className} />;
+  };
 
   const statsByFamily = useMemo(() => {
     const families: Record<string, { count: number, totalLeadTime: number, completedCount: number }> = {};
@@ -1509,6 +2329,19 @@ function AppContent() {
               Clientes
               {activeTab === 'clients' && <motion.div layoutId="active-pill" className="absolute right-4 w-1.5 h-1.5 bg-blue-600 dark:bg-blue-400 rounded-full" />}
             </button>
+            <button
+              onClick={() => setActiveTab('equipments')}
+              className={cn(
+                "sidebar-item w-full group",
+                activeTab === 'equipments' ? "sidebar-item-active" : "sidebar-item-inactive"
+              )}
+            >
+              <div className={cn("p-2 rounded-xl transition-all duration-300", activeTab === 'equipments' ? "bg-blue-600 text-white" : "bg-slate-50 dark:bg-slate-800 group-hover:bg-blue-50 dark:group-hover:bg-blue-900/30 group-hover:text-blue-600 dark:group-hover:text-blue-400")}>
+                <Boxes className="w-4 h-4" />
+              </div>
+              Equipamentos
+              {activeTab === 'equipments' && <motion.div layoutId="active-pill" className="absolute right-4 w-1.5 h-1.5 bg-blue-600 dark:bg-blue-400 rounded-full" />}
+            </button>
             {(currentUserRole === 'moderator' || user.email === "almeidacesar2010@gmail.com") && (
               <>
                 <button
@@ -1642,13 +2475,14 @@ function AppContent() {
                 {activeTab === 'dashboard' ? 'Painel de Produtividade' : 
                  activeTab === 'orders' ? 'Gestão de OS' :
                  activeTab === 'clients' ? 'Gestão de Clientes' : 
+                 activeTab === 'equipments' ? 'Gestão de Equipamentos' :
                  activeTab === 'settings' ? 'Configurações' : 
                  activeTab === 'audits' ? 'Auditoria de Sistema' : 'Gestão de Acessos'}
               </motion.h2>
               <div className="flex items-center gap-3 mt-2">
                 <div className="flex -space-x-2">
                   {[1,2,3].map(i => (
-                    <div key={i} className="w-5 h-5 rounded-full border-2 border-[#f8fafc] dark:border-[#020617] bg-slate-200 dark:bg-slate-800 animate-pulse" style={{ animationDelay: `${i * 200}ms` }}></div>
+                    <div key={i} className="w-5 h-5 rounded-full border-2 border-[#f8fafc] dark:border-slate-950 bg-slate-200 dark:bg-slate-800 animate-pulse" style={{ animationDelay: `${i * 200}ms` }}></div>
                   ))}
                 </div>
                 <p className="text-xs font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em]">
@@ -1656,6 +2490,7 @@ function AppContent() {
                     ? 'Performance em tempo real' 
                     : activeTab === 'orders' ? 'Controle operacional' :
                     activeTab === 'clients' ? 'Base de parceiros' :
+                    activeTab === 'equipments' ? 'Ativos registrados' :
                     activeTab === 'settings' ? 'Preferências do sistema' :
                     'Controle de segurança'}
                 </p>
@@ -1720,7 +2555,31 @@ function AppContent() {
                       clientId: '',
                       startDate: format(new Date(), 'yyyy-MM-dd'),
                       endDate: '',
-                      status: 'Em Manutenção'
+                      status: 'Em Manutenção',
+                      priority: 'Média' as const,
+                      maintenanceScope: '',
+                      slingCheck: { status: 'NA', value: '' },
+                      damagedSlingCheck: { status: 'NA', value: '' },
+                      excessiveCorrosionCheck: { status: 'NA', value: '' },
+                      primaryStructureCheck: { status: 'NA', value: '' },
+                      secondaryStructureCheck: { status: 'NA', value: '' },
+                      damagedBagCheck: { status: 'NA', value: '' },
+                      bottomCheck: { status: 'NA', value: '' },
+                      roofCheck: { status: 'NA', value: '' },
+                      tieDownPointCheck: { status: 'NA', value: '' },
+                      doorCheck: { status: 'NA', value: '' },
+                      lidCheck: { status: 'NA', value: '' },
+                      leverCheck: { status: 'NA', value: '' },
+                      leverSupportCheck: { status: 'NA', value: '' },
+                      roundHeadRivetCheck: { status: 'NA', value: '' },
+                      clawCheck: { status: 'NA', value: '' },
+                      retainerCheck: { status: 'NA', value: '' },
+                      rodCheck: { status: 'NA', value: '' },
+                      simpleRodSupportCheck: { status: 'NA', value: '' },
+                      specialRodSupportCheck: { status: 'NA', value: '' },
+                      rodLockCheck: { status: 'NA', value: '' },
+                      hingeCheck: { status: 'NA', value: '' },
+                      reworkCheck: { status: 'NA', value: '' },
                     });
                     setModalType('os'); 
                     setAccessError(null); 
@@ -1740,6 +2599,16 @@ function AppContent() {
                 >
                   <Plus className="w-5 h-5" />
                   Novo Cliente
+                </button>
+              )}
+
+              {activeTab === 'equipments' && (
+                <button
+                  onClick={() => { setModalType('equipment'); setAccessError(null); setIsModalOpen(true); }}
+                  className="btn-primary flex items-center gap-2"
+                >
+                  <Plus className="w-5 h-5" />
+                  Novo Equipamento
                 </button>
               )}
 
@@ -2180,7 +3049,35 @@ function AppContent() {
                   </div>
                 </div>
               ) : activeTab === 'orders' ? (
-                <div className="space-y-8">
+                <div className="space-y-6">
+                  {/* Equipment Type Global Filters */}
+                  <div className="flex flex-wrap items-center gap-3 bg-white/50 dark:bg-slate-900/50 p-4 rounded-[32px] border border-slate-200/50 dark:border-slate-800/50 backdrop-blur-sm">
+                    {[
+                      { id: 'all', label: 'Todos Equipamentos', icon: <Boxes className="w-4 h-4" /> },
+                      { id: 'Tanques de 1500L', label: 'Tanques 1500L', icon: <Container className="w-4 h-4" /> },
+                      { id: 'Tanques de 5000/5200L', label: 'Tanques 5000L', icon: <Container className="w-4 h-4" /> },
+                      { id: 'CCUs', label: 'CCUs', icon: <LayoutGrid className="w-4 h-4" /> },
+                      { id: 'Outros', label: 'Outros', icon: <Package className="w-4 h-4" /> }
+                    ].map(filter => (
+                      <button
+                        key={filter.id}
+                        onClick={() => {
+                          setOsTypeFilter(filter.id as any);
+                          setCurrentPage(1);
+                        }}
+                        className={cn(
+                          "px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-3 border shadow-sm active:scale-95",
+                          osTypeFilter === filter.id
+                            ? "bg-blue-600 text-white border-blue-600 shadow-lg shadow-blue-500/20"
+                            : "bg-white dark:bg-slate-900 text-slate-400 border-slate-200 dark:border-slate-800 hover:border-blue-500/30 hover:text-blue-500"
+                        )}
+                      >
+                        {filter.icon}
+                        {filter.label}
+                      </button>
+                    ))}
+                  </div>
+
                   {/* Sub-tabs, Search and View Toggle */}
                   <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
                     <div className="flex items-center gap-4">
@@ -2426,10 +3323,35 @@ function AppContent() {
                                           )}></div>
                                           
                                           <div className="flex justify-between items-start mb-4">
-                                            <span className="text-[10px] font-black text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30 px-3 py-1 rounded-full uppercase tracking-wider">
-                                              #{order.equipmentNumber}
-                                            </span>
+                                            <div className="flex flex-col gap-2">
+                                              <div className="flex items-center gap-2">
+                                                <div className="p-2 bg-slate-50 dark:bg-slate-800 rounded-xl text-slate-400">
+                                                  {getFamilyIcon(order.family, "w-4 h-4")}
+                                                </div>
+                                                <span className="text-[10px] font-black text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30 px-3 py-1 rounded-full uppercase tracking-wider">
+                                                  #{order.equipmentNumber}
+                                                </span>
+                                              </div>
+                                              {order.priority && (
+                                                <div className={cn(
+                                                  "px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest w-fit border shadow-sm",
+                                                  order.priority === 'Baixa' ? "bg-emerald-50 text-emerald-600 border-emerald-100 dark:bg-emerald-900/20 dark:text-emerald-400 dark:border-emerald-900/30" :
+                                                  order.priority === 'Alta' ? "bg-amber-50 text-amber-600 border-amber-100 dark:bg-amber-900/20 dark:text-amber-400 dark:border-amber-900/30" :
+                                                  order.priority === 'Urgente' ? "bg-rose-50 text-rose-600 border-rose-100 dark:bg-rose-900/20 dark:text-rose-400 dark:border-rose-900/30" :
+                                                  "bg-blue-50 text-blue-600 border-blue-100 dark:bg-blue-900/20 dark:text-blue-400 dark:border-blue-900/30"
+                                                )}>
+                                                  {order.priority === 'Urgente' && '🚨 '}{order.priority}
+                                                </div>
+                                              )}
+                                            </div>
                                             <div className="flex items-center gap-1">
+                                              <button 
+                                                onClick={() => handleViewOrder(order)}
+                                                className="p-2 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 rounded-xl transition-all"
+                                                title="Visualizar OS (PDF)"
+                                              >
+                                                <Eye className="w-4 h-4" />
+                                              </button>
                                               <button 
                                                 onClick={() => handleEditOrder(order)}
                                                 className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-xl transition-all"
@@ -2457,9 +3379,29 @@ function AppContent() {
                                           <h5 className="text-base font-black text-slate-900 dark:text-white mb-1 truncate tracking-tight">
                                             {client?.razaoSocial || 'Cliente não encontrado'}
                                           </h5>
-                                          <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-6 truncate">
+                                          <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-4 truncate">
                                             {order.family} {order.subFamily ? `• ${order.subFamily}` : ''}
                                           </p>
+
+                                          {order.maintenanceScope && (
+                                            <div className="mb-6 p-4 bg-slate-50/50 dark:bg-slate-800/30 rounded-2xl border border-slate-100/50 dark:border-slate-800/50 group-hover:bg-white dark:group-hover:bg-slate-800 transition-all">
+                                              <p className="text-[10px] font-black text-blue-500 dark:text-blue-400 uppercase tracking-[0.15em] mb-1.5 flex items-center gap-2">
+                                                <Wrench className="w-3.5 h-3.5" /> Comando de Serviço
+                                              </p>
+                                              <p className="text-xs text-slate-600 dark:text-slate-300 line-clamp-2 font-medium leading-relaxed italic">
+                                                "{order.maintenanceScope}"
+                                              </p>
+                                            </div>
+                                          )}
+
+                                          <div className="mb-4 flex items-center gap-2 px-1">
+                                            <div className="w-5 h-5 rounded-full bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 flex items-center justify-center font-black text-[9px] uppercase border border-blue-100/30">
+                                              {(order.createdBy || 'S').charAt(0)}
+                                            </div>
+                                            <span className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest">
+                                              Aberto por: <span className="text-slate-700 dark:text-slate-300 font-bold">{order.createdBy || 'Sistema'}</span>
+                                            </span>
+                                          </div>
                                           
                                           <div className="flex items-center justify-between pt-5 border-t border-slate-50 dark:border-slate-800/50">
                                             <div className="flex flex-col gap-1.5">
@@ -2536,20 +3478,22 @@ function AppContent() {
                           <table className="w-full text-left border-collapse">
                             <thead>
                               <tr className="bg-slate-50/50 dark:bg-slate-800/30 border-b border-slate-100 dark:border-slate-800/50">
-                                <th className="px-10 py-5 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em]">Equipamento</th>
-                                <th className="px-10 py-5 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em]">Família</th>
-                                <th className="px-10 py-5 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em]">Cliente</th>
-                                <th className="px-10 py-5 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em]">Início</th>
-                                <th className="px-10 py-5 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em]">Fim</th>
-                                <th className="px-10 py-5 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em]">Tempo</th>
-                                <th className="px-10 py-5 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em]">Status</th>
-                                <th className="px-10 py-5 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em] text-right">Ações</th>
+                                <th className="px-4 md:px-5 py-4 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em]">Prioridade</th>
+                                <th className="px-4 md:px-5 py-4 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em]">Equipamento</th>
+                                <th className="px-4 md:px-5 py-4 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em]">Família</th>
+                                <th className="px-4 md:px-5 py-4 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em]">Cliente</th>
+                                <th className="px-4 md:px-5 py-4 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em]">Início</th>
+                                <th className="px-4 md:px-5 py-4 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em]">Fim</th>
+                                <th className="px-4 md:px-5 py-4 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em]">Tempo</th>
+                                <th className="px-4 md:px-5 py-4 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em]">Responsável</th>
+                                <th className="px-4 md:px-5 py-4 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em]">Status</th>
+                                <th className="px-4 md:px-5 py-4 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em] text-right">Ações</th>
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                               {ordersList.length === 0 ? (
                                 <tr>
-                                  <td colSpan={7} className="px-10 py-20 text-center">
+                                  <td colSpan={10} className="px-4 md:px-5 py-20 text-center">
                                     <div className="flex flex-col items-center gap-3">
                                       <div className="w-16 h-16 bg-slate-50 dark:bg-slate-800 rounded-[24px] flex items-center justify-center">
                                         <ClipboardList className="w-8 h-8 text-slate-200 dark:text-slate-700" />
@@ -2562,15 +3506,31 @@ function AppContent() {
                                 const client = clients.find(c => c.id === order.clientId);
                                 return (
                                   <tr key={order.id} className="group hover:bg-slate-50/50 dark:hover:bg-slate-800/20 transition-all duration-300">
-                                    <td className="px-10 py-6">
-                                      <div className="flex items-center gap-4">
-                                        <div className="w-12 h-12 bg-blue-50 dark:bg-blue-900/30 rounded-2xl flex items-center justify-center text-blue-600 dark:text-blue-400 font-black text-[11px] shadow-inner border border-blue-100/50 dark:border-blue-800/50">
-                                          #{(order.equipmentNumber || '').slice(-2)}
+                                    <td className="px-4 md:px-5 py-4">
+                                      {order.priority && (
+                                        <div className={cn(
+                                          "px-2.5 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest border shadow-sm flex items-center justify-center gap-2 w-fit",
+                                          order.priority === 'Baixa' ? "bg-emerald-50 text-emerald-600 border-emerald-100 dark:bg-emerald-900/20 dark:text-emerald-400 dark:border-emerald-900/30" :
+                                          order.priority === 'Alta' ? "bg-amber-50 text-amber-600 border-amber-100 dark:bg-amber-900/20 dark:text-amber-400 dark:border-amber-900/30" :
+                                          order.priority === 'Urgente' ? "bg-rose-50 text-rose-600 border-rose-100 dark:bg-rose-900/20 dark:text-rose-400 dark:border-rose-900/30" :
+                                          "bg-blue-50 text-blue-600 border-blue-100 dark:bg-blue-900/20 dark:text-blue-400 dark:border-blue-900/30"
+                                        )}>
+                                          {order.priority === 'Urgente' && '🚨 '}
+                                          {order.priority}
                                         </div>
-                                        <span className="text-sm font-black text-slate-900 dark:text-white tracking-tight">#{order.equipmentNumber || '---'}</span>
+                                      )}
+                                    </td>
+                                    <td className="px-4 md:px-5 py-4">
+                                      <div className="flex items-center gap-4">
+                                        <div className="w-12 h-12 bg-blue-50 dark:bg-blue-900/30 rounded-2xl flex items-center justify-center text-blue-600 dark:text-blue-400 font-black text-[11px] shadow-inner border border-blue-100/50 dark:border-blue-800/50 flex-shrink-0">
+                                          {getFamilyIcon(order.family, "w-5 h-5")}
+                                        </div>
+                                        <div className="flex flex-col gap-1">
+                                          <span className="text-sm font-black text-slate-900 dark:text-white tracking-tight">#{order.equipmentNumber || '---'}</span>
+                                        </div>
                                       </div>
                                     </td>
-                                    <td className="px-10 py-6">
+                                    <td className="px-4 md:px-5 py-4">
                                       <div className="flex flex-col gap-1.5">
                                         <span className="px-3 py-1.5 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-xl text-[10px] font-black uppercase tracking-widest border border-slate-200/50 dark:border-slate-700/50 w-fit">
                                           {order.family}
@@ -2582,24 +3542,24 @@ function AppContent() {
                                         )}
                                       </div>
                                     </td>
-                                    <td className="px-10 py-6">
+                                    <td className="px-4 md:px-5 py-4">
                                       <div className="flex flex-col">
-                                        <span className="text-sm font-bold text-slate-700 dark:text-slate-300 truncate max-w-[200px]">{client?.razaoSocial || 'Cliente não encontrado'}</span>
+                                        <span className="text-sm font-bold text-slate-700 dark:text-slate-300 truncate max-w-[150px]">{client?.razaoSocial || 'Cliente não encontrado'}</span>
                                       </div>
                                     </td>
-                                    <td className="px-10 py-6">
+                                    <td className="px-4 md:px-5 py-4">
                                       <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400">
                                         <Calendar className="w-4 h-4 opacity-50" />
                                         <span className="text-xs font-bold">{order.startDate?.toDate ? format(order.startDate.toDate(), 'dd/MM/yyyy') : '-'}</span>
                                       </div>
                                     </td>
-                                    <td className="px-10 py-6">
+                                    <td className="px-4 md:px-5 py-4">
                                       <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400">
                                         <Calendar className="w-4 h-4 opacity-50" />
                                         <span className="text-xs font-bold">{order.endDate?.toDate ? format(order.endDate.toDate(), 'dd/MM/yyyy') : '-'}</span>
                                       </div>
                                     </td>
-                                    <td className="px-10 py-6">
+                                    <td className="px-4 md:px-5 py-4">
                                       {order.status === 'Concluído' && order.leadTime !== null && order.leadTime !== undefined ? (
                                         <div className="flex items-center gap-2 text-slate-600 dark:text-slate-400">
                                           <Timer className="w-4 h-4 text-blue-500" />
@@ -2611,12 +3571,17 @@ function AppContent() {
                                         <span className="text-slate-300 dark:text-slate-700">--</span>
                                       )}
                                     </td>
-                                    <td className="px-10 py-6">
+                                    <td className="px-4 md:px-5 py-4">
+                                      <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                                        {order.createdBy || 'Sistema'}
+                                      </span>
+                                    </td>
+                                    <td className="px-4 md:px-5 py-4">
                                       <button 
                                         onClick={() => handleUpdateStatus(order.id, order.status)}
                                         disabled={updatingStatusId === order.id}
                                         className={cn(
-                                          "px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-[0.1em] transition-all shadow-sm active:scale-95 border flex items-center gap-2",
+                                          "px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-[0.1em] transition-all shadow-sm active:scale-95 border flex items-center gap-2",
                                           order.status === 'Concluído' 
                                             ? "bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400 border-emerald-100 dark:border-emerald-900/30" 
                                             : "bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 border-blue-100 dark:border-blue-900/30",
@@ -2633,26 +3598,33 @@ function AppContent() {
                                         )}
                                       </button>
                                     </td>
-                                    <td className="px-10 py-6 text-right">
-                                      <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-all duration-300">
+                                    <td className="px-4 md:px-5 py-4 text-right">
+                                      <div className="flex items-center justify-end gap-2 opacity-100 md:opacity-60 md:group-hover:opacity-100 transition-all duration-300">
+                                        <button 
+                                          onClick={() => handleViewOrder(order)}
+                                          title="Visualizar OS (PDF)"
+                                          className="p-2.5 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 rounded-xl transition-all"
+                                        >
+                                          <Eye className="w-5 h-5" />
+                                        </button>
                                         <button 
                                           onClick={() => generatePDF(order)}
                                           title="Baixar PDF"
-                                          className="p-3 text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-2xl transition-all"
+                                          className="p-2.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-xl transition-all"
                                         >
                                           <FileText className="w-5 h-5" />
                                         </button>
                                         <button 
                                           onClick={() => handleEditOrder(order)}
                                           title="Editar OS"
-                                          className="p-3 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 rounded-2xl transition-all"
+                                          className="p-2.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 rounded-xl transition-all"
                                         >
                                           <Edit className="w-5 h-5" />
                                         </button>
                                         <button 
                                           onClick={() => handleDeleteOrder(order.id)}
                                           title="Excluir OS"
-                                          className="p-3 text-slate-300 dark:text-slate-600 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/30 rounded-2xl transition-all"
+                                          className="p-2.5 text-slate-300 dark:text-slate-600 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/30 rounded-xl transition-all"
                                         >
                                           <Trash2 className="w-5 h-5" />
                                         </button>
@@ -2810,6 +3782,27 @@ function AppContent() {
                             </button>
                           </div>
                         </div>
+
+                        {(currentUserRole === 'admin' || user?.email === "almeidacesar2010@gmail.com") && (
+                          <div className="pt-6 border-t border-slate-100 dark:border-slate-800">
+                            <label className="text-[11px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-4 block">Ações Administrativas</label>
+                            <div className="bg-slate-50 dark:bg-slate-800/50 p-6 rounded-[32px] border border-slate-100 dark:border-slate-700">
+                              <div className="flex items-center justify-between gap-6">
+                                <div>
+                                  <h4 className="text-sm font-black text-slate-900 dark:text-white tracking-tight">Importação de Ativos OEG</h4>
+                                  <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest mt-1">Carregar lista completa de tanques pré-definidos</p>
+                                </div>
+                                <button
+                                  onClick={seedRealEquipments}
+                                  disabled={isSubmitting}
+                                  className="px-8 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all shadow-xl shadow-indigo-500/20 disabled:opacity-50 active:scale-95"
+                                >
+                                  {isSubmitting ? 'Importando...' : 'Iniciar Importação'}
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        )}
 
                         <div className="pt-6 border-t border-slate-100 dark:border-slate-800">
                           <label className="text-[11px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-6 block">Seu Perfil</label>
@@ -3025,7 +4018,7 @@ function AppContent() {
                               </div>
                             </td>
                             <td className="px-8 py-5 text-right">
-                              <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-all duration-300">
+                              <div className="flex items-center justify-end gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-all duration-300">
                                 <button
                                   onClick={() => {
                                     setConfirmModal({
@@ -3074,6 +4067,95 @@ function AppContent() {
                   </div>
                 </div>
               </div>
+              ) : activeTab === 'equipments' ? (
+                <div className="space-y-6">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight uppercase leading-none">Gestão de Equipamentos</h3>
+                      <p className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em] mt-2">Ativos físicos e containers registrados</p>
+                    </div>
+                    {equipments.length === 0 && (
+                      <button 
+                        onClick={seedRealEquipments}
+                        disabled={isSubmitting}
+                        className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-8 py-4 rounded-2xl font-black text-xs uppercase tracking-widest transition-all shadow-xl shadow-indigo-500/20 active:scale-95"
+                      >
+                        <Upload className="w-5 h-5" />
+                        {isSubmitting ? 'Importando...' : 'Iniciar Importação em Massa'}
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="bg-white dark:bg-slate-900 rounded-[32px] border border-slate-200/60 dark:border-slate-800 shadow-sm overflow-hidden transition-colors duration-300">
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left border-collapse">
+                        <thead>
+                          <tr className="bg-slate-50/50 dark:bg-slate-800/30 border-b border-slate-100 dark:border-slate-800/50">
+                            <th className="px-10 py-5 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em]">Equipamento (Tag)</th>
+                            <th className="px-10 py-5 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em]">Tipo / Família</th>
+                            <th className="px-10 py-5 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em]">Subfamília</th>
+                            <th className="px-10 py-5 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em]">Data de Cadastro</th>
+                            <th className="px-10 py-5 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em] text-right">Ações</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                          {equipments.length === 0 ? (
+                            <tr>
+                              <td colSpan={5} className="px-10 py-20 text-center">
+                                <div className="flex flex-col items-center gap-3">
+                                  <div className="w-16 h-16 bg-slate-50 dark:bg-slate-800 rounded-[24px] flex items-center justify-center">
+                                    <Boxes className="w-8 h-8 text-slate-200 dark:text-slate-700" />
+                                  </div>
+                                  <p className="text-sm font-black text-slate-300 dark:text-slate-600 uppercase tracking-widest">Nenhum equipamento registrado</p>
+                                  <button
+                                    onClick={seedRealEquipments}
+                                    disabled={isSubmitting}
+                                    className="mt-4 px-8 py-3 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded-2xl font-black text-[10px] uppercase tracking-widest border border-indigo-100 dark:border-indigo-800 transition-all hover:bg-indigo-100 dark:hover:bg-indigo-900/50 active:scale-95"
+                                  >
+                                    Verificado: Importar Frota Completa
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          ) : equipments.map((equipment) => (
+                            <tr key={equipment.id} className="group hover:bg-slate-50/50 dark:hover:bg-slate-800/20 transition-all duration-300">
+                              <td className="px-10 py-6">
+                                <span className="text-sm font-black text-slate-900 dark:text-white tracking-tight uppercase">{equipment.tag}</span>
+                              </td>
+                              <td className="px-10 py-6">
+                                <span className={cn(
+                                  "px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest border transition-colors",
+                                  equipment.family === 'CCUs' ? "bg-blue-50 text-blue-600 border-blue-100 dark:bg-blue-900/20 dark:text-blue-400 dark:border-blue-900/30" :
+                                  equipment.family.includes('1500') ? "bg-amber-50 text-amber-600 border-amber-100 dark:bg-amber-900/20 dark:text-amber-400 dark:border-amber-900/30" :
+                                  equipment.family.includes('5000') ? "bg-indigo-50 text-indigo-600 border-indigo-100 dark:bg-indigo-900/20 dark:text-indigo-400 dark:border-indigo-900/30" :
+                                  "bg-slate-50 text-slate-600 border-slate-100 dark:bg-slate-900/20 dark:text-slate-400 dark:border-slate-800"
+                                )}>
+                                  {equipment.family}
+                                </span>
+                              </td>
+                              <td className="px-10 py-6">
+                                <span className="text-xs font-bold text-slate-400 uppercase tracking-widest">{equipment.subFamily || 'N/A'}</span>
+                              </td>
+                              <td className="px-10 py-6">
+                                <span className="text-xs font-bold text-slate-400">
+                                  {equipment.createdAt?.toDate ? format(equipment.createdAt.toDate(), 'dd/MM/yyyy') : '-'}
+                                </span>
+                              </td>
+                              <td className="px-10 py-6 text-right">
+                                <button 
+                                  onClick={() => handleDeleteEquipment(equipment.id)}
+                                  className="p-3 text-slate-300 dark:text-slate-600 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/30 rounded-2xl transition-all opacity-100 md:opacity-0 md:group-hover:opacity-100"
+                                >
+                                  <Trash2 className="w-5 h-5" />
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
               ) : (
                 <div className="space-y-6">
                   <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200/60 dark:border-slate-800 shadow-sm overflow-hidden transition-colors duration-300">
@@ -3217,7 +4299,7 @@ function AppContent() {
                                     }
                                   });
                                 }}
-                                className="p-2 text-slate-300 dark:text-slate-600 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-xl transition-all opacity-0 group-hover:opacity-100"
+                                className="p-2 text-slate-300 dark:text-slate-600 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-xl transition-all opacity-100 md:opacity-0 md:group-hover:opacity-100"
                               >
                                 <Trash2 className="w-4 h-4" />
                               </button>
@@ -3398,7 +4480,7 @@ function AppContent() {
       {/* Modal Form */}
       <AnimatePresence>
         {isModalOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-1.5 sm:p-3 md:p-4">
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -3410,148 +4492,521 @@ function AppContent() {
               initial={{ opacity: 0, scale: 0.95, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="relative w-full max-w-lg bg-white dark:bg-slate-900 rounded-[32px] shadow-2xl overflow-hidden border border-slate-100 dark:border-slate-800 transition-colors duration-300"
+              className={cn(
+                "relative w-full bg-white dark:bg-slate-900 rounded-[28px] shadow-2xl overflow-hidden border border-slate-200 dark:border-slate-800 transition-all duration-300 flex flex-col",
+                modalType === 'os' ? "max-w-6xl xl:max-w-7xl w-full h-[98vh] my-auto" : "max-w-lg"
+              )}
             >
-              <div className="p-8 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50/50 dark:bg-slate-950/50">
+              <div className="p-4 sm:p-6 border-b border-slate-100 dark:border-slate-800 flex flex-wrap items-center justify-between gap-4 bg-slate-50/50 dark:bg-slate-950/50">
                 <div>
-                  <h3 className="text-xl font-black text-slate-900 dark:text-white tracking-tight">
-                    {modalType === 'os' ? (editingOrder ? 'Editar Ordem de Serviço' : 'Nova Ordem de Serviço') : 
-                     modalType === 'client' ? 'Novo Cliente' : 'Novo Acesso'}
+                  <h3 className="text-xl font-black text-slate-900 dark:text-white tracking-tight flex items-center gap-2">
+                    {modalType === 'os' ? (
+                      editingOrder ? `Editar OS #${editingOrder.equipmentNumber}` : 'Nova Ordem de Serviço'
+                    ) :
+                      modalType === 'client' ? 'Novo Cliente' :
+                      modalType === 'equipment' ? 'Novo Equipamento' : 'Novo Acesso'}
                   </h3>
-                  <p className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest mt-1">Preencha os dados abaixo</p>
+                  <p className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest mt-1">
+                    {modalType === 'os' 
+                      ? 'Preenchimento em tempo real idêntico ao documento oficial PDF'
+                      : 'Preencha os dados abaixo'}
+                  </p>
                 </div>
+
+                {modalType === 'os' && (
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => generatePDF(editingOrder || { ...formData, id: 'preview' })}
+                      className="px-4 py-2 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/50 rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center gap-2 border border-blue-200 dark:border-blue-800 shadow-sm cursor-pointer"
+                      title="Baixar PDF Oficial"
+                    >
+                      <FileText className="w-4 h-4" />
+                      <span className="hidden sm:inline">Baixar PDF</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => window.print()}
+                      className="px-4 py-2 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center gap-2 border border-slate-200 dark:border-slate-700 shadow-sm cursor-pointer"
+                      title="Imprimir OS"
+                    >
+                      <Printer className="w-4 h-4" />
+                      <span className="hidden sm:inline">Imprimir</span>
+                    </button>
+                  </div>
+                )}
+
                 <button 
                   onClick={() => { setIsModalOpen(false); setEditingOrder(null); }}
-                  className="p-2 hover:bg-white dark:hover:bg-slate-800 hover:shadow-sm rounded-xl transition-all group"
+                  className="p-2 hover:bg-white dark:hover:bg-slate-800 hover:shadow-sm rounded-xl transition-all group cursor-pointer"
                 >
                   <Plus className="w-6 h-6 text-slate-400 rotate-45 group-hover:text-red-500 transition-colors" />
                 </button>
               </div>
 
               {modalType === 'os' ? (
-                <form onSubmit={handleSubmit} className="p-8 space-y-6">
-                  <div className="grid grid-cols-2 gap-6">
-                    <div className="space-y-2">
-                      <label className="text-[11px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Equipamento</label>
-                      <input
-                        required
-                        type="text"
-                        placeholder="Ex: EQ-123"
-                        className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all font-bold text-slate-900 dark:text-white placeholder:text-slate-300 dark:placeholder:text-slate-600"
-                        value={formData.equipmentNumber}
-                        onChange={e => setFormData({...formData, equipmentNumber: e.target.value})}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <label className="text-[11px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Família</label>
-                      <select
-                        required
-                        className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all font-bold text-slate-900 dark:text-white cursor-pointer"
-                        value={['CCUs', 'Tanques de 1500L', 'Tanques de 5000/5200L', ''].includes(formData.family) ? formData.family : 'Outros'}
-                        onChange={e => {
-                          const val = e.target.value;
-                          if (val === 'Outros') {
-                            setFormData({...formData, family: 'Outros', otherFamily: '', subFamily: ''});
-                          } else {
-                            setFormData({...formData, family: val, otherFamily: '', subFamily: ''});
-                          }
-                        }}
-                      >
-                        <option value="">Selecione a Família</option>
-                        <option value="CCUs">CCUs</option>
-                        <option value="Tanques de 1500L">Tanques de 1500L</option>
-                        <option value="Tanques de 5000/5200L">Tanques de 5000/5200L</option>
-                        <option value="Outros">Outros</option>
-                      </select>
-                    </div>
-                  </div>
+                <div className="flex-1 overflow-y-auto custom-scrollbar p-2 sm:p-4 md:p-6 bg-slate-100/80 dark:bg-slate-950/90">
+                  <form onSubmit={handleSubmit} className="w-full max-w-[1140px] mx-auto bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100 rounded-3xl border-2 border-slate-200/90 dark:border-slate-800 shadow-2xl p-6 sm:p-10 md:p-12 space-y-8 font-sans my-1">
+                    {/* Document Header Accent Strip */}
+                    <div className="h-2.5 bg-slate-800 dark:bg-slate-700 w-full rounded-t -mt-5 sm:-mt-8 md:-mt-12 -mx-5 sm:-mx-8 md:-mx-12 mb-6"></div>
 
-                  <div className="space-y-2">
-                    <label className="text-[11px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Subfamília (Modelo)</label>
-                    <button
-                      type="button"
-                      disabled={formData.family !== 'CCUs'}
-                      onClick={() => setIsSubFamilyModalOpen(true)}
-                      className={cn(
-                        "w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none transition-all font-bold text-left flex items-center justify-between group",
-                        formData.family !== 'CCUs' ? "opacity-40 cursor-not-allowed text-slate-400" : "text-slate-900 dark:text-white hover:border-blue-500/50"
-                      )}
-                    >
-                      <span className="truncate">
-                        {formData.subFamily || (formData.family === 'CCUs' ? 'Selecionar Modelo' : 'Não aplicável')}
-                      </span>
-                      <LayoutGrid className={cn(
-                        "w-4 h-4 transition-colors",
-                        formData.family === 'CCUs' ? "text-blue-500" : "text-slate-300 dark:text-slate-700"
-                      )} />
-                    </button>
-                    {formData.family === 'CCUs' && !formData.subFamily && (
-                      <p className="text-[9px] font-bold text-rose-500 uppercase tracking-widest ml-1">Seleção obrigatória para CCUs</p>
+                    {/* Document Top Header */}
+                    <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6 pb-6 border-b border-slate-200 dark:border-slate-800">
+                      <div className="flex items-center gap-4">
+                        {logoUrl ? (
+                          <img src={logoUrl} alt="Logo" className="w-16 h-16 object-contain" />
+                        ) : (
+                          <div className="w-14 h-14 rounded-2xl bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900 flex items-center justify-center font-black text-xl shadow-md">
+                            OS
+                          </div>
+                        )}
+                        <div>
+                          <h2 className="text-xl font-black tracking-tight text-slate-900 dark:text-white uppercase">
+                            RELATÓRIO OPERACIONAL
+                          </h2>
+                          <p className="text-xs font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider">
+                            MANUTENÇÃO, INSPEÇÃO & CONTROLE OPERACIONAL DE ATIVOS
+                          </p>
+                          <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest mt-0.5">
+                            SISTEMA DE GESTÃO DE EQUIPAMENTOS INTEGRADO
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="px-5 py-3 rounded-2xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 min-w-[260px] shadow-sm space-y-2">
+                        <div>
+                          <span className="text-[9px] font-black uppercase text-slate-400 tracking-wider block">
+                            TAG / IDENTIFICAÇÃO DO ATIVO *
+                          </span>
+                          <input
+                            type="text"
+                            required
+                            list="equipment-list"
+                            value={formData.equipmentNumber}
+                            onChange={e => {
+                              const val = e.target.value.toUpperCase();
+                              const matched = equipments.find(eq => eq.tag.toUpperCase() === val);
+                              if (matched) {
+                                const isPredefined = ['CCUs', 'Tanques de 1500L', 'Tanques de 5000/5200L'].includes(matched.family);
+                                setFormData(prev => ({
+                                  ...prev,
+                                  equipmentNumber: val,
+                                  family: isPredefined ? matched.family : 'Outros',
+                                  otherFamily: isPredefined ? '' : matched.family,
+                                  subFamily: matched.subFamily || ''
+                                }));
+                              } else {
+                                setFormData(prev => ({ ...prev, equipmentNumber: val }));
+                              }
+                            }}
+                            placeholder="Ex: CCU-001"
+                            className="w-full mt-0.5 px-3 py-1.5 text-base font-black uppercase bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          />
+                          <datalist id="equipment-list">
+                            {equipments.map(e => (
+                              <option key={e.id} value={e.tag}>{e.family} {e.subFamily ? `(${e.subFamily})` : ''}</option>
+                            ))}
+                          </datalist>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-200 dark:border-slate-800">
+                          <div>
+                            <span className="text-[9px] font-black uppercase text-slate-400 tracking-wider block">
+                              STATUS
+                            </span>
+                            <select
+                              value={formData.status}
+                              onChange={e => setFormData({ ...formData, status: e.target.value as any })}
+                              className="w-full mt-0.5 px-2 py-1 text-[11px] font-black uppercase bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-900 dark:text-white cursor-pointer"
+                            >
+                              <option value="Em Manutenção">EM MANUTENÇÃO</option>
+                              <option value="Aguardando Peças">AGUARDANDO PEÇAS</option>
+                              <option value="Concluído">CONCLUÍDO</option>
+                            </select>
+                          </div>
+
+                          <div>
+                            <span className="text-[9px] font-black uppercase text-slate-400 tracking-wider block">
+                              PRIORIDADE
+                            </span>
+                            <select
+                              value={formData.priority}
+                              onChange={e => setFormData({ ...formData, priority: e.target.value as any })}
+                              className="w-full mt-0.5 px-2 py-1 text-[11px] font-black uppercase bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-900 dark:text-white cursor-pointer"
+                            >
+                              <option value="Baixa">BAIXA</option>
+                              <option value="Média">MÉDIA</option>
+                              <option value="Alta">ALTA</option>
+                              <option value="Urgente">URGENTE</option>
+                            </select>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* SEÇÃO I */}
+                    <div className="space-y-3">
+                      <h3 className="text-xs font-black text-slate-900 dark:text-white uppercase tracking-wider flex items-center gap-2">
+                        <span className="w-2.5 h-2.5 rounded-full bg-slate-800 dark:bg-slate-300"></span>
+                        I. DADOS OPERACIONAIS E DETALHES DO ATIVO
+                      </h3>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-slate-50/90 dark:bg-slate-900/70 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 text-xs">
+                        <div className="space-y-1">
+                          <label className="font-bold text-slate-500 uppercase text-[10px] block">CLIENTE RESTRITO *</label>
+                          <select
+                            required
+                            value={formData.clientId}
+                            onChange={e => setFormData({ ...formData, clientId: e.target.value })}
+                            className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-xs uppercase text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none cursor-pointer"
+                          >
+                            <option value="">SELECIONE UM CLIENTE</option>
+                            <option value="na">NÃO DEFINIDO / N/A</option>
+                            {clients.map(c => (
+                              <option key={c.id} value={c.id}>{c.razaoSocial}</option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div className="space-y-1">
+                          <label className="font-bold text-slate-500 uppercase text-[10px] block">FAMÍLIA / TIPO DE OS *</label>
+                          <div className="flex gap-2">
+                            <select
+                              required
+                              value={formData.family}
+                              onChange={e => {
+                                const val = e.target.value;
+                                if (val === 'Outros') {
+                                  setFormData({ ...formData, family: 'Outros', otherFamily: '', subFamily: '' });
+                                } else {
+                                  setFormData({ ...formData, family: val, otherFamily: '', subFamily: '' });
+                                }
+                              }}
+                              className="flex-1 px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-xs uppercase text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none cursor-pointer"
+                            >
+                              <option value="">SELECIONE O TIPO</option>
+                              <option value="CCUs">CCUs (Containers & Baskets)</option>
+                              <option value="Tanques de 1500L">Tanques de 1500L</option>
+                              <option value="Tanques de 5000/5200L">Tanques de 5000/5200L</option>
+                              <option value="Outros">Outros Equipamentos</option>
+                            </select>
+
+                            {formData.family === 'CCUs' && (
+                              <button
+                                type="button"
+                                onClick={() => setIsSubFamilyModalOpen(true)}
+                                className="px-3 py-2 bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-300 border border-blue-300 dark:border-blue-700 rounded-xl font-black text-xs uppercase hover:bg-blue-100 transition-all shrink-0 cursor-pointer"
+                              >
+                                {formData.subFamily || 'Modelo...'}
+                              </button>
+                            )}
+                          </div>
+                          {formData.family === 'CCUs' && !formData.subFamily && (
+                            <p className="text-[9px] font-bold text-rose-500 uppercase tracking-widest mt-1">Seleção obrigatória do modelo CCU</p>
+                          )}
+                          {formData.family === 'Outros' && (
+                            <input
+                              type="text"
+                              required
+                              placeholder="Especifique a família..."
+                              value={formData.otherFamily}
+                              onChange={e => setFormData({ ...formData, otherFamily: e.target.value })}
+                              className="w-full mt-2 px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-xs uppercase text-slate-900 dark:text-white"
+                            />
+                          )}
+                        </div>
+
+                        <div className="space-y-1">
+                          <label className="font-bold text-slate-500 uppercase text-[10px] block">Nº DA ESLINGA / CABO DE AÇO</label>
+                          <div className="flex items-center gap-2">
+                            <div className="inline-flex bg-slate-200 dark:bg-slate-800 p-0.5 rounded-xl border border-slate-300 dark:border-slate-700 shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => setFormData({ ...formData, slingCheck: { ...formData.slingCheck, status: 'OK' } })}
+                                className={cn("px-2.5 py-1 text-[10px] font-black rounded-lg transition-all cursor-pointer", formData.slingCheck.status === 'OK' ? "bg-emerald-600 text-white" : "text-slate-500")}
+                              >OK</button>
+                              <button
+                                type="button"
+                                onClick={() => setFormData({ ...formData, slingCheck: { ...formData.slingCheck, status: 'NC' } })}
+                                className={cn("px-2.5 py-1 text-[10px] font-black rounded-lg transition-all cursor-pointer", formData.slingCheck.status === 'NC' ? "bg-rose-600 text-white" : "text-slate-500")}
+                              >NC</button>
+                              <button
+                                type="button"
+                                onClick={() => setFormData({ ...formData, slingCheck: { ...formData.slingCheck, status: 'NA' } })}
+                                className={cn("px-2.5 py-1 text-[10px] font-black rounded-lg transition-all cursor-pointer", formData.slingCheck.status === 'NA' ? "bg-slate-700 text-white dark:bg-slate-300 dark:text-slate-900" : "text-slate-500")}
+                              >N/A</button>
+                            </div>
+                            <input
+                              type="text"
+                              placeholder="Digite o número da eslinga..."
+                              value={formData.slingCheck.value}
+                              onChange={e => setFormData({ ...formData, slingCheck: { ...formData.slingCheck, value: e.target.value } })}
+                              className="flex-1 px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-xs uppercase text-slate-900 dark:text-white"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="space-y-1">
+                            <label className="font-bold text-slate-500 uppercase text-[10px] block">INÍCIO MANUTENÇÃO *</label>
+                            <input
+                              type="date"
+                              required
+                              value={formData.startDate}
+                              onChange={e => setFormData({ ...formData, startDate: e.target.value })}
+                              className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-xs text-slate-900 dark:text-white"
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <label className="font-bold text-slate-500 uppercase text-[10px] block">FECHAMENTO (OPCIONAL)</label>
+                            <input
+                              type="date"
+                              value={formData.endDate}
+                              onChange={e => setFormData({ ...formData, endDate: e.target.value })}
+                              className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-xs text-slate-900 dark:text-white"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* SEÇÃO II */}
+                    <div className="space-y-3">
+                      <h3 className="text-xs font-black text-slate-900 dark:text-white uppercase tracking-wider flex items-center gap-2">
+                        <span className="w-2.5 h-2.5 rounded-full bg-slate-800 dark:bg-slate-300"></span>
+                        II. ESCOPO DO SERVIÇO & INSPEÇÃO INICIAL
+                      </h3>
+
+                      <div className="overflow-hidden rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
+                        <table className="w-full text-left text-xs">
+                          <thead className="bg-slate-800 dark:bg-slate-800 text-white font-black uppercase text-[10px] tracking-wider">
+                            <tr>
+                              <th className="py-3 px-4">ITEM DE INSPEÇÃO / ROTINA DE SEGURANÇA</th>
+                              <th className="py-3 px-4 text-center w-36">STATUS</th>
+                              <th className="py-3 px-4">OBSERVAÇÕES / DETALHES</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+                            <DocInspectionTableRow label="ESTRUTURA PRIMÁRIA" value={formData.primaryStructureCheck} onToggle={(status) => setFormData({...formData, primaryStructureCheck: { ...formData.primaryStructureCheck, status }})} onValueChange={(value) => setFormData({...formData, primaryStructureCheck: { ...formData.primaryStructureCheck, value }})} />
+                            <DocInspectionTableRow label="ESTRUTURA SECUNDÁRIA" value={formData.secondaryStructureCheck} onToggle={(status) => setFormData({...formData, secondaryStructureCheck: { ...formData.secondaryStructureCheck, status }})} onValueChange={(value) => setFormData({...formData, secondaryStructureCheck: { ...formData.secondaryStructureCheck, value }})} />
+                            <DocInspectionTableRow label="BOLSA DE EMPILHADEIRA" value={formData.damagedBagCheck} onToggle={(status) => setFormData({...formData, damagedBagCheck: { ...formData.damagedBagCheck, status }})} onValueChange={(value) => setFormData({...formData, damagedBagCheck: { ...formData.damagedBagCheck, value }})} />
+                            <DocInspectionTableRow label="ESTRUTURA DO FUNDO (SOALHO)" value={formData.bottomCheck} onToggle={(status) => setFormData({...formData, bottomCheck: { ...formData.bottomCheck, status }})} onValueChange={(value) => setFormData({...formData, bottomCheck: { ...formData.bottomCheck, value }})} />
+                            <DocInspectionTableRow label="ESTRUTURA DO TETO (COBERTURA)" value={formData.roofCheck} onToggle={(status) => setFormData({...formData, roofCheck: { ...formData.roofCheck, status }})} onValueChange={(value) => setFormData({...formData, roofCheck: { ...formData.roofCheck, value }})} />
+                            <DocInspectionTableRow label="PONTOS DE AMARRAÇÃO / OLHAIS" value={formData.tieDownPointCheck} onToggle={(status) => setFormData({...formData, tieDownPointCheck: { ...formData.tieDownPointCheck, status }})} onValueChange={(value) => setFormData({...formData, tieDownPointCheck: { ...formData.tieDownPointCheck, value }})} />
+                            <DocInspectionTableRow label="PORTA DE ACESSO" value={formData.doorCheck} onToggle={(status) => setFormData({...formData, doorCheck: { ...formData.doorCheck, status }})} onValueChange={(value) => setFormData({...formData, doorCheck: { ...formData.doorCheck, value }})} />
+                            <DocInspectionTableRow label="TAMPA DE INSPEÇÃO / ESCOATILHA" value={formData.lidCheck} onToggle={(status) => setFormData({...formData, lidCheck: { ...formData.lidCheck, status }})} onValueChange={(value) => setFormData({...formData, lidCheck: { ...formData.lidCheck, value }})} />
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+
+                    {/* SEÇÃO III - Visível apenas para CCUs */}
+                    {(formData.family === 'CCUs' || formData.family === 'CCU' || (formData.family === 'Outros' && formData.otherFamily.toUpperCase().includes('CCU'))) && (
+                      <div className="space-y-3">
+                        <h3 className="text-xs font-black text-slate-900 dark:text-white uppercase tracking-wider flex items-center gap-2">
+                          <span className="w-2.5 h-2.5 rounded-full bg-slate-800 dark:bg-slate-300"></span>
+                          III. TROCA DE PEÇAS & MANUTENÇÃO DE COMPONENTES
+                        </h3>
+
+                        <div className="overflow-hidden rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
+                          <table className="w-full text-left text-xs">
+                            <thead className="bg-slate-800 dark:bg-slate-800 text-white font-black uppercase text-[10px] tracking-wider">
+                              <tr>
+                                <th className="py-3 px-4">PEÇA / COMPONENTE</th>
+                                <th className="py-3 px-4 text-center w-36">STATUS</th>
+                                <th className="py-3 px-4">OBSERVAÇÕES / DETALHES</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+                              <DocInspectionTableRow label="ALAVANCA DE ACIONAMENTO" value={formData.leverCheck} onToggle={(status) => setFormData({...formData, leverCheck: { ...formData.leverCheck, status }})} onValueChange={(value) => setFormData({...formData, leverCheck: { ...formData.leverCheck, value }})} />
+                              <DocInspectionTableRow label="SUPORTE DA ALAVANCA" value={formData.leverSupportCheck} onToggle={(status) => setFormData({...formData, leverSupportCheck: { ...formData.leverSupportCheck, status }})} onValueChange={(value) => setFormData({...formData, leverSupportCheck: { ...formData.leverSupportCheck, value }})} />
+                              <DocInspectionTableRow label="REBITE CABEÇA REDONDA" value={formData.roundHeadRivetCheck} onToggle={(status) => setFormData({...formData, roundHeadRivetCheck: { ...formData.roundHeadRivetCheck, status }})} onValueChange={(value) => setFormData({...formData, roundHeadRivetCheck: { ...formData.roundHeadRivetCheck, value }})} />
+                              <DocInspectionTableRow label="GARRA DO VARÃO" value={formData.clawCheck} onToggle={(status) => setFormData({...formData, clawCheck: { ...formData.clawCheck, status }})} onValueChange={(value) => setFormData({...formData, clawCheck: { ...formData.clawCheck, value }})} />
+                              <DocInspectionTableRow label="RETAINER (RETENTOR)" value={formData.retainerCheck} onToggle={(status) => setFormData({...formData, retainerCheck: { ...formData.retainerCheck, status }})} onValueChange={(value) => setFormData({...formData, retainerCheck: { ...formData.retainerCheck, value }})} />
+                              <DocInspectionTableRow label="VARÃO DE FECHAMENTO" value={formData.rodCheck} onToggle={(status) => setFormData({...formData, rodCheck: { ...formData.rodCheck, status }})} onValueChange={(value) => setFormData({...formData, rodCheck: { ...formData.rodCheck, value }})} />
+                              <DocInspectionTableRow label="ABRAÇADEIRA DO VARÃO SIMPLES" value={formData.simpleRodSupportCheck} onToggle={(status) => setFormData({...formData, simpleRodSupportCheck: { ...formData.simpleRodSupportCheck, status }})} onValueChange={(value) => setFormData({...formData, simpleRodSupportCheck: { ...formData.simpleRodSupportCheck, value }})} />
+                              <DocInspectionTableRow label="ABRAÇADEIRA DO VARÃO ESPECIAL" value={formData.specialRodSupportCheck} onToggle={(status) => setFormData({...formData, specialRodSupportCheck: { ...formData.specialRodSupportCheck, status }})} onValueChange={(value) => setFormData({...formData, specialRodSupportCheck: { ...formData.specialRodSupportCheck, value }})} />
+                              <DocInspectionTableRow label="TRAVA DO VARÃO" value={formData.rodLockCheck} onToggle={(status) => setFormData({...formData, rodLockCheck: { ...formData.rodLockCheck, status }})} onValueChange={(value) => setFormData({...formData, rodLockCheck: { ...formData.rodLockCheck, value }})} />
+                              <DocInspectionTableRow label="DOBRADIÇA" value={formData.hingeCheck} onToggle={(status) => setFormData({...formData, hingeCheck: { ...formData.hingeCheck, status }})} onValueChange={(value) => setFormData({...formData, hingeCheck: { ...formData.hingeCheck, value }})} />
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
                     )}
-                  </div>
 
-                  {formData.family === 'Outros' && (
+                    {/* SEÇÃO IV - RETRABALHO */}
+                    <div className="space-y-3">
+                      <h3 className="text-xs font-black text-slate-900 dark:text-white uppercase tracking-wider flex items-center gap-2">
+                        <span className="w-2.5 h-2.5 rounded-full bg-slate-800 dark:bg-slate-300"></span>
+                        {(formData.family === 'CCUs' || formData.family === 'CCU' || (formData.family === 'Outros' && formData.otherFamily.toUpperCase().includes('CCU')))
+                          ? 'IV. INDICADOR DE RETRABALHO (CONTROLE DE GARGALOS)'
+                          : 'III. INDICADOR DE RETRABALHO (CONTROLE DE GARGALOS)'}
+                      </h3>
+
+                      <div className="overflow-hidden rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
+                        <table className="w-full text-left text-xs">
+                          <thead className="bg-slate-800 dark:bg-slate-800 text-white font-black uppercase text-[10px] tracking-wider">
+                            <tr>
+                              <th className="py-3 px-4 w-1/3">MÉTRICA OPERACIONAL</th>
+                              <th className="py-3 px-4 text-center w-1/4">EXIGE AJUSTE / EXECUTADO?</th>
+                              <th className="py-3 px-4">OBSERVAÇÕES / DIRETRIZES DE REPARO</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+                            <tr>
+                              <td className="py-4 px-4 font-black text-slate-900 dark:text-white uppercase text-[11px] align-top pt-5">
+                                RETRABALHO DE SOLDAGEM / PINTURA
+                              </td>
+                              <td className="py-4 px-3 text-center align-top pt-4 whitespace-nowrap">
+                                <div className="inline-flex bg-slate-100 dark:bg-slate-800 p-1 rounded-xl border border-slate-200 dark:border-slate-700 gap-1">
+                                  <button
+                                    type="button"
+                                    onClick={() => setFormData({ ...formData, reworkCheck: { ...formData.reworkCheck, status: 'OK' } })}
+                                    className={cn(
+                                      "px-4 py-1.5 rounded-lg text-xs font-black tracking-wider transition-all cursor-pointer",
+                                      formData.reworkCheck.status === 'OK'
+                                        ? "bg-amber-500 text-white shadow-md scale-105"
+                                        : "text-slate-500 hover:text-amber-600 dark:text-slate-400"
+                                    )}
+                                  >
+                                    SIM
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setFormData({ ...formData, reworkCheck: { ...formData.reworkCheck, status: 'NA' } })}
+                                    className={cn(
+                                      "px-4 py-1.5 rounded-lg text-xs font-black tracking-wider transition-all cursor-pointer",
+                                      formData.reworkCheck.status === 'NA' || formData.reworkCheck.status === 'NC'
+                                        ? "bg-teal-600 text-white shadow-md scale-105"
+                                        : "text-slate-400 hover:text-teal-600 dark:text-slate-400"
+                                    )}
+                                  >
+                                    NÃO
+                                  </button>
+                                </div>
+                              </td>
+                              <td className="py-3 px-3 align-top">
+                                <textarea
+                                  rows={2}
+                                  value={formData.reworkCheck.value || ''}
+                                  onChange={(e) => setFormData({ ...formData, reworkCheck: { ...formData.reworkCheck, value: e.target.value } })}
+                                  placeholder="Descreva as razões do retrabalho e diretrizes de reparo..."
+                                  className="w-full px-3.5 py-2 bg-slate-50 dark:bg-slate-900/80 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold uppercase tracking-wide text-slate-900 dark:text-slate-100 placeholder:text-slate-300 dark:placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                                />
+                              </td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+
+                    {/* Signatures & Footer Action Bar */}
+                    <div className="pt-8 border-t border-slate-200 dark:border-slate-800 space-y-8">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-10 text-center text-xs">
+                        <div className="space-y-2">
+                          <div className="border-b-2 border-slate-400 dark:border-slate-600 w-3/4 mx-auto mb-2"></div>
+                          <p className="font-black text-slate-900 dark:text-white uppercase">RESPONSÁVEL TÉCNICO (INSPEÇÃO)</p>
+                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">NOME / REGISTRO / ASSINATURA</p>
+                        </div>
+                        <div className="space-y-2">
+                          <div className="border-b-2 border-slate-400 dark:border-slate-600 w-3/4 mx-auto mb-2"></div>
+                          <p className="font-black text-slate-900 dark:text-white uppercase">SUPERVISOR DE OPERAÇÕES</p>
+                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">VALIDAÇÃO DE QUALIDADE & LIBERAÇÃO</p>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-4 pt-4 border-t border-slate-100 dark:border-slate-800">
+                        <button
+                          type="button"
+                          onClick={() => { setIsModalOpen(false); setEditingOrder(null); }}
+                          className="flex-1 px-6 py-4 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 font-black uppercase tracking-widest rounded-2xl transition-all hover:bg-slate-200 dark:hover:bg-slate-700 active:scale-95 text-xs cursor-pointer"
+                        >
+                          Cancelar
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => generatePDF(editingOrder || { ...formData, id: 'preview' })}
+                          className="px-6 py-4 bg-slate-800 hover:bg-slate-900 text-white font-black uppercase tracking-widest rounded-2xl transition-all shadow-md active:scale-95 text-xs flex items-center justify-center gap-2 cursor-pointer"
+                        >
+                          <FileText className="w-4 h-4" />
+                          <span>Baixar PDF</span>
+                        </button>
+
+                        <button
+                          type="submit"
+                          disabled={isSubmitting}
+                          className="flex-[2] min-w-[240px] bg-blue-600 hover:bg-blue-700 text-white font-black uppercase tracking-widest py-4 rounded-2xl transition-all shadow-xl shadow-blue-500/20 active:scale-[0.98] disabled:opacity-50 text-xs flex items-center justify-center gap-2 cursor-pointer"
+                        >
+                          <CheckSquare className="w-4 h-4" />
+                          <span>{isSubmitting ? 'Salvando OS...' : (editingOrder ? 'Atualizar Ordem de Serviço' : 'Salvar Ordem de Serviço')}</span>
+                        </button>
+                      </div>
+                    </div>
+                  </form>
+                </div>
+              ) : modalType === 'equipment' ? (
+                <form onSubmit={handleEquipmentSubmit} className="p-8 space-y-6">
+                  <div className="space-y-2">
+                    <label className="text-[11px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Tag / Identificador</label>
+                    <input
+                      required
+                      type="text"
+                      placeholder="Ex: EQ-001"
+                      className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all font-bold text-slate-900 dark:text-white placeholder:text-slate-300 dark:placeholder:text-slate-600 uppercase"
+                      value={equipmentForm.tag}
+                      onChange={e => setEquipmentForm({...equipmentForm, tag: e.target.value.toUpperCase()})}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[11px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Tipo / Família</label>
+                    <select
+                      required
+                      className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all font-bold text-slate-900 dark:text-white cursor-pointer"
+                      value={equipmentForm.family}
+                      onChange={e => {
+                        const val = e.target.value;
+                        setEquipmentForm({...equipmentForm, family: val, otherFamily: '', subFamily: ''});
+                      }}
+                    >
+                      <option value="">Selecione a Família</option>
+                      <option value="CCUs">CCUs (Containers & Baskets)</option>
+                      <option value="Tanques de 1500L">Tanques de 1500L</option>
+                      <option value="Tanques de 5000/5200L">Tanques de 5000/5200L</option>
+                      <option value="Outros">Outros Equipamentos</option>
+                    </select>
+                  </div>
+                  
+                  {equipmentForm.family === 'Outros' && (
                     <div className="space-y-2">
                       <label className="text-[11px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Especifique a Família</label>
                       <input
                         required
                         type="text"
-                        placeholder="Ex: Torno"
-                        className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all font-bold text-slate-900 dark:text-white placeholder:text-slate-300 dark:placeholder:text-slate-600"
-                        value={formData.otherFamily}
-                        onChange={e => setFormData({...formData, otherFamily: e.target.value})}
+                        placeholder="Ex: Geradores"
+                        className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all font-bold text-slate-900 dark:text-white"
+                        value={equipmentForm.otherFamily}
+                        onChange={e => setEquipmentForm({...equipmentForm, otherFamily: e.target.value})}
                       />
                     </div>
                   )}
 
-                  <div className="space-y-2">
-                    <label className="text-[11px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Cliente</label>
-                    <select
-                      required
-                      className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all font-bold text-slate-900 dark:text-white cursor-pointer"
-                      value={formData.clientId}
-                      onChange={e => setFormData({...formData, clientId: e.target.value})}
-                    >
-                      <option value="">Selecione um cliente</option>
-                      {clients.map(c => (
-                        <option key={c.id} value={c.id}>{c.razaoSocial}</option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-6">
+                  {equipmentForm.family === 'CCUs' && (
                     <div className="space-y-2">
-                      <label className="text-[11px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Início da Manutenção</label>
-                      <input
+                      <label className="text-[11px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Subfamília (Modelo)</label>
+                      <select
                         required
-                        type="date"
-                        className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all font-bold text-slate-900 dark:text-white"
-                        value={formData.startDate}
-                        onChange={e => setFormData({...formData, startDate: e.target.value})}
-                      />
+                        className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all font-bold text-slate-900 dark:text-white cursor-pointer"
+                        value={equipmentForm.subFamily}
+                        onChange={e => setEquipmentForm({...equipmentForm, subFamily: e.target.value})}
+                      >
+                        <option value="">Selecione o Modelo</option>
+                        {CCU_SUBFAMILIES.map(sub => (
+                          <option key={sub} value={sub}>{sub}</option>
+                        ))}
+                      </select>
                     </div>
-                    <div className="space-y-2">
-                      <label className="text-[11px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Fim (Opcional)</label>
-                      <input
-                        type="date"
-                        className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all font-bold text-slate-900 dark:text-white"
-                        value={formData.endDate}
-                        onChange={e => setFormData({...formData, endDate: e.target.value})}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="text-[11px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Status Inicial</label>
-                    <select
-                      className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all font-bold text-slate-900 dark:text-white cursor-pointer"
-                      value={formData.status}
-                      onChange={e => setFormData({...formData, status: e.target.value as any})}
-                    >
-                      <option value="Em Manutenção">Em Manutenção</option>
-                      <option value="Concluído">Concluído</option>
-                    </select>
-                  </div>
+                  )}
 
                   <div className="pt-4">
                     <button
@@ -3559,7 +5014,7 @@ function AppContent() {
                       disabled={isSubmitting}
                       className="w-full bg-blue-600 hover:bg-blue-700 text-white font-black uppercase tracking-widest py-4 rounded-2xl transition-all shadow-lg shadow-blue-100 dark:shadow-none active:scale-[0.98] disabled:opacity-50"
                     >
-                      {isSubmitting ? 'Salvando...' : (editingOrder ? 'Atualizar Ordem de Serviço' : 'Salvar Ordem de Serviço')}
+                      {isSubmitting ? 'Cadastrando...' : 'Cadastrar Equipamento'}
                     </button>
                   </div>
                 </form>

@@ -11,7 +11,8 @@
         },
         "family": {
           "type": "string",
-          "description": "The family of the equipment (e.g., Torno, Fresa)."
+          "enum": ["CCUs", "Tanques de 1500L", "Tanques de 5000/5200L", "Outros"],
+          "description": "The type or family of the equipment."
         },
         "subFamily": {
           "type": "string",
@@ -48,6 +49,62 @@
           "type": "string",
           "format": "date-time",
           "description": "The creation timestamp."
+        },
+        "slingCheck": {
+          "type": "object",
+          "properties": {
+            "status": { "type": "string", "enum": ["OK", "NA"] },
+            "value": { "type": "string" }
+          },
+          "description": "Check for Sling (Eslinga)."
+        },
+        "damagedSlingCheck": {
+          "type": "object",
+          "properties": {
+            "status": { "type": "string", "enum": ["OK", "NA"] },
+            "value": { "type": "string" }
+          },
+          "description": "Check for Damaged Sling."
+        },
+        "excessiveCorrosionCheck": {
+          "type": "object",
+          "properties": {
+            "status": { "type": "string", "enum": ["OK", "NA"] },
+            "value": { "type": "string" }
+          },
+          "description": "Check for Excessive Corrosion."
+        },
+        "primaryStructureCheck": {
+          "type": "object",
+          "properties": {
+            "status": { "type": "string", "enum": ["OK", "NA"] },
+            "value": { "type": "string" }
+          },
+          "description": "Check for Primary Structure."
+        },
+        "secondaryStructureCheck": {
+          "type": "object",
+          "properties": {
+            "status": { "type": "string", "enum": ["OK", "NA"] },
+            "value": { "type": "string" }
+          },
+          "description": "Check for Secondary Structure."
+        },
+        "damagedBagCheck": {
+          "type": "object",
+          "properties": {
+            "status": { "type": "string", "enum": ["OK", "NA"] },
+            "value": { "type": "string" }
+          },
+          "description": "Check for Damaged Bag."
+        },
+        "reworkCheck": {
+          "type": "object",
+          "properties": {
+            "status": { "type": "string", "enum": ["OK", "NA"] },
+            "value": { "type": "string" }
+          },
+          "description": "Check for Rework."
         }
       },
       "required": ["equipmentNumber", "family", "clientId", "startDate", "status", "userId"]
@@ -102,6 +159,36 @@
         }
       },
       "required": ["email", "name", "role", "createdAt"]
+    },
+    "equipment": {
+      "title": "Equipment",
+      "description": "Represents a physical asset or container.",
+      "type": "object",
+      "properties": {
+        "tag": {
+          "type": "string",
+          "description": "The unique tag identifier (e.g., EQ-123)."
+        },
+        "family": {
+          "type": "string",
+          "enum": ["CCUs", "Tanques de 1500L", "Tanques de 5000/5200L", "Outros"],
+          "description": "The type or family of the equipment."
+        },
+        "subFamily": {
+          "type": "string",
+          "description": "The sub-family/model (optional)."
+        },
+        "userId": {
+          "type": "string",
+          "description": "The creator UID."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "The creation timestamp."
+        }
+      },
+      "required": ["tag", "family", "userId", "createdAt"]
     }
   },
   "firestore": {
@@ -116,6 +203,10 @@
     "/users/{userId}": {
       "schema": "appUser",
       "description": "Collection of authorized users."
+    },
+    "/equipments/{equipmentId}": {
+      "schema": "equipment",
+      "description": "Collection of registered equipments."
     }
   }
 }

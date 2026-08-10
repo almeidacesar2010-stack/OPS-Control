@@ -83,7 +83,13 @@ export interface AppUser {
   username?: string;
   name: string;
   role: UserRole;
-  createdAt: Timestamp;
+  status: 'active' | 'inactive';
+  passwordHash?: string;
+  mustChangePassword?: boolean;
+  isFirstLoginCompleted?: boolean;
+  createdAt: any;
+  updatedAt?: any;
+  lastLoginAt?: any;
 }
 
 export interface InspectionCheck {

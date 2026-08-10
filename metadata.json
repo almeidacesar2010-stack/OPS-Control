@@ -1,5 +1,8 @@
 {
   "name": "OPS Control",
   "description": "Sistema de controle de operações OEG para PCP, com gestão de clientes, equipamentos registrados, ordens de serviço e dashboards de produtividade.",
-  "requestFramePermissions": []
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
 }

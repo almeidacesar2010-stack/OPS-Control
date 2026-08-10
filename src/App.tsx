@@ -107,8 +107,10 @@ import { DecontaminationOperation } from './types/decontamination';
 import { DecontaminationManagement } from './components/DecontaminationManagement';
 import { PendingApprovals } from './components/PendingApprovals';
 import { PermissionsManagement } from './components/PermissionsManagement';
+import { FirstLoginModal } from './components/FirstLoginModal';
+import { hashPassword } from './utils/authUtils';
 import { DeleteRequestModal } from './components/DeleteRequestModal';
-import { DeletionRequest, ModuleVisibilityConfig, UserRole } from './types';
+import { DeletionRequest, ModuleVisibilityConfig, UserRole, AppUser } from './types';
 
 // Types
 interface Client {
@@ -116,15 +118,6 @@ interface Client {
   cnpj: string;
   razaoSocial: string;
   userId: string;
-  createdAt: Timestamp;
-}
-
-interface AppUser {
-  id: string;
-  email: string;
-  username?: string;
-  name: string;
-  role: 'moderator' | 'admin' | 'user';
   createdAt: Timestamp;
 }
 
@@ -548,6 +541,11 @@ function AppContent() {
   });
   const [deletionRequests, setDeletionRequests] = useState<DeletionRequest[]>([]);
   const [activeRolePreview, setActiveRolePreview] = useState<UserRole | null>(null);
+  const [mustChangePasswordUser, setMustChangePasswordUser] = useState<{
+    userId: string;
+    userName: string;
+    userEmail: string;
+  } | null>(null);
   const effectiveRole: UserRole = activeRolePreview || currentUserRole;
   const [deleteModalState, setDeleteModalState] = useState<{
     isOpen: boolean;
@@ -880,7 +878,27 @@ function AppContent() {
     const unsubUser = onSnapshot(userRef, (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
-        const role = data.role;
+
+        // Inactive account check
+        if (data.status === 'inactive') {
+          console.warn("User account is inactive. Signing out...");
+          signOut(auth);
+          setGlobalError("Sua conta está desativada. Entre em contato com o moderador.");
+          return;
+        }
+
+        // Mandatory password change check (First login or reset)
+        if (data.mustChangePassword === true) {
+          setMustChangePasswordUser({
+            userId: user.uid,
+            userName: data.name || user.displayName || 'Usuário',
+            userEmail: data.email || user.email || ''
+          });
+        } else {
+          setMustChangePasswordUser(null);
+        }
+
+        const role = data.role || 'user';
         console.log("Current user role updated:", role);
         setCurrentUserRole(role);
         setProfileForm({
@@ -947,27 +965,82 @@ function AppContent() {
     
     try {
       if (authForm.username && authForm.password) {
-        // Use username as email internally
-        const email = authForm.username.includes('@') ? authForm.username : `${authForm.username}@oeg.local`;
-        const userCredential = await signInWithEmailAndPassword(auth, email, authForm.password);
+        const inputClean = authForm.username.trim();
+        let targetEmail = inputClean.toLowerCase();
         
-        // Check if user exists in Firestore immediately
-        const userRef = doc(db, 'users', userCredential.user.uid);
-        const userDoc = await getDoc(userRef);
-        
-        if (!userDoc.exists() && email !== "almeidacesar2010@gmail.com") {
-          await signOut(auth);
-          setLoginError('Não existe cadastro para este usuário ou sua conta foi removida.');
-          return;
+        if (!targetEmail.includes('@')) {
+          targetEmail = `${targetEmail}@opscontrol.com`;
+        }
+
+        // 1. Search user in Firestore first to verify status and password hash
+        let userDocData: any = null;
+        try {
+          const usersRef = collection(db, 'users');
+          const qEmail = query(usersRef, where('email', '==', targetEmail));
+          const snapEmail = await getDocs(qEmail);
+
+          if (!snapEmail.empty) {
+            userDocData = snapEmail.docs[0].data();
+          } else {
+            const qUser = query(usersRef, where('username', '==', inputClean.replace(/^@/, '')));
+            const snapUser = await getDocs(qUser);
+            if (!snapUser.empty) {
+              userDocData = snapUser.docs[0].data();
+              if (userDocData.email) targetEmail = userDocData.email.toLowerCase();
+            }
+          }
+        } catch (err) {
+          console.error('Firestore pre-login lookup error:', err);
+        }
+
+        // Check if user is inactive
+        if (userDocData) {
+          if (userDocData.status === 'inactive') {
+            setLoginError('Sua conta está desativada. Entre em contato com o moderador.');
+            setIsSubmitting(false);
+            return;
+          }
+
+          if (userDocData.passwordHash) {
+            const inputHash = await hashPassword(authForm.password);
+            if (inputHash !== userDocData.passwordHash) {
+              setLoginError('Usuário ou senha incorretos.');
+              setIsSubmitting(false);
+              return;
+            }
+          }
+        }
+
+        // 2. Perform Firebase Auth login
+        try {
+          const userCredential = await signInWithEmailAndPassword(auth, targetEmail, authForm.password);
+          const userRef = doc(db, 'users', userCredential.user.uid);
+          const userDoc = await getDoc(userRef);
+          
+          if (!userDoc.exists() && targetEmail !== "almeidacesar2010@gmail.com") {
+            await signOut(auth);
+            setLoginError('Não existe cadastro para este usuário ou sua conta foi removida.');
+            return;
+          }
+        } catch (authErr: any) {
+          if (authErr.code === 'auth/user-not-found' && userDocData) {
+            // User created in Firestore by Moderator -> Bootstrap in Firebase Auth
+            try {
+              await createUserWithEmailAndPassword(auth, targetEmail, authForm.password);
+            } catch (createErr) {
+              console.error('Error bootstrapping Firebase Auth user:', createErr);
+              setLoginError('Erro ao autenticar. Verifique sua senha temporária.');
+            }
+          } else if (authErr.code === 'auth/wrong-password' || authErr.code === 'auth/invalid-credential') {
+            setLoginError('Usuário ou senha incorretos.');
+          } else {
+            setLoginError('Erro ao entrar. Verifique seu usuário e senha.');
+          }
         }
       }
     } catch (error: any) {
       console.error('Login error:', error);
-      if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential') {
-        setLoginError('Usuário ou senha incorretos.');
-      } else {
-        setLoginError('Erro ao entrar. Verifique seu usuário e senha.');
-      }
+      setLoginError('Erro ao entrar. Verifique seu usuário e senha.');
     } finally {
       setIsSubmitting(false);
     }
@@ -2696,6 +2769,67 @@ const generatePDF = (order: any) => {
     } catch (err: any) {
       console.error("Error updating user role:", err);
       setGlobalError("Erro ao atualizar perfil do usuário.");
+      throw err;
+    }
+  };
+
+  const handleUpdateUserFullProfile = async (
+    userId: string,
+    data: { name: string; username: string; email: string; role: UserRole; password?: string }
+  ) => {
+    if (!user) return;
+    try {
+      let cleanUsername = data.username.trim();
+      if (cleanUsername.startsWith('@')) cleanUsername = cleanUsername.slice(1);
+
+      const updateData: any = {
+        name: data.name.trim(),
+        username: cleanUsername,
+        email: data.email.trim(),
+        role: data.role,
+        updatedAt: serverTimestamp()
+      };
+
+      if (data.password && data.password.trim() !== '') {
+        updateData.password = data.password.trim();
+        updateData.plainPassword = data.password.trim();
+      }
+
+      await updateDoc(doc(db, 'users', userId), updateData);
+
+      await addAuditLog(
+        'UPDATE',
+        'USER',
+        userId,
+        `Atualizou as informações do perfil do usuário "${data.name}" (${data.role.toUpperCase()}).`
+      );
+
+      setSuccessMessage(`Perfil do usuário "${data.name}" atualizado com sucesso!`);
+      setTimeout(() => setSuccessMessage(null), 4000);
+    } catch (err: any) {
+      console.error("Error updating user profile:", err);
+      setGlobalError("Erro ao atualizar o perfil do usuário.");
+      throw err;
+    }
+  };
+
+  const handleDeleteUser = async (userId: string, userName: string) => {
+    if (!user) return;
+    try {
+      await deleteDoc(doc(db, 'users', userId));
+
+      await addAuditLog(
+        'DELETE',
+        'USER',
+        userId,
+        `Excluiu o usuário "${userName}".`
+      );
+
+      setSuccessMessage(`Usuário "${userName}" excluído com sucesso!`);
+      setTimeout(() => setSuccessMessage(null), 4000);
+    } catch (err: any) {
+      console.error("Error deleting user:", err);
+      setGlobalError("Erro ao excluir usuário.");
       throw err;
     }
   };
@@ -5349,6 +5483,8 @@ const generatePDF = (order: any) => {
                   moduleVisibility={moduleVisibility}
                   onUpdateModuleVisibility={handleUpdateModuleVisibility}
                   onUpdateUserRole={handleUpdateUserRole}
+                  onUpdateUserFullProfile={handleUpdateUserFullProfile}
+                  onDeleteUser={handleDeleteUser}
                   activeRolePreview={activeRolePreview}
                   setActiveRolePreview={setActiveRolePreview}
                   currentUserId={user?.uid || ''}
@@ -6478,6 +6614,21 @@ const generatePDF = (order: any) => {
           </div>
         )}
       </AnimatePresence>
+
+      {/* First Login Password Change Modal */}
+      {mustChangePasswordUser && (
+        <FirstLoginModal
+          userId={mustChangePasswordUser.userId}
+          userName={mustChangePasswordUser.userName}
+          userEmail={mustChangePasswordUser.userEmail}
+          onPasswordChanged={() => {
+            setMustChangePasswordUser(null);
+            setSuccessMessage("Senha alterada com sucesso! Seu acesso foi liberado.");
+            setTimeout(() => setSuccessMessage(null), 4000);
+          }}
+          onLogout={handleLogout}
+        />
+      )}
     </div>
   );
 }

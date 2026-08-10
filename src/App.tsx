@@ -550,7 +550,11 @@ function AppContent() {
   } | null>(null);
   const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
   const effectiveRole: UserRole = activeRolePreview || currentUserRole;
-  const canDelete = effectiveRole === 'admin' || effectiveRole === 'moderator' || user?.email === "almeidacesar2010@gmail.com";
+  const isSuperAdmin = user?.email === "almeidacesar2010@gmail.com";
+  const isModerator = effectiveRole === 'moderator' || (isSuperAdmin && !activeRolePreview);
+  const isAdmin = effectiveRole === 'admin' || (isSuperAdmin && activeRolePreview === 'admin');
+  const canSeeDelete = effectiveRole === 'admin' || effectiveRole === 'moderator' || (isSuperAdmin && !activeRolePreview);
+  const canDelete = canSeeDelete;
   const [deleteModalState, setDeleteModalState] = useState<{
     isOpen: boolean;
     itemType: string;
@@ -1554,6 +1558,11 @@ function AppContent() {
     const equipment = equipments.find(e => e.id === id);
     if (!equipment) return;
 
+    if (isAdmin) {
+      handleOpenDeleteModal('Equipamento', id, 'equipments', equipment.tag);
+      return;
+    }
+
     setConfirmModal({
       isOpen: true,
       title: 'Excluir Equipamento',
@@ -2225,6 +2234,14 @@ const generatePDF = (order: any) => {
   };
 
   const handleDeleteOrder = async (id: string) => {
+    const orderToDelete = orders.find(o => o.id === id);
+    const label = orderToDelete ? `OS #${orderToDelete.equipmentNumber || orderToDelete.id}` : 'Ordem de Serviço';
+
+    if (isAdmin) {
+      handleOpenDeleteModal('Ordem de Serviço', id, 'serviceOrders', label);
+      return;
+    }
+
     setConfirmModal({
       isOpen: true,
       title: 'Excluir Ordem de Serviço',
@@ -2232,7 +2249,6 @@ const generatePDF = (order: any) => {
       type: 'danger',
       onConfirm: async () => {
         try {
-          const orderToDelete = orders.find(o => o.id === id);
           await deleteDoc(doc(db, 'serviceOrders', id));
           if (orderToDelete) {
             await addAuditLog('DELETE', 'OS', id, `Excluiu OS #${orderToDelete.equipmentNumber}`);
@@ -2346,6 +2362,11 @@ const generatePDF = (order: any) => {
       console.error("Erro de validação de parâmetro na exclusão do ativo:", err);
       setGlobalError(err.message);
       throw err;
+    }
+
+    if (isAdmin) {
+      handleOpenDeleteModal('Ativo da Frota', id, 'fleetEquipment', tag);
+      return;
     }
 
     try {
@@ -2697,7 +2718,32 @@ const generatePDF = (order: any) => {
   const handleDeleteDecontaminationOperation = async (id: string) => {
     if (!user) return;
     const op = decontaminationOperations.find(o => o.id === id);
-    handleOpenDeleteModal('Operação de Descontaminação', id, 'decontaminationOperations', op?.equipmentNumber || 'Tanque');
+    const tag = op?.equipmentNumber || 'Tanque';
+
+    if (isAdmin) {
+      handleOpenDeleteModal('Operação de Descontaminação', id, 'decontaminationOperations', tag);
+      return;
+    }
+
+    setConfirmModal({
+      isOpen: true,
+      title: 'Excluir Operação de Descontaminação',
+      message: `Tem certeza que deseja excluir esta operação do tanque ${tag}? Esta ação não pode ser desfeita.`,
+      type: 'danger',
+      onConfirm: async () => {
+        try {
+          await deleteDoc(doc(db, 'decontaminationOperations', id));
+          await addAuditLog('DELETE', 'FLEET', id, `Excluiu operação de descontaminação do tanque ${tag}`);
+          setSuccessMessage('Operação excluída com sucesso!');
+          setTimeout(() => setSuccessMessage(null), 3000);
+        } catch (error) {
+          console.error('Error deleting decontamination operation:', error);
+          setGlobalError('Erro ao excluir operação.');
+        } finally {
+          setConfirmModal(prev => ({ ...prev, isOpen: false }));
+        }
+      }
+    });
   };
 
   const handleOpenDeleteModal = (itemType: string, itemId: string, itemCollection: string, itemName: string) => {
@@ -2913,6 +2959,10 @@ const generatePDF = (order: any) => {
 
   const handleDeleteUser = async (userId: string, userName: string) => {
     if (!user) return;
+    if (isAdmin) {
+      handleOpenDeleteModal('Usuário', userId, 'users', userName);
+      return;
+    }
     try {
       await deleteDoc(doc(db, 'users', userId));
 
@@ -4458,6 +4508,7 @@ const generatePDF = (order: any) => {
                   userRole={effectiveRole}
                   onSaveEquipment={handleSaveFleetEquipment}
                   onDeleteEquipment={handleDeleteFleetEquipment}
+                  onRequestDelete={handleOpenDeleteModal}
                   onDeleteAllEquipment={handleDeleteAllFleetEquipment}
                   onAddNonConformity={handleAddFleetNonConformity}
                   onResolveNonConformity={handleResolveFleetNonConformity}
@@ -4472,6 +4523,7 @@ const generatePDF = (order: any) => {
                   userRole={effectiveRole}
                   onSaveOperation={handleSaveDecontaminationOperation}
                   onDeleteOperation={handleDeleteDecontaminationOperation}
+                  onRequestDelete={handleOpenDeleteModal}
                 />
               ) : activeTab === 'orders' ? (
                 <div className="space-y-6">
@@ -5453,6 +5505,10 @@ const generatePDF = (order: any) => {
                                 {canDelete && (
                                   <button
                                     onClick={() => {
+                                      if (isAdmin) {
+                                        handleOpenDeleteModal('Cliente', client.id, 'clients', client.razaoSocial);
+                                        return;
+                                      }
                                       setConfirmModal({
                                         isOpen: true,
                                         title: 'Excluir Cliente',
@@ -5605,6 +5661,7 @@ const generatePDF = (order: any) => {
                   onUpdateUserRole={handleUpdateUserRole}
                   onUpdateUserFullProfile={handleUpdateUserFullProfile}
                   onDeleteUser={handleDeleteUser}
+                  onRequestDelete={handleOpenDeleteModal}
                   activeRolePreview={activeRolePreview}
                   setActiveRolePreview={setActiveRolePreview}
                   currentUserId={user?.uid || ''}

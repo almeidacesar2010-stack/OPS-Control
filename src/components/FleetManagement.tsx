@@ -168,6 +168,7 @@ interface FleetManagementProps {
   userRole?: UserRole;
   onSaveEquipment: (data: Partial<FleetEquipment>) => Promise<void>;
   onDeleteEquipment: (id: string, equipmentNumber: string) => Promise<void>;
+  onRequestDelete?: (itemType: string, itemId: string, itemCollection: string, itemName: string) => void;
   onDeleteAllEquipment?: () => Promise<{ deletedCount: number }>;
   onAddNonConformity: (equipmentId: string, description: string, photoUrl?: string) => Promise<void>;
   onResolveNonConformity: (equipmentId: string, ncId: string) => Promise<void>;
@@ -194,6 +195,7 @@ export const FleetManagement: React.FC<FleetManagementProps> = ({
   userRole = 'user',
   onSaveEquipment,
   onDeleteEquipment,
+  onRequestDelete,
   onDeleteAllEquipment,
   onAddNonConformity,
   onResolveNonConformity,
@@ -1052,8 +1054,12 @@ export const FleetManagement: React.FC<FleetManagementProps> = ({
                           setIsEquipmentModalOpen(true);
                         }}
                         onDeleteRequest={canDelete ? (item) => {
-                          setDeleteError(null);
-                          setDeletingEquipment(item);
+                          if (userRole === 'admin' && onRequestDelete) {
+                            onRequestDelete('Ativo da Frota', item.id, 'fleetEquipment', item.equipmentNumber);
+                          } else {
+                            setDeleteError(null);
+                            setDeletingEquipment(item);
+                          }
                         } : undefined}
                       />
                     ))
@@ -1460,8 +1466,12 @@ export const FleetManagement: React.FC<FleetManagementProps> = ({
           setIsEquipmentModalOpen(true);
         }}
         onDeleteClick={canDelete ? (eq) => {
-          setDeleteError(null);
-          setDeletingEquipment(eq);
+          if (userRole === 'admin' && onRequestDelete) {
+            onRequestDelete('Ativo da Frota', eq.id, 'fleetEquipment', eq.equipmentNumber);
+          } else {
+            setDeleteError(null);
+            setDeletingEquipment(eq);
+          }
         } : undefined}
       />
 

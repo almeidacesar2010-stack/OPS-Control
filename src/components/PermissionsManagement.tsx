@@ -47,6 +47,7 @@ interface PermissionsManagementProps {
   onUpdateUserRole: (userId: string, newRole: UserRole) => Promise<void>;
   onUpdateUserFullProfile?: (userId: string, data: { name: string; username: string; email: string; role: UserRole }) => Promise<void>;
   onDeleteUser?: (userId: string, userName: string) => Promise<void>;
+  onRequestDelete?: (itemType: string, itemId: string, itemCollection: string, itemName: string) => void;
   activeRolePreview: UserRole | null;
   setActiveRolePreview: (role: UserRole | null) => void;
   currentUserId: string;
@@ -99,6 +100,7 @@ export function PermissionsManagement({
   onUpdateUserRole,
   onUpdateUserFullProfile,
   onDeleteUser,
+  onRequestDelete,
   activeRolePreview,
   setActiveRolePreview,
   currentUserId,
@@ -754,14 +756,22 @@ export function PermissionsManagement({
                         {isActive ? 'Desativar' : 'Ativar'}
                       </button>
 
-                      <button
-                        onClick={() => setUserToDelete(usr)}
-                        className="py-2 px-3 rounded-xl bg-rose-50 dark:bg-rose-950/50 text-rose-600 dark:text-rose-400 hover:bg-rose-100 dark:hover:bg-rose-900/60 border border-rose-200/60 dark:border-rose-800/60 text-xs font-black uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 cursor-pointer"
-                        title="Excluir Conta do Usuário"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                        Excluir
-                      </button>
+                      {(currentUserRole === 'admin' || currentUserRole === 'moderator') && (
+                        <button
+                          onClick={() => {
+                            if (currentUserRole === 'admin' && onRequestDelete) {
+                              onRequestDelete('Usuário', usr.id, 'users', usr.name);
+                            } else {
+                              setUserToDelete(usr);
+                            }
+                          }}
+                          className="py-2 px-3 rounded-xl bg-rose-50 dark:bg-rose-950/50 text-rose-600 dark:text-rose-400 hover:bg-rose-100 dark:hover:bg-rose-900/60 border border-rose-200/60 dark:border-rose-800/60 text-xs font-black uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                          title="Excluir Conta do Usuário"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          Excluir
+                        </button>
+                      )}
                     </div>
                   </div>
                 </div>

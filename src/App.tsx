@@ -95,7 +95,8 @@ import {
   AlertTriangle,
   Eye,
   Printer,
-  Droplet
+  Droplet,
+  KeyRound
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from './lib/utils';
@@ -108,7 +109,8 @@ import { DecontaminationManagement } from './components/DecontaminationManagemen
 import { PendingApprovals } from './components/PendingApprovals';
 import { PermissionsManagement } from './components/PermissionsManagement';
 import { FirstLoginModal } from './components/FirstLoginModal';
-import { hashPassword } from './utils/authUtils';
+import { ChangePasswordModal } from './components/ChangePasswordModal';
+import { hashPassword, findUserByUsernameOrEmail, getUsernameInternalEmail } from './utils/authUtils';
 import { DeleteRequestModal } from './components/DeleteRequestModal';
 import { DeletionRequest, ModuleVisibilityConfig, UserRole, AppUser } from './types';
 
@@ -546,6 +548,7 @@ function AppContent() {
     userName: string;
     userEmail: string;
   } | null>(null);
+  const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
   const effectiveRole: UserRole = activeRolePreview || currentUserRole;
   const [deleteModalState, setDeleteModalState] = useState<{
     isOpen: boolean;
@@ -984,118 +987,163 @@ function AppContent() {
   const handleLogin = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (isSubmitting) return;
+
+    const rawUsername = authForm.username.trim();
+    const rawPassword = authForm.password;
+
+    if (!rawUsername || !rawPassword) {
+      setLoginError('Por favor, informe o usuário e a senha.');
+      return;
+    }
+
     setIsSubmitting(true);
     setGlobalError(null);
     setLoginError(null);
-    
+
     try {
-      if (authForm.username && authForm.password) {
-        const inputClean = authForm.username.trim();
-        let targetEmail = inputClean.toLowerCase();
-        
-        if (!targetEmail.includes('@')) {
-          targetEmail = `${targetEmail}@opscontrol.com`;
-        }
+      // 1. Search user in Firestore first
+      const found = await findUserByUsernameOrEmail(rawUsername);
 
-        // 1. Search user in Firestore first to verify status and password hash
-        let userDocData: any = null;
-        let oldDocId: string | null = null;
+      if (!found) {
+        // Audit log failed login
         try {
-          const usersRef = collection(db, 'users');
-          const qEmail = query(usersRef, where('email', '==', targetEmail));
-          const snapEmail = await getDocs(qEmail);
+          await addDoc(collection(db, 'auditLogs'), {
+            userName: rawUsername,
+            action: 'LOGIN_FAILED',
+            entity: 'AUTH',
+            details: `Tentativa de login para o usuário "${rawUsername}" falhou (usuário não encontrado).`,
+            timestamp: serverTimestamp()
+          });
+        } catch (e) {}
 
-          if (!snapEmail.empty) {
-            userDocData = snapEmail.docs[0].data();
-            oldDocId = snapEmail.docs[0].id;
-          } else {
-            const cleanUserStr = inputClean.replace(/^@/, '');
-            const qUser = query(usersRef, where('username', '==', cleanUserStr));
-            const snapUser = await getDocs(qUser);
-            if (!snapUser.empty) {
-              userDocData = snapUser.docs[0].data();
-              oldDocId = snapUser.docs[0].id;
-              if (userDocData.email) targetEmail = userDocData.email.toLowerCase();
-            }
-          }
-        } catch (err) {
-          console.error('Firestore pre-login lookup error:', err);
+        setLoginError('Usuário ou senha incorretos.');
+        setIsSubmitting(false);
+        return;
+      }
+
+      const { docId, data: userDocData } = found;
+
+      // 2. Check if user is inactive
+      if (userDocData.status === 'inactive') {
+        setLoginError('Este usuário está desativado. Entre em contato com o administrador do sistema.');
+        setIsSubmitting(false);
+        return;
+      }
+
+      // 3. Verify password hash against Firestore
+      if (userDocData.passwordHash) {
+        const inputHash = await hashPassword(rawPassword);
+        if (inputHash !== userDocData.passwordHash) {
+          // Audit log failed login
+          try {
+            await addDoc(collection(db, 'auditLogs'), {
+              userId: docId,
+              userName: userDocData.name || rawUsername,
+              action: 'LOGIN_FAILED',
+              entity: 'AUTH',
+              details: `Tentativa de login para o usuário "${rawUsername}" falhou (senha incorreta).`,
+              timestamp: serverTimestamp()
+            });
+          } catch (e) {}
+
+          setLoginError('Usuário ou senha incorretos.');
+          setIsSubmitting(false);
+          return;
         }
+      }
 
-        // Check if user is inactive
-        if (userDocData) {
-          if (userDocData.status === 'inactive') {
-            setLoginError('Sua conta está desativada. Entre em contato com o moderador.');
-            setIsSubmitting(false);
-            return;
-          }
+      // 4. Authenticate with Firebase Auth using internal technical email
+      const cleanUsername = (userDocData.username || rawUsername).trim().toLowerCase().replace(/^@/, '');
+      const authEmail = (userDocData.email && userDocData.email.includes('@') && !userDocData.email.includes(' '))
+        ? userDocData.email
+        : getUsernameInternalEmail(cleanUsername);
 
-          if (userDocData.passwordHash) {
-            const inputHash = await hashPassword(authForm.password);
-            if (inputHash !== userDocData.passwordHash) {
-              setLoginError('Usuário ou senha incorretos.');
+      const authPass = userDocData.passwordHash || rawPassword;
+
+      let userCredential;
+      try {
+        userCredential = await signInWithEmailAndPassword(auth, authEmail, authPass);
+      } catch (signInErr: any) {
+        // Try with plain rawPassword if passwordHash failed
+        try {
+          userCredential = await signInWithEmailAndPassword(auth, authEmail, rawPassword);
+        } catch (signInErr2: any) {
+          // If user doesn't exist in Firebase Auth yet, create the Auth user identity
+          try {
+            userCredential = await createUserWithEmailAndPassword(auth, authEmail, authPass);
+          } catch (createErr: any) {
+            if (createErr.code === 'auth/email-already-in-use') {
+              const altEmail = `${cleanUsername}_${docId.slice(0, 5)}@opscontrol.internal`;
+              try {
+                userCredential = await createUserWithEmailAndPassword(auth, altEmail, authPass);
+              } catch (altErr) {
+                console.error('Error creating user credential:', altErr);
+                setLoginError('Erro ao autenticar usuário no sistema.');
+                setIsSubmitting(false);
+                return;
+              }
+            } else {
+              console.error('Firebase Auth creation error:', createErr);
+              setLoginError('Erro ao autenticar no sistema. Tente novamente.');
               setIsSubmitting(false);
               return;
             }
           }
         }
+      }
 
-        // 2. Perform Firebase Auth login or bootstrap
-        try {
-          let userCredential;
+      if (userCredential && userCredential.user) {
+        const newUid = userCredential.user.uid;
+
+        // If docId is different from Firebase Auth UID, sync Firestore doc to newUid
+        if (docId !== newUid) {
+          const userRef = doc(db, 'users', newUid);
+          await setDoc(userRef, {
+            ...userDocData,
+            id: newUid,
+            email: authEmail,
+            updatedAt: serverTimestamp()
+          });
           try {
-            userCredential = await signInWithEmailAndPassword(auth, targetEmail, authForm.password);
-          } catch (signInErr: any) {
-            // If sign-in failed BUT we verified userDocData & passwordHash in Firestore, bootstrap/create Firebase Auth user
-            if (userDocData) {
-              try {
-                userCredential = await createUserWithEmailAndPassword(auth, targetEmail, authForm.password);
-              } catch (createErr) {
-                console.error('Error creating Firebase Auth user:', createErr);
-                setLoginError('Usuário ou senha incorretos.');
-                setIsSubmitting(false);
-                return;
-              }
-            } else {
-              throw signInErr;
-            }
+            await deleteDoc(doc(db, 'users', docId));
+          } catch (delErr) {
+            console.error('Error deleting old user doc:', delErr);
           }
-
-          if (userCredential && userCredential.user) {
-            const newUid = userCredential.user.uid;
-            const userRef = doc(db, 'users', newUid);
-            const userDoc = await getDoc(userRef);
-
-            if (!userDoc.exists() && userDocData) {
-              await setDoc(userRef, {
-                ...userDocData,
-                id: newUid,
-                email: targetEmail,
-                updatedAt: serverTimestamp()
-              });
-              if (oldDocId && oldDocId !== newUid) {
-                try {
-                  await deleteDoc(doc(db, 'users', oldDocId));
-                } catch (delErr) {
-                  console.error('Error removing old user doc:', delErr);
-                }
-              }
-            }
-          }
-        } catch (authErr: any) {
-          console.error('Auth error:', authErr);
-          setLoginError('Usuário ou senha incorretos.');
         }
+
+        // Audit log login success
+        try {
+          await addDoc(collection(db, 'auditLogs'), {
+            userId: newUid,
+            userName: userDocData.name || rawUsername,
+            action: 'LOGIN_SUCCESS',
+            entity: 'AUTH',
+            details: `Usuário "@${cleanUsername}" realizou login no sistema.`,
+            timestamp: serverTimestamp()
+          });
+        } catch (e) {}
       }
     } catch (error: any) {
-      console.error('Login error:', error);
-      setLoginError('Erro ao entrar. Verifique seu usuário e senha.');
+      console.error('Login process error:', error);
+      setLoginError('Usuário ou senha incorretos.');
     } finally {
       setIsSubmitting(false);
     }
   };
 
   const handleLogout = async () => {
+    if (user) {
+      try {
+        await addDoc(collection(db, 'auditLogs'), {
+          userId: user.uid,
+          userName: appUsers.find(u => u.id === user.uid)?.name || user.displayName || 'Usuário',
+          action: 'LOGOUT',
+          entity: 'AUTH',
+          details: `Usuário encerrou a sessão.`,
+          timestamp: serverTimestamp()
+        });
+      } catch (e) {}
+    }
     try {
       await signOut(auth);
     } catch (error) {
@@ -3677,13 +3725,23 @@ const generatePDF = (order: any) => {
                 </div>
               </div>
             </div>
-            <button
-              onClick={handleLogout}
-              className="w-full flex items-center justify-center gap-2 px-4 py-3 text-slate-500 dark:text-slate-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-xl transition-all text-[10px] font-black uppercase tracking-[0.2em] border border-transparent hover:border-red-100 dark:hover:border-red-900/30 active:scale-95"
-            >
-              <LogOut className="w-4 h-4" />
-              Sair do Sistema
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setIsChangePasswordOpen(true)}
+                className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2.5 text-slate-600 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-xl transition-all text-[10px] font-black uppercase tracking-wider border border-slate-200/60 dark:border-slate-700/60 cursor-pointer"
+                title="Alterar sua senha de acesso"
+              >
+                <KeyRound className="w-3.5 h-3.5" />
+                Senha
+              </button>
+              <button
+                onClick={handleLogout}
+                className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2.5 text-slate-500 dark:text-slate-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-xl transition-all text-[10px] font-black uppercase tracking-wider border border-transparent hover:border-red-100 dark:hover:border-red-900/30 cursor-pointer"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+                Sair
+              </button>
+            </div>
           </div>
         </div>
       </aside>
@@ -6663,6 +6721,21 @@ const generatePDF = (order: any) => {
           </div>
         )}
       </AnimatePresence>
+
+      {/* Change Password Modal */}
+      {user && (
+        <ChangePasswordModal
+          userId={user.uid}
+          userName={appUsers.find(u => u.id === user.uid)?.name || user.displayName || 'Usuário'}
+          userUsername={appUsers.find(u => u.id === user.uid)?.username || user.email?.split('@')[0] || 'usuario'}
+          isOpen={isChangePasswordOpen}
+          onClose={() => setIsChangePasswordOpen(false)}
+          onSuccess={(msg) => {
+            setSuccessMessage(msg);
+            setTimeout(() => setSuccessMessage(null), 4000);
+          }}
+        />
+      )}
 
       {/* First Login Password Change Modal */}
       {mustChangePasswordUser && (

@@ -38,7 +38,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { collection, addDoc, updateDoc, deleteDoc, doc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../firebase';
 import { AppUser, UserRole, ModuleVisibilityConfig } from '../types';
-import { hashPassword, generateTempPassword } from '../utils/authUtils';
+import { hashPassword, generateTempPassword, getUsernameInternalEmail } from '../utils/authUtils';
 
 interface PermissionsManagementProps {
   appUsers: AppUser[];
@@ -197,21 +197,39 @@ export function PermissionsManagement({
     setIsSavingEdit(true);
     setSaveError(null);
     try {
-      let cleanUsername = editForm.username.trim();
+      let cleanUsername = editForm.username.trim().toLowerCase();
       if (cleanUsername.startsWith('@')) cleanUsername = cleanUsername.slice(1);
+
+      if (!cleanUsername) {
+        setSaveError('O nome de usuário (username) é obrigatório.');
+        setIsSavingEdit(false);
+        return;
+      }
+
+      // Check username uniqueness
+      const duplicate = appUsers.find(
+        u => u.id !== editingUser.id && (u.username || '').toLowerCase() === cleanUsername
+      );
+      if (duplicate) {
+        setSaveError(`O nome de usuário "${cleanUsername}" já está em uso por outro usuário.`);
+        setIsSavingEdit(false);
+        return;
+      }
+
+      const emailVal = editForm.email.trim().toLowerCase() || `${cleanUsername}@opscontrol.com`;
 
       if (onUpdateUserFullProfile) {
         await onUpdateUserFullProfile(editingUser.id, {
           name: editForm.name.trim(),
           username: cleanUsername,
-          email: editForm.email.trim(),
+          email: emailVal,
           role: editForm.role
         });
       } else {
         await updateDoc(doc(db, 'users', editingUser.id), {
           name: editForm.name.trim(),
           username: cleanUsername,
-          email: editForm.email.trim(),
+          email: emailVal,
           role: editForm.role,
           updatedAt: serverTimestamp()
         });
@@ -355,8 +373,21 @@ export function PermissionsManagement({
     e.preventDefault();
     setAccessError(null);
 
-    if (!accessForm.name.trim() || !accessForm.email.trim()) {
-      setAccessError('Por favor, preencha o Nome Completo e o E-mail do usuário.');
+    const nameVal = accessForm.name.trim();
+    let cleanUsername = accessForm.username.trim().toLowerCase();
+    if (cleanUsername.startsWith('@')) cleanUsername = cleanUsername.slice(1);
+
+    if (!nameVal || !cleanUsername) {
+      setAccessError('Por favor, preencha o Nome Completo e o Nome de Usuário (username).');
+      return;
+    }
+
+    // Uniqueness check for username
+    const existingUser = appUsers.find(
+      u => (u.username || '').toLowerCase() === cleanUsername
+    );
+    if (existingUser) {
+      setAccessError('Este nome de usuário já está em uso.');
       return;
     }
 
@@ -368,18 +399,13 @@ export function PermissionsManagement({
 
     setIsSubmittingUser(true);
     try {
-      let cleanUsername = accessForm.username.trim();
-      if (!cleanUsername) {
-        cleanUsername = accessForm.email.trim().split('@')[0];
-      }
-      if (cleanUsername.startsWith('@')) cleanUsername = cleanUsername.slice(1);
-
+      const generatedEmail = getUsernameInternalEmail(cleanUsername);
       const passwordHash = await hashPassword(definedPassword);
 
       const newUserRef = await addDoc(collection(db, 'users'), {
-        name: accessForm.name.trim(),
+        name: nameVal,
         username: cleanUsername,
-        email: accessForm.email.trim().toLowerCase(),
+        email: generatedEmail,
         role: accessForm.role,
         status: 'active',
         passwordHash,
@@ -396,15 +422,15 @@ export function PermissionsManagement({
         action: 'CREATE',
         entity: 'USER',
         entityId: newUserRef.id,
-        details: `Cadastrou o novo usuário "${accessForm.name.trim()}" (${accessForm.role.toUpperCase()}) com senha definida pelo moderador.`,
+        details: `Cadastrou o novo usuário "@${cleanUsername}" (${nameVal} - ${accessForm.role.toUpperCase()}) com senha definida pelo moderador.`,
         timestamp: serverTimestamp()
       });
 
       setCreatedCredentialsModal({
         isOpen: true,
-        title: 'Usuário Cadastrado e Acesso Liberado!',
-        userName: accessForm.name.trim(),
-        userEmail: accessForm.email.trim().toLowerCase(),
+        title: 'Usuário Cadastrado com Sucesso!',
+        userName: nameVal,
+        userEmail: generatedEmail,
         username: cleanUsername,
         tempPassword: definedPassword,
         isReset: false
@@ -784,35 +810,19 @@ export function PermissionsManagement({
               />
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <label className="text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
-                  <Mail className="w-3.5 h-3.5 text-emerald-500" />
-                  E-mail de Login *
-                </label>
-                <input
-                  type="email"
-                  required
-                  value={accessForm.email}
-                  onChange={(e) => setAccessForm(prev => ({ ...prev, email: e.target.value }))}
-                  placeholder="usuario@empresa.com"
-                  className="w-full px-4 py-3 rounded-2xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
-                  <UserCheck className="w-3.5 h-3.5 text-purple-500" />
-                  Nome de Usuário (Username)
-                </label>
-                <input
-                  type="text"
-                  value={accessForm.username}
-                  onChange={(e) => setAccessForm(prev => ({ ...prev, username: e.target.value }))}
-                  placeholder="Opcional (Ex: carlos.silva)"
-                  className="w-full px-4 py-3 rounded-2xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                <UserCheck className="w-3.5 h-3.5 text-purple-500" />
+                Nome de Usuário (Username / Login) *
+              </label>
+              <input
+                type="text"
+                required
+                value={accessForm.username}
+                onChange={(e) => setAccessForm(prev => ({ ...prev, username: e.target.value }))}
+                placeholder="Ex: carlos.silva"
+                className="w-full px-4 py-3 rounded-2xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
             </div>
 
             <div className="space-y-1.5">
@@ -892,7 +902,7 @@ export function PermissionsManagement({
                 className="flex-1 py-3.5 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs uppercase tracking-wider transition-all shadow-lg shadow-emerald-600/20 active:scale-95 disabled:opacity-50 cursor-pointer flex items-center justify-center gap-2"
               >
                 <CheckCircle2 className="w-4 h-4" />
-                {isSubmittingUser ? 'Criando Usuário...' : 'Cadastrar e Liberar Acesso'}
+                {isSubmittingUser ? 'Criando Usuário...' : 'CONCEDER ACESSO'}
               </button>
             </div>
           </form>
@@ -1025,12 +1035,12 @@ export function PermissionsManagement({
               <div className="space-y-4">
                 <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 space-y-2 text-xs">
                   <div className="flex justify-between">
-                    <span className="text-slate-400 font-bold">Usuário:</span>
+                    <span className="text-slate-400 font-bold">Nome:</span>
                     <span className="font-bold text-slate-900 dark:text-white">{createdCredentialsModal.userName}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-slate-400 font-bold">E-mail:</span>
-                    <span className="font-bold text-blue-600 dark:text-blue-400">{createdCredentialsModal.userEmail}</span>
+                    <span className="text-slate-400 font-bold">Usuário (Login):</span>
+                    <span className="font-bold text-blue-600 dark:text-blue-400">@{createdCredentialsModal.username}</span>
                   </div>
                 </div>
 
@@ -1135,20 +1145,6 @@ export function PermissionsManagement({
                     required
                     value={editForm.username}
                     onChange={(e) => setEditForm(prev => ({ ...prev, username: e.target.value }))}
-                    className="w-full px-4 py-3 rounded-2xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="text-xs font-black uppercase text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
-                    <Mail className="w-3.5 h-3.5 text-emerald-500" />
-                    E-mail
-                  </label>
-                  <input
-                    type="email"
-                    required
-                    value={editForm.email}
-                    onChange={(e) => setEditForm(prev => ({ ...prev, email: e.target.value }))}
                     className="w-full px-4 py-3 rounded-2xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>

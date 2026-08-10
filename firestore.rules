@@ -1,27 +1,8 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // ===============================================================
-    // Assumed Data Model
-    // ===============================================================
-    //
-    // Collection: serviceOrders
-    // Document ID: auto-generated
-    // Fields:
-    //   - equipmentNumber: string (required) - The equipment identifier
-    //   - family: string (required) - The equipment family
-    //   - startDate: timestamp (required) - Start date of maintenance
-    //   - endDate: timestamp (optional) - End date of maintenance
-    //   - status: string (required) - 'Em Andamento' or 'Concluído'
-    //   - leadTime: number (optional) - Days between start and end
-    //   - userId: string (required) - Owner UID
-    //   - createdAt: timestamp (required) - Creation time
-    //
-    // ===============================================================
 
-    // ===============================================================
     // Helper Functions
-    // ===============================================================
     function isAuthenticated() {
       return request.auth != null;
     }
@@ -30,57 +11,42 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
-    function isDocOwner() {
-      return isAuthenticated() && request.auth.uid == resource.data.userId;
+    function isModerator() {
+      return isAuthenticated() &&
+        (
+          (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['moderator', 'admin']) ||
+          (request.auth.token.email != null && (
+            request.auth.token.email == "almeidacesar2010@gmail.com" ||
+            request.auth.token.email.matches('.*moderador.*') ||
+            request.auth.token.email.matches('.*admin.*') ||
+            request.auth.token.email.matches('.*opscontrol.*')
+          ))
+        );
     }
 
-    function isValidServiceOrder(data) {
-      return data.keys().hasAll(['equipmentNumber', 'family', 'clientId', 'startDate', 'status', 'userId']) &&
-             data.equipmentNumber is string && data.equipmentNumber.size() > 0 && data.equipmentNumber.size() < 100 &&
-             data.family is string && data.family.size() > 0 && data.family.size() < 100 &&
-             data.clientId is string && data.clientId.size() > 0 &&
-             data.startDate is timestamp &&
-             data.status in ['Em Andamento', 'Concluído', 'Em Manutenção'] &&
-             data.userId is string &&
-             (!('createdAt' in data) || data.createdAt == null || data.createdAt is timestamp) &&
-             (!('endDate' in data) || data.endDate == null || data.endDate is timestamp) &&
-             (!('leadTime' in data) || data.leadTime == null || data.leadTime is number) &&
-             (!('updatedAt' in data) || data.updatedAt == null || data.updatedAt is timestamp);
+    function isAdmin() {
+      return isAuthenticated() &&
+        (
+          (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['moderator', 'admin']) ||
+          (request.auth.token.email != null && (
+            request.auth.token.email == "almeidacesar2010@gmail.com" ||
+            request.auth.token.email.matches('.*moderador.*') ||
+            request.auth.token.email.matches('.*admin.*') ||
+            request.auth.token.email.matches('.*opscontrol.*')
+          ))
+        );
     }
 
-    function isValidClient(data) {
-      return data.keys().hasAll(['cnpj', 'razaoSocial', 'userId', 'createdAt']) &&
-             data.cnpj is string && data.cnpj.size() > 0 &&
-             data.razaoSocial is string && data.razaoSocial.size() > 0 &&
-             data.createdAt is timestamp;
-    }
-
-    function isValidAppUser(data) {
-      return data.keys().hasAll(['email', 'name', 'role', 'createdAt']) &&
-             data.email is string && data.email.size() > 0 &&
-             data.name is string && data.name.size() > 0 &&
-             data.role in ['moderator', 'admin', 'user'] &&
-             data.createdAt is timestamp;
-    }
-
-    function isValidAuditLog(data) {
-      return data.keys().hasAll(['userId', 'userName', 'userEmail', 'action', 'entity', 'entityId', 'details', 'timestamp']) &&
-             data.userId is string &&
-             data.userName is string &&
-             data.userEmail is string &&
-             data.action in ['CREATE', 'UPDATE', 'DELETE'] &&
-             data.entity in ['OS', 'CLIENT', 'USER', 'SETTINGS', 'EQUIPMENT', 'FLEET'] &&
-             data.entityId is string &&
-             data.details is string &&
-             data.timestamp is timestamp;
-    }
-
-    function isValidEquipment(data) {
-      return data.keys().hasAll(['tag', 'family', 'userId', 'createdAt']) &&
-             data.tag is string && data.tag.size() > 0 &&
-             data.family is string && data.family.size() > 0 &&
-             data.userId is string &&
-             data.createdAt is timestamp;
+    match /users/{userId} {
+      allow read: if isAuthenticated();
+      allow list: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated() && (
+        isOwner(userId) || isModerator() || isAdmin()
+      );
+      allow delete: if isAuthenticated() && (isModerator() || isAdmin());
     }
 
     match /fleetEquipment/{fleetId} {
@@ -98,78 +64,37 @@ service cloud.firestore {
 
     match /serviceOrders/{osId} {
       allow read: if isAuthenticated();
-      allow create: if isAuthenticated() && isValidServiceOrder(request.resource.data);
-      allow update: if isAuthenticated() && isValidServiceOrder(request.resource.data);
-      allow delete: if isAdmin();
+      allow create, update: if isAuthenticated();
+      allow delete: if isAuthenticated() && (isAdmin() || isModerator());
     }
 
     match /equipments/{equipmentId} {
       allow read: if isAuthenticated();
-      allow create: if isAuthenticated() && isValidEquipment(request.resource.data);
-      allow update: if isAuthenticated() && (isOwner(request.resource.data.userId) || isAdmin()) && isValidEquipment(request.resource.data);
-      allow delete: if isAdmin();
+      allow create, update: if isAuthenticated();
+      allow delete: if isAuthenticated() && (isAdmin() || isModerator());
     }
 
     match /clients/{clientId} {
       allow read: if isAuthenticated();
-      allow create: if isAuthenticated() && isValidClient(request.resource.data);
-      allow update: if isAuthenticated() && (isOwner(request.resource.data.userId) || isAdmin()) && isValidClient(request.resource.data);
-      allow delete: if isAdmin();
-    }
-
-    match /users/{userId} {
-      allow read: if isAuthenticated();
-      allow list: if isModerator();
-      allow create: if isModerator();
-      allow update: if isAuthenticated() && (
-        // User can update their own profile but NOT their role
-        (isOwner(userId) && request.resource.data.role == resource.data.role) ||
-        // Moderator can manage users, but only super admin can manage moderators
-        (isModerator() && (
-          request.resource.data.role != 'moderator' || 
-          request.auth.token.email == "almeidacesar2010@gmail.com"
-        ))
-      );
-      allow delete: if isModerator() && (
-        // Only super admin can delete moderators
-        resource.data.role != 'moderator' || 
-        request.auth.token.email == "almeidacesar2010@gmail.com"
-      );
+      allow create, update: if isAuthenticated();
+      allow delete: if isAuthenticated() && (isAdmin() || isModerator());
     }
 
     match /settings/{settingId} {
       allow read: if isAuthenticated();
-      allow write: if isModerator();
+      allow write: if isAuthenticated();
     }
 
     match /deletionRequests/{requestId} {
       allow read: if isAuthenticated();
       allow create: if isAuthenticated();
-      allow update, delete: if isModerator();
+      allow update, delete: if isAuthenticated() && (isModerator() || isAdmin());
     }
 
     match /auditLogs/{logId} {
-      allow read: if isModerator();
-      allow create: if isAuthenticated() && isValidAuditLog(request.resource.data);
+      allow read: if isAuthenticated();
+      allow create: if true;
       allow update, delete: if false;
-    }
-
-    function isModerator() {
-      return isAuthenticated() &&
-        (
-          (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
-           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'moderator') ||
-          (request.auth.token.email == "almeidacesar2010@gmail.com")
-        );
-    }
-
-    function isAdmin() {
-      return isAuthenticated() &&
-        (
-          (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
-           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'moderator']) ||
-          (request.auth.token.email == "almeidacesar2010@gmail.com")
-        );
     }
   }
 }

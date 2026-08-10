@@ -38,7 +38,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { collection, addDoc, updateDoc, deleteDoc, doc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../firebase';
 import { AppUser, UserRole, ModuleVisibilityConfig } from '../types';
-import { hashPassword, generateTempPassword, getUsernameInternalEmail } from '../utils/authUtils';
+import { hashPassword, getUsernameInternalEmail } from '../utils/authUtils';
 
 interface PermissionsManagementProps {
   appUsers: AppUser[];
@@ -127,7 +127,7 @@ export function PermissionsManagement({
   // Reset password state
   const [userToResetPassword, setUserToResetPassword] = useState<AppUser | null>(null);
   const [resetPasswordInput, setResetPasswordInput] = useState({
-    password: generateTempPassword(10),
+    password: '',
     showPassword: true
   });
   const [isResettingPassword, setIsResettingPassword] = useState(false);
@@ -159,7 +159,7 @@ export function PermissionsManagement({
     username: '',
     email: '',
     role: 'user' as UserRole,
-    initialPassword: generateTempPassword(10),
+    initialPassword: '',
     showPassword: true
   });
   const [isSubmittingUser, setIsSubmittingUser] = useState(false);
@@ -301,8 +301,8 @@ export function PermissionsManagement({
 
       await updateDoc(doc(db, 'users', userToResetPassword.id), {
         passwordHash,
-        mustChangePassword: true,
-        isFirstLoginCompleted: false,
+        mustChangePassword: false,
+        isFirstLoginCompleted: true,
         updatedAt: serverTimestamp()
       });
 
@@ -328,6 +328,7 @@ export function PermissionsManagement({
       });
 
       setUserToResetPassword(null);
+      setResetPasswordInput({ password: '', showPassword: true });
     } catch (err: any) {
       console.error('Error resetting user password:', err);
       setSaveError(err?.message || 'Erro ao redefinir a senha do usuário.');
@@ -409,8 +410,8 @@ export function PermissionsManagement({
         role: accessForm.role,
         status: 'active',
         passwordHash,
-        mustChangePassword: true,
-        isFirstLoginCompleted: false,
+        mustChangePassword: false,
+        isFirstLoginCompleted: true,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp()
       });
@@ -441,7 +442,7 @@ export function PermissionsManagement({
         username: '',
         email: '',
         role: 'user',
-        initialPassword: generateTempPassword(10),
+        initialPassword: '',
         showPassword: true
       });
       setActiveTab('users');
@@ -843,27 +844,17 @@ export function PermissionsManagement({
 
             {/* DEFINIR SENHA INICIAL */}
             <div className="space-y-1.5 pt-2">
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
-                  <KeyRound className="w-3.5 h-3.5 text-amber-500" />
-                  Senha Inicial do Usuário *
-                </label>
-                <button
-                  type="button"
-                  onClick={() => setAccessForm(prev => ({ ...prev, initialPassword: generateTempPassword(10) }))}
-                  className="text-[11px] font-bold text-blue-600 dark:text-blue-400 hover:underline cursor-pointer flex items-center gap-1"
-                >
-                  <RefreshCw className="w-3 h-3" />
-                  Gerar Senha Aleatória
-                </button>
-              </div>
+              <label className="text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                <KeyRound className="w-3.5 h-3.5 text-amber-500" />
+                Senha de Acesso do Usuário *
+              </label>
               <div className="relative">
                 <input
                   type={accessForm.showPassword ? 'text' : 'password'}
                   required
                   value={accessForm.initialPassword}
                   onChange={(e) => setAccessForm(prev => ({ ...prev, initialPassword: e.target.value }))}
-                  placeholder="Digite a senha inicial (Mín. 6 caracteres)"
+                  placeholder="Digite a senha que o usuário utilizará (Mín. 6 caracteres)"
                   className="w-full px-4 py-3 pr-12 rounded-2xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-mono font-bold focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
                 <button
@@ -1048,7 +1039,7 @@ export function PermissionsManagement({
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-black uppercase tracking-wider text-amber-700 dark:text-amber-400 flex items-center gap-1.5">
                       <KeyRound className="w-4 h-4" />
-                      Senha Temporária Gerada
+                      Senha Configurada
                     </span>
                     <button
                       type="button"
@@ -1070,10 +1061,7 @@ export function PermissionsManagement({
                     Orientação ao Usuário:
                   </p>
                   <p>
-                    Forneça o e-mail/usuário e a senha inicial acima ao usuário para que ele possa acessar o sistema.
-                  </p>
-                  <p className="text-[11px] text-slate-400 pt-1">
-                    • Ao realizar o primeiro login no site, o usuário será solicitado a redefinir esta senha para uma senha pessoal definitiva.
+                    Informe o nome de usuário (<strong>@{createdCredentialsModal.username}</strong>) e a senha acima ao usuário para que ele possa realizar seu primeiro acesso diretamente no sistema.
                   </p>
                 </div>
               </div>
@@ -1209,27 +1197,53 @@ export function PermissionsManagement({
                   <h3 className="text-lg font-black uppercase tracking-tight text-slate-900 dark:text-white">
                     Redefinir Senha do Usuário
                   </h3>
-                  <p className="text-xs text-slate-500">Envio automático de senha temporária</p>
+                  <p className="text-xs text-slate-500">Defina a nova senha do usuário</p>
                 </div>
               </div>
 
-              <div className="text-xs text-slate-600 dark:text-slate-300 space-y-3 leading-relaxed">
+              <div className="text-xs text-slate-600 dark:text-slate-300 space-y-4 leading-relaxed">
                 <p>
-                  Tem certeza que deseja redefinir a senha de <strong className="text-slate-900 dark:text-white">{userToResetPassword.name}</strong> ({userToResetPassword.email})?
+                  Defina a nova senha para <strong className="text-slate-900 dark:text-white">{userToResetPassword.name}</strong> (@{userToResetPassword.username || userToResetPassword.email.split('@')[0]}):
                 </p>
-                <div className="p-3.5 rounded-2xl bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 space-y-1">
-                  <p className="font-bold">• O que acontecerá:</p>
-                  <p>1. Uma nova senha temporária será gerada automaticamente.</p>
-                  <p>2. A senha anterior deixará de funcionar imediatamente.</p>
-                  <p>3. As novas credenciais serão enviadas para o e-mail do usuário.</p>
-                  <p>4. O usuário será obrigado a cadastrar uma nova senha no próximo login.</p>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                    <KeyRound className="w-3.5 h-3.5 text-amber-500" />
+                    Nova Senha *
+                  </label>
+                  <div className="relative">
+                    <input
+                      type={resetPasswordInput.showPassword ? 'text' : 'password'}
+                      required
+                      value={resetPasswordInput.password}
+                      onChange={(e) => setResetPasswordInput(prev => ({ ...prev, password: e.target.value }))}
+                      placeholder="Digite a nova senha (Mín. 6 caracteres)"
+                      className="w-full px-4 py-3 pr-12 rounded-2xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-mono font-bold focus:outline-none focus:ring-2 focus:ring-amber-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setResetPasswordInput(prev => ({ ...prev, showPassword: !prev.showPassword }))}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1 cursor-pointer"
+                    >
+                      {resetPasswordInput.showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="p-3.5 rounded-2xl bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 space-y-1 text-[11px]">
+                  <p className="font-bold">• Importante:</p>
+                  <p>1. A senha anterior deixará de funcionar imediatamente.</p>
+                  <p>2. Passe a nova senha criada diretamente para o usuário.</p>
                 </div>
               </div>
 
               <div className="flex items-center gap-3 pt-2">
                 <button
                   type="button"
-                  onClick={() => setUserToResetPassword(null)}
+                  onClick={() => {
+                    setUserToResetPassword(null);
+                    setResetPasswordInput({ password: '', showPassword: true });
+                  }}
                   className="flex-1 py-3 rounded-2xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-black text-xs uppercase tracking-wider hover:bg-slate-200 transition-all cursor-pointer"
                 >
                   Cancelar
@@ -1237,11 +1251,11 @@ export function PermissionsManagement({
                 <button
                   type="button"
                   onClick={handleConfirmResetPassword}
-                  disabled={isResettingPassword}
+                  disabled={isResettingPassword || !resetPasswordInput.password.trim()}
                   className="flex-1 py-3 rounded-2xl bg-amber-600 hover:bg-amber-700 text-white font-black text-xs uppercase tracking-wider transition-all shadow-lg shadow-amber-600/20 active:scale-95 disabled:opacity-50 cursor-pointer flex items-center justify-center gap-2"
                 >
-                  <RefreshCw className={`w-4 h-4 ${isResettingPassword ? 'animate-spin' : ''}`} />
-                  {isResettingPassword ? 'Gerando...' : 'Confirmar Redefinição'}
+                  <CheckCircle2 className={`w-4 h-4 ${isResettingPassword ? 'animate-spin' : ''}`} />
+                  {isResettingPassword ? 'Salvando...' : 'Confirmar Nova Senha'}
                 </button>
               </div>
             </motion.div>

@@ -2720,11 +2720,6 @@ const generatePDF = (order: any) => {
     const op = decontaminationOperations.find(o => o.id === id);
     const tag = op?.equipmentNumber || 'Tanque';
 
-    if (isAdmin) {
-      handleOpenDeleteModal('Operação de Descontaminação', id, 'decontaminationOperations', tag);
-      return;
-    }
-
     setConfirmModal({
       isOpen: true,
       title: 'Excluir Operação de Descontaminação',
@@ -3854,8 +3849,10 @@ const generatePDF = (order: any) => {
                 {activeTab === 'dashboard' ? 'Painel de Produtividade' : 
                  activeTab === 'orders' ? 'Gestão de OS' :
                  activeTab === 'fleet' ? 'Gestão da Frota' :
+                 activeTab === 'decontamination' ? 'Descontaminação' :
                  activeTab === 'clients' ? 'Gestão de Clientes' : 
                  activeTab === 'equipments' ? 'Gestão de Equipamentos' :
+                 activeTab === 'approvals' ? 'Aprovações Pendentes' :
                  activeTab === 'settings' ? 'Configurações' : 
                  activeTab === 'audits' ? 'Auditoria de Sistema' : 'Gestão de Acessos'}
               </motion.h2>
@@ -3870,9 +3867,12 @@ const generatePDF = (order: any) => {
                     ? 'Performance em tempo real' 
                     : activeTab === 'orders' ? 'Controle operacional' :
                     activeTab === 'fleet' ? 'Controle de ativos e inspeções PCP' :
+                    activeTab === 'decontamination' ? 'Controle de lavagem e descontaminação' :
                     activeTab === 'clients' ? 'Base de parceiros' :
                     activeTab === 'equipments' ? 'Ativos registrados' :
+                    activeTab === 'approvals' ? 'Solicitações e autorizações' :
                     activeTab === 'settings' ? 'Preferências do sistema' :
+                    activeTab === 'audits' ? 'Registros e logs de ações' :
                     'Controle de segurança'}
                 </p>
               </div>
@@ -4523,7 +4523,6 @@ const generatePDF = (order: any) => {
                   userRole={effectiveRole}
                   onSaveOperation={handleSaveDecontaminationOperation}
                   onDeleteOperation={handleDeleteDecontaminationOperation}
-                  onRequestDelete={handleOpenDeleteModal}
                 />
               ) : activeTab === 'orders' ? (
                 <div className="space-y-6">

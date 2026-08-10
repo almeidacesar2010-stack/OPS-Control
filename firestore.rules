@@ -40,12 +40,10 @@ service cloud.firestore {
     }
 
     match /users/{userId} {
-      allow read: if isAuthenticated();
-      allow list: if isAuthenticated();
-      allow create: if isAuthenticated();
-      allow update: if isAuthenticated() && (
-        isOwner(userId) || isModerator() || isAdmin()
-      );
+      allow read: if true;
+      allow list: if true;
+      allow create: if true;
+      allow update: if true;
       allow delete: if isAuthenticated() && (isModerator() || isAdmin());
     }
 

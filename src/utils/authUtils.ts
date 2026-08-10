@@ -76,6 +76,28 @@ export async function findUserByUsernameOrEmail(input: string): Promise<{ docId:
     console.error('Error querying legacy email in Firestore:', err);
   }
 
+  // 5. Fallback scan all users in Firestore (case-insensitive match)
+  try {
+    const snapAll = await getDocs(usersRef);
+    for (const userDoc of snapAll.docs) {
+      const uData = userDoc.data() as AppUser;
+      const uName = (uData.username || '').trim().toLowerCase().replace(/^@/, '');
+      const uEmail = (uData.email || '').trim().toLowerCase();
+      const rawInputClean = input.trim().toLowerCase().replace(/^@/, '');
+      
+      if (
+        uName === rawInputClean ||
+        uEmail === rawInputClean ||
+        uEmail === getUsernameInternalEmail(rawInputClean) ||
+        (uData.name && uData.name.trim().toLowerCase() === rawInputClean)
+      ) {
+        return { docId: userDoc.id, data: uData };
+      }
+    }
+  } catch (err) {
+    console.error('Error scanning all users in Firestore:', err);
+  }
+
   return null;
 }
 

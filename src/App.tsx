@@ -94,10 +94,21 @@ import {
   Hash,
   AlertTriangle,
   Eye,
-  Printer
+  Printer,
+  Droplet
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from './lib/utils';
+import { FleetEquipment, FleetHistoryEntry, FleetNonConformity } from './types/fleet';
+import { FleetManagement } from './components/FleetManagement';
+import { isDateOrInvalidEquipmentNumber } from './components/FleetImportModal';
+import { calculateDaysRemaining } from './utils/fleetUtils';
+import { DecontaminationOperation } from './types/decontamination';
+import { DecontaminationManagement } from './components/DecontaminationManagement';
+import { PendingApprovals } from './components/PendingApprovals';
+import { PermissionsManagement } from './components/PermissionsManagement';
+import { DeleteRequestModal } from './components/DeleteRequestModal';
+import { DeletionRequest, ModuleVisibilityConfig, UserRole } from './types';
 
 // Types
 interface Client {
@@ -137,6 +148,8 @@ interface ServiceOrder {
   userId: string;
   createdAt: Timestamp;
   createdBy?: string;
+  maintenanceTechnician?: string;
+  closedBy?: string;
   slingCheck?: InspectionCheck;
   damagedSlingCheck?: InspectionCheck;
   excessiveCorrosionCheck?: InspectionCheck;
@@ -167,7 +180,7 @@ interface AuditLog {
   userName: string;
   userEmail: string;
   action: 'CREATE' | 'UPDATE' | 'DELETE';
-  entity: 'OS' | 'CLIENT' | 'USER' | 'SETTINGS' | 'EQUIPMENT';
+  entity: 'OS' | 'CLIENT' | 'USER' | 'SETTINGS' | 'EQUIPMENT' | 'FLEET';
   entityId: string;
   details: string;
   timestamp: Timestamp;
@@ -514,14 +527,41 @@ const DocInspectionTableRow = ({
 function AppContent() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'orders' | 'clients' | 'equipments' | 'access' | 'settings' | 'audits'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'orders' | 'fleet' | 'decontamination' | 'clients' | 'equipments' | 'approvals' | 'access' | 'settings' | 'audits'>('dashboard');
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
   const [orders, setOrders] = useState<ServiceOrder[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
   const [equipments, setEquipments] = useState<Equipment[]>([]);
+  const [fleetEquipment, setFleetEquipment] = useState<FleetEquipment[]>([]);
+  const [fleetHistory, setFleetHistory] = useState<FleetHistoryEntry[]>([]);
+  const [decontaminationOperations, setDecontaminationOperations] = useState<DecontaminationOperation[]>([]);
   const [appUsers, setAppUsers] = useState<AppUser[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
-  const [currentUserRole, setCurrentUserRole] = useState<'moderator' | 'admin' | 'user'>('user');
+  const [currentUserRole, setCurrentUserRole] = useState<UserRole>('user');
+  const [moduleVisibility, setModuleVisibility] = useState<ModuleVisibilityConfig>({
+    dashboard: { moderator: true, admin: true, user: true },
+    orders: { moderator: true, admin: true, user: false },
+    fleet: { moderator: true, admin: true, user: false },
+    decontamination: { moderator: true, admin: true, user: true },
+    clients: { moderator: true, admin: true, user: false },
+    equipments: { moderator: true, admin: true, user: true },
+  });
+  const [deletionRequests, setDeletionRequests] = useState<DeletionRequest[]>([]);
+  const [activeRolePreview, setActiveRolePreview] = useState<UserRole | null>(null);
+  const effectiveRole: UserRole = activeRolePreview || currentUserRole;
+  const [deleteModalState, setDeleteModalState] = useState<{
+    isOpen: boolean;
+    itemType: string;
+    itemId: string;
+    itemCollection: string;
+    itemName: string;
+  }>({
+    isOpen: false,
+    itemType: '',
+    itemId: '',
+    itemCollection: '',
+    itemName: ''
+  });
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalType, setModalType] = useState<'os' | 'client' | 'access' | 'equipment'>('os');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -560,6 +600,9 @@ function AppContent() {
     password: ''
   });
 
+  const currentUserInfo = appUsers.find(u => u.id === user?.uid);
+  const currentUserName = currentUserInfo?.name || user?.displayName || user?.email || '';
+
   // Form States
   const [formData, setFormData] = useState({
     equipmentNumber: '',
@@ -572,6 +615,9 @@ function AppContent() {
     status: 'Em Manutenção' as 'Em Manutenção' | 'Concluído',
     priority: 'Média' as 'Baixa' | 'Média' | 'Alta' | 'Urgente',
     maintenanceScope: '',
+    createdBy: '',
+    maintenanceTechnician: '',
+    closedBy: '',
     slingCheck: { status: 'NA', value: '' } as InspectionCheck,
     damagedSlingCheck: { status: 'NA', value: '' } as InspectionCheck,
     excessiveCorrosionCheck: { status: 'NA', value: '' } as InspectionCheck,
@@ -645,7 +691,7 @@ function AppContent() {
     localStorage.setItem('theme', theme);
   }, [theme]);
 
-  const addAuditLog = async (action: 'CREATE' | 'UPDATE' | 'DELETE', entity: 'OS' | 'CLIENT' | 'USER' | 'SETTINGS' | 'EQUIPMENT', entityId: string, details: string) => {
+  const addAuditLog = async (action: 'CREATE' | 'UPDATE' | 'DELETE', entity: 'OS' | 'CLIENT' | 'USER' | 'SETTINGS' | 'EQUIPMENT' | 'FLEET', entityId: string, details: string) => {
     try {
       const currentUserData = appUsers.find(u => u.id === user?.uid);
       await addDoc(collection(db, 'auditLogs'), {
@@ -716,6 +762,7 @@ function AppContent() {
       setOrders(ordersData);
     }, (error) => {
       console.error("Orders listener error:", error);
+      handleFirestoreError(error, OperationType.GET, 'serviceOrders');
     });
 
     // Clients Listener
@@ -725,6 +772,7 @@ function AppContent() {
       setClients(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Client[]);
     }, (error) => {
       console.error("Clients listener error:", error);
+      handleFirestoreError(error, OperationType.GET, 'clients');
     });
 
     // Audit Logs Listener (Moderators only)
@@ -741,6 +789,7 @@ function AppContent() {
         }));
       }, (error) => {
         console.error("Audit logs listener error:", error);
+        handleFirestoreError(error, OperationType.GET, 'auditLogs');
       });
     }
 
@@ -748,6 +797,43 @@ function AppContent() {
       setEquipments(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Equipment[]);
     }, (error) => {
       console.error("Equipments listener error:", error);
+      handleFirestoreError(error, OperationType.GET, 'equipments');
+    });
+
+    const unsubFleetEquipment = onSnapshot(collection(db, 'fleetEquipment'), (snapshot) => {
+      setFleetEquipment(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as FleetEquipment[]);
+    }, (error) => {
+      console.error("Fleet equipment listener error:", error);
+      handleFirestoreError(error, OperationType.GET, 'fleetEquipment');
+    });
+
+    const unsubFleetHistory = onSnapshot(collection(db, 'fleetHistory'), (snapshot) => {
+      setFleetHistory(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as FleetHistoryEntry[]);
+    }, (error) => {
+      console.error("Fleet history listener error:", error);
+      handleFirestoreError(error, OperationType.GET, 'fleetHistory');
+    });
+
+    const unsubDecontamination = onSnapshot(collection(db, 'decontaminationOperations'), (snapshot) => {
+      setDecontaminationOperations(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as DecontaminationOperation[]);
+    }, (error) => {
+      console.error("Decontamination operations listener error:", error);
+      handleFirestoreError(error, OperationType.GET, 'decontaminationOperations');
+    });
+
+    const unsubVisibility = onSnapshot(doc(db, 'settings', 'moduleVisibility'), (snapshot) => {
+      if (snapshot.exists()) {
+        setModuleVisibility(snapshot.data() as ModuleVisibilityConfig);
+      }
+    });
+
+    const unsubDelReqs = onSnapshot(collection(db, 'deletionRequests'), (snapshot) => {
+      const reqs = snapshot.docs.map(d => ({ id: d.id, ...d.data() })) as DeletionRequest[];
+      setDeletionRequests(reqs.sort((a, b) => {
+        const tA = a.requestedAt?.toMillis ? a.requestedAt.toMillis() : 0;
+        const tB = b.requestedAt?.toMillis ? b.requestedAt.toMillis() : 0;
+        return tB - tA;
+      }));
     });
 
     return () => {
@@ -755,6 +841,11 @@ function AppContent() {
       unsubClients();
       unsubAudits();
       unsubEquipments();
+      unsubFleetEquipment();
+      unsubFleetHistory();
+      unsubDecontamination();
+      unsubVisibility();
+      unsubDelReqs();
     };
   }, [user, isAuthReady, currentUserRole]);
 
@@ -925,7 +1016,9 @@ function AppContent() {
         leadTime,
         userId: user.uid,
         updatedAt: serverTimestamp(),
-        createdBy: editingOrder ? (editingOrder.createdBy || currentUserName) : currentUserName,
+        createdBy: editingOrder ? (editingOrder.createdBy || formData.createdBy || currentUserName) : (formData.createdBy || currentUserName),
+        maintenanceTechnician: formData.maintenanceTechnician || '',
+        closedBy: formData.closedBy || '',
         slingCheck: formData.slingCheck,
         damagedSlingCheck: formData.damagedSlingCheck,
         excessiveCorrosionCheck: formData.excessiveCorrosionCheck,
@@ -967,6 +1060,29 @@ function AppContent() {
         setSuccessMessage('Ordem de serviço cadastrada com sucesso!');
       }
 
+      // Automatically validate fleet equipment if OS is completed or opened with valid data
+      if (formData.equipmentNumber) {
+        const matchedFleetItem = fleetEquipment.find(fe => (fe.equipmentNumber || '').trim().toUpperCase() === formData.equipmentNumber.trim().toUpperCase());
+        if (matchedFleetItem && (matchedFleetItem.isPendingValidation !== false || matchedFleetItem.validationStatus === 'pending')) {
+          if (formData.status === 'Concluído') {
+            try {
+              const clientObj = clients.find(c => c.id === formData.clientId);
+              await updateDoc(doc(db, 'fleetEquipment', matchedFleetItem.id), {
+                isPendingValidation: false,
+                validationStatus: 'validated',
+                validatedAt: serverTimestamp(),
+                validatedBy: currentUserName,
+                clientId: clientObj ? clientObj.razaoSocial : (matchedFleetItem.clientId || 'BASE'),
+                updatedAt: serverTimestamp()
+              });
+              await addAuditLog('UPDATE', 'FLEET', matchedFleetItem.id, `Validação de cadastro da frota efetuada via conclusão da OS #${formData.equipmentNumber}`);
+            } catch (err) {
+              console.error('Error auto-validating fleet equipment:', err);
+            }
+          }
+        }
+      }
+
       setIsModalOpen(false);
       setEditingOrder(null);
       setFormData({
@@ -980,6 +1096,9 @@ function AppContent() {
         status: 'Em Manutenção',
         priority: 'Média' as const,
         maintenanceScope: '',
+        createdBy: '',
+        maintenanceTechnician: '',
+        closedBy: '',
         slingCheck: { status: 'NA', value: '' },
         damagedSlingCheck: { status: 'NA', value: '' },
         excessiveCorrosionCheck: { status: 'NA', value: '' },
@@ -1399,6 +1518,9 @@ function AppContent() {
       status: order.status || 'Em Manutenção',
       priority: order.priority || 'Média',
       maintenanceScope: order.maintenanceScope || '',
+      createdBy: order.createdBy || '',
+      maintenanceTechnician: order.maintenanceTechnician || '',
+      closedBy: order.closedBy || '',
       slingCheck: order.slingCheck || { status: 'NA', value: '' },
       damagedSlingCheck: order.damagedSlingCheck || { status: 'NA', value: '' },
       excessiveCorrosionCheck: order.excessiveCorrosionCheck || { status: 'NA', value: '' },
@@ -1600,6 +1722,10 @@ const generatePDF = (order: any) => {
       [
         'LEAD TIME OPERACIONAL:', leadTimeText.toUpperCase(),
         'RESPONSÁVEL ABERTURA:', (order.createdBy || 'SISTEMA').toUpperCase()
+      ],
+      [
+        'TÉCNICO MANUTENÇÃO:', (order.maintenanceTechnician || 'NÃO INFORMADO').toUpperCase(),
+        'FECHAMENTO DA OS:', (order.closedBy || (order.status === 'Concluído' ? 'NÃO INFORMADO' : 'PENDENTE')).toUpperCase()
       ]
     ];
 
@@ -1609,7 +1735,7 @@ const generatePDF = (order: any) => {
       theme: 'grid',
       styles: {
         fontSize: 7,
-        cellPadding: { top: 3.5, bottom: 3.5, left: 4, right: 4 },
+        cellPadding: { top: 3, bottom: 3, left: 4, right: 4 },
         lineColor: [226, 232, 240], // slate-200 (tidy subtle lines)
         lineWidth: 0.15,
         fontStyle: 'bold'
@@ -1622,7 +1748,7 @@ const generatePDF = (order: any) => {
       }
     });
 
-    currentY = (doc as any).lastAutoTable.finalY + 8;
+    currentY = (doc as any).lastAutoTable.finalY + 6;
 
     // --- II. ESCOPO DO SERVIÇO ---
     doc.setFont('helvetica', 'bold');
@@ -1651,12 +1777,12 @@ const generatePDF = (order: any) => {
         fontStyle: 'bold', 
         fontSize: 7.5,
         halign: 'left',
-        cellPadding: { top: 4, bottom: 4, left: 5, right: 5 }
+        cellPadding: { top: 3.2, bottom: 3.2, left: 5, right: 5 }
       },
       bodyStyles: { 
         fontSize: 7, 
         textColor: [51, 65, 85], // Slate-700
-        cellPadding: { top: 4, bottom: 4, left: 5, right: 5 },
+        cellPadding: { top: 3.2, bottom: 3.2, left: 5, right: 5 },
         lineColor: [226, 232, 240], // Slate-200
         lineWidth: 0.15
       },
@@ -1682,23 +1808,21 @@ const generatePDF = (order: any) => {
       }
     });
 
+    currentY = (doc as any).lastAutoTable.finalY + 6;
+
     const isCCU = order.family === 'CCUs' || (order.family || '').toUpperCase().includes('CCU');
 
-    // --- PAGE 2 FOR CCU COMPONENT PARTS & RETRABALHO / SIGNATURES ---
-    doc.addPage();
-    
-    // Draw outer page-2 boundary frame
-    doc.setDrawColor(226, 232, 240);
-    doc.setLineWidth(0.15);
-    doc.rect(8, 8, 194, 281);
-
-    // Top margin accent bar for page 2
-    doc.setFillColor(30, 41, 59);
-    doc.rect(8, 8, 194, 2, 'F');
-
-    currentY = 18;
-
     if (isCCU) {
+      if (currentY > 160) {
+        doc.addPage();
+        doc.setDrawColor(226, 232, 240);
+        doc.setLineWidth(0.15);
+        doc.rect(8, 8, 194, 281);
+        doc.setFillColor(30, 41, 59);
+        doc.rect(8, 8, 194, 2, 'F');
+        currentY = 18;
+      }
+
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(8);
       doc.setTextColor(15, 23, 42); // slate-900
@@ -1722,18 +1846,18 @@ const generatePDF = (order: any) => {
         ],
         theme: 'grid',
         headStyles: { 
-          fillColor: [30, 41, 59], // Standardized Slate-800 header pattern
+          fillColor: [30, 41, 59],
           textColor: [255, 255, 255], 
           fontStyle: 'bold', 
           fontSize: 7.5,
           halign: 'left',
-          cellPadding: { top: 4, bottom: 4, left: 5, right: 5 }
+          cellPadding: { top: 3.5, bottom: 3.5, left: 5, right: 5 }
         },
         bodyStyles: { 
           fontSize: 7, 
-          textColor: [51, 65, 85], // Slate-700
-          cellPadding: { top: 4, bottom: 4, left: 5, right: 5 },
-          lineColor: [226, 232, 240], // Slate-200
+          textColor: [51, 65, 85],
+          cellPadding: { top: 3.5, bottom: 3.5, left: 5, right: 5 },
+          lineColor: [226, 232, 240],
           lineWidth: 0.15
         },
         columnStyles: { 
@@ -1758,10 +1882,20 @@ const generatePDF = (order: any) => {
         }
       });
 
-      currentY = (doc as any).lastAutoTable.finalY + 8;
+      currentY = (doc as any).lastAutoTable.finalY + 6;
     }
 
-    // --- IV. INDICADOR DE RETRABALHO (CONTROLE DE GARGALOS) ---
+    // --- INDICADOR DE RETRABALHO (CONTROLE DE GARGALOS) ---
+    if (currentY > 230) {
+      doc.addPage();
+      doc.setDrawColor(226, 232, 240);
+      doc.setLineWidth(0.15);
+      doc.rect(8, 8, 194, 281);
+      doc.setFillColor(30, 41, 59);
+      doc.rect(8, 8, 194, 2, 'F');
+      currentY = 18;
+    }
+
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(8);
     doc.setTextColor(15, 23, 42); // slate-900
@@ -1776,58 +1910,58 @@ const generatePDF = (order: any) => {
       ],
       theme: 'grid',
       headStyles: { 
-        fillColor: [30, 41, 59], // Standardized Slate-800 header pattern
+        fillColor: [30, 41, 59],
         textColor: [255, 255, 255], 
         fontStyle: 'bold', 
         fontSize: 7.5,
         halign: 'left',
-        cellPadding: { top: 4, bottom: 4, left: 5, right: 5 }
+        cellPadding: { top: 3.5, bottom: 3.5, left: 5, right: 5 }
       },
       bodyStyles: { 
         fontSize: 7, 
-        textColor: [51, 65, 85], // Slate-700
-        cellPadding: { top: 4, bottom: 4, left: 5, right: 5 },
-        lineColor: [226, 232, 240], // Slate-200
+        textColor: [51, 65, 85],
+        cellPadding: { top: 3.5, bottom: 3.5, left: 5, right: 5 },
+        lineColor: [226, 232, 240],
         lineWidth: 0.15
       },
       columnStyles: { 
-        0: { fontStyle: 'bold', cellWidth: 70, textColor: [15, 23, 42] }, // Checkpoint tag
+        0: { fontStyle: 'bold', cellWidth: 70, textColor: [15, 23, 42] },
         1: { halign: 'center', cellWidth: 45, fontStyle: 'bold' },
-        2: { cellWidth: 67, fontStyle: 'normal', textColor: [71, 85, 105] } // notes tag
+        2: { cellWidth: 67, fontStyle: 'normal', textColor: [71, 85, 105] }
       },
       didParseCell: (data) => {
         if (data.section === 'body' && data.column.index === 1) {
           const val = data.cell.text[0];
           if (val === 'SIM') {
-            data.cell.styles.textColor = [194, 65, 12]; // Amber-700 (Alerting bottleneck!)
-            data.cell.styles.fillColor = [255, 247, 237]; // Amber-50
+            data.cell.styles.textColor = [194, 65, 12];
+            data.cell.styles.fillColor = [255, 247, 237];
           } else {
-            data.cell.styles.textColor = [13, 148, 136]; // Teal-600
-            data.cell.styles.fillColor = [240, 253, 250]; // Teal-50
+            data.cell.styles.textColor = [13, 148, 136];
+            data.cell.styles.fillColor = [240, 253, 250];
           }
         }
       }
     });
 
-    currentY = (doc as any).lastAutoTable.finalY + 12;
+    currentY = (doc as any).lastAutoTable.finalY + 8;
 
-    // --- SIGNATURE FOOTER WITH RELATIVE OFFSET CALCULATION (PERFECT SPACING PROTECTION) ---
-    let signatureY = 258;
-    if (currentY > 238) {
+    // --- SIGNATURE FOOTER ---
+    let signatureY = 242;
+    if (currentY > 230) {
       doc.addPage();
       currentY = 20;
-      signatureY = 80;
+      signatureY = 60;
       
-      // Draw outer page-2 boundary frame
+      // Draw outer page boundary frame
       doc.setDrawColor(226, 232, 240);
       doc.setLineWidth(0.15);
       doc.rect(8, 8, 194, 281);
 
-      // Top margin accent bar for page 2
+      // Top margin accent bar for page
       doc.setFillColor(30, 41, 59);
       doc.rect(8, 8, 194, 2, 'F');
     } else {
-      signatureY = Math.max(258, currentY + 10);
+      signatureY = Math.max(240, currentY + 12);
     }
 
     doc.setDrawColor(203, 213, 225); // slate-300 lines
@@ -1835,12 +1969,16 @@ const generatePDF = (order: any) => {
     doc.line(14, signatureY, 90, signatureY);
     doc.line(120, signatureY, 196, signatureY);
     
+    const techName = order.maintenanceTechnician ? order.maintenanceTechnician.toUpperCase() : '_______________________';
+    const closedName = order.closedBy ? order.closedBy.toUpperCase() : (order.status === 'Concluído' ? '_______________________' : 'PENDENTE DE FECHAMENTO');
+
     doc.setFontSize(6.5);
     doc.setTextColor(148, 163, 184); // Slate-400
     doc.setFont('helvetica', 'bold');
-    doc.text('ASSINATURA DO TÉCNICO INSPETOR', 52, signatureY + 4, { align: 'center' });
-    doc.text(`RESPONSÁVEL: ${(order.createdBy || 'SISTEMA').toUpperCase()}`, 52, signatureY + 8, { align: 'center' });
-    doc.text('ASSINATURA DA DIRETORIA / OPERAÇÕES', 158, signatureY + 4, { align: 'center' });
+    doc.text('EXECUTOR DA MANUTENÇÃO (TÉCNICO)', 52, signatureY + 4, { align: 'center' });
+    doc.text(order.maintenanceTechnician ? `TÉCNICO: ${techName}` : techName, 52, signatureY + 8, { align: 'center' });
+    doc.text('RESPONSÁVEL PELO FECHAMENTO DA OS', 158, signatureY + 4, { align: 'center' });
+    doc.text(order.closedBy ? `FECHADO POR: ${closedName}` : closedName, 158, signatureY + 8, { align: 'center' });
 
     // --- MULTI-PAGE SECURE LOG FOOTERS ---
     const pageCount = (doc as any).internal.getNumberOfPages();
@@ -1877,10 +2015,15 @@ const generatePDF = (order: any) => {
         const end = endDate ? (endDate as Timestamp).toDate() : null;
         const leadTime = end ? differenceInDays(end, start) : null;
 
+        const currentUserData = appUsers.find(u => u.id === user?.uid);
+        const currentUserName = currentUserData?.name || user?.displayName || user?.email || 'Sistema';
+        const closedByVal = newStatus === 'Concluído' ? (orderDoc.closedBy || currentUserName) : (orderDoc.closedBy || '');
+
         await updateDoc(orderRef, {
           status: newStatus,
           endDate,
           leadTime: leadTime ?? null,
+          closedBy: closedByVal,
           updatedAt: serverTimestamp()
         });
 
@@ -1936,6 +2079,828 @@ const generatePDF = (order: any) => {
         }
       }
     });
+  };
+
+  // Gestão da Frota - Handlers
+  const handleSaveFleetEquipment = async (data: Partial<FleetEquipment>) => {
+    if (!user) return;
+    const tag = (data.equipmentNumber || '').trim().toUpperCase();
+    const type = (data.type || 'CCU').trim().toUpperCase();
+
+    let existingDoc = data.id ? fleetEquipment.find(e => e.id === data.id) : undefined;
+    if (!existingDoc) {
+      existingDoc = fleetEquipment.find(e => 
+        (e.equipmentNumber || '').trim().toUpperCase() === tag && 
+        (e.type || 'CCU').trim().toUpperCase() === type
+      );
+    }
+
+    try {
+      if (existingDoc) {
+        const eqRef = doc(db, 'fleetEquipment', existingDoc.id);
+        const updatePayload: any = {
+          ...data,
+          equipmentNumber: tag,
+          type: data.type || existingDoc.type || 'CCU',
+          updatedAt: serverTimestamp()
+        };
+        await updateDoc(eqRef, updatePayload);
+
+        const batch = writeBatch(db);
+        const fieldsToTrack: (keyof FleetEquipment)[] = [
+          'equipmentNumber', 'type', 'clientId', 'location', 'status', 
+          'visualInspectionDate', 'nextVisualInspectionDate', 'endInspectionDate', 'nextEndInspectionDate', 'observations'
+        ];
+
+        fieldsToTrack.forEach((field) => {
+          const oldVal = String(existingDoc[field] || '');
+          const newVal = String(data[field] || '');
+          if (oldVal !== newVal) {
+            const historyRef = doc(collection(db, 'fleetHistory'));
+            batch.set(historyRef, {
+              equipmentId: existingDoc.id,
+              equipmentNumber: tag,
+              userName: currentUserName,
+              userEmail: user.email || '',
+              timestamp: serverTimestamp(),
+              field: field,
+              oldValue: oldVal,
+              newValue: newVal
+            });
+          }
+        });
+        await batch.commit();
+        setSuccessMessage(`Equipamento ${tag} atualizado com sucesso!`);
+      } else {
+        const newDocRef = doc(collection(db, 'fleetEquipment'));
+        const newEqPayload = {
+          ...data,
+          equipmentNumber: tag,
+          userId: user.uid,
+          nonConformities: data.nonConformities || [],
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp()
+        };
+        await setDoc(newDocRef, newEqPayload);
+
+        await addDoc(collection(db, 'fleetHistory'), {
+          equipmentId: newDocRef.id,
+          equipmentNumber: tag,
+          userName: currentUserName,
+          userEmail: user.email || '',
+          timestamp: serverTimestamp(),
+          field: 'CADASTRADO',
+          oldValue: '—',
+          newValue: `Equipamento ${tag} cadastrado no sistema`
+        });
+        setSuccessMessage(`Equipamento ${tag} cadastrado com sucesso!`);
+      }
+      setTimeout(() => setSuccessMessage(null), 3000);
+    } catch (err) {
+      console.error("Error saving fleet equipment:", err);
+      setGlobalError("Erro ao salvar equipamento da frota.");
+    }
+  };
+
+  const handleDeleteFleetEquipment = async (id: string, tag: string) => {
+    if (!user) {
+      const err = new Error("Usuário não autenticado para realizar exclusão.");
+      console.error("Erro de autenticação na exclusão do ativo:", err);
+      setGlobalError(err.message);
+      throw err;
+    }
+
+    if (!id) {
+      const err = new Error("ID de registro do equipamento não foi informado para exclusão.");
+      console.error("Erro de validação de parâmetro na exclusão do ativo:", err);
+      setGlobalError(err.message);
+      throw err;
+    }
+
+    try {
+      console.log(`Iniciando exclusão permanente do ativo ID=${id}, TAG=${tag} da coleção 'fleetEquipment'...`);
+      
+      // Permanently remove document from Firestore
+      await deleteDoc(doc(db, 'fleetEquipment', id));
+      
+      // Register history entry for deletion
+      try {
+        await addDoc(collection(db, 'fleetHistory'), {
+          equipmentId: id,
+          equipmentNumber: tag,
+          userName: currentUserName,
+          userEmail: user.email || '',
+          timestamp: serverTimestamp(),
+          field: 'EXCLUÍDO',
+          oldValue: tag,
+          newValue: 'REGISTRO EXCLUÍDO PERMANENTEMENTE'
+        });
+      } catch (histErr) {
+        console.warn("Aviso: Falha ao registrar log no histórico de frota:", histErr);
+      }
+
+      const msg = `Ativo ${tag} excluído permanentemente do banco de dados com sucesso.`;
+      console.log(msg);
+      setSuccessMessage(msg);
+      setTimeout(() => setSuccessMessage(null), 4000);
+    } catch (err: any) {
+      console.error("Erro detalhado do banco de dados ao excluir equipamento da frota:", err);
+      const detailedError = err?.message || err?.code || String(err);
+      setGlobalError(`Erro no banco de dados ao excluir equipamento: ${detailedError}`);
+      throw err;
+    }
+  };
+
+  const handleAddFleetNonConformity = async (equipmentId: string, description: string, photoUrl?: string) => {
+    if (!user) return;
+    const eq = fleetEquipment.find(e => e.id === equipmentId);
+    if (!eq) return;
+
+    try {
+      const newNc: FleetNonConformity = {
+        id: `nc_${Date.now()}`,
+        description,
+        date: format(new Date(), 'dd/MM/yyyy HH:mm'),
+        resolved: false,
+        photoUrl
+      };
+
+      const updatedNcs = [...(eq.nonConformities || []), newNc];
+      await updateDoc(doc(db, 'fleetEquipment', equipmentId), {
+        nonConformities: updatedNcs,
+        status: 'Não conforme',
+        updatedAt: serverTimestamp()
+      });
+
+      await addDoc(collection(db, 'fleetHistory'), {
+        equipmentId,
+        equipmentNumber: eq.equipmentNumber,
+        userName: currentUserName,
+        userEmail: user.email || '',
+        timestamp: serverTimestamp(),
+        field: 'NÃO CONFORMIDADE',
+        oldValue: eq.status,
+        newValue: `Nova NC: ${description}`
+      });
+      setSuccessMessage(`Não conformidade registrada para ${eq.equipmentNumber}.`);
+      setTimeout(() => setSuccessMessage(null), 3000);
+    } catch (err) {
+      console.error("Error adding non conformity:", err);
+      setGlobalError("Erro ao registrar não conformidade.");
+    }
+  };
+
+  const handleResolveFleetNonConformity = async (equipmentId: string, ncId: string) => {
+    if (!user) return;
+    const eq = fleetEquipment.find(e => e.id === equipmentId);
+    if (!eq) return;
+
+    try {
+      const updatedNcs = (eq.nonConformities || []).map(nc => {
+        if (nc.id === ncId) {
+          return {
+            ...nc,
+            resolved: true,
+            resolvedAt: format(new Date(), 'dd/MM/yyyy HH:mm'),
+            resolvedBy: currentUserName
+          };
+        }
+        return nc;
+      });
+
+      const hasUnresolved = updatedNcs.some(nc => !nc.resolved);
+      const newStatus = hasUnresolved ? 'Não conforme' : 'Operacional';
+
+      await updateDoc(doc(db, 'fleetEquipment', equipmentId), {
+        nonConformities: updatedNcs,
+        status: newStatus,
+        updatedAt: serverTimestamp()
+      });
+
+      await addDoc(collection(db, 'fleetHistory'), {
+        equipmentId,
+        equipmentNumber: eq.equipmentNumber,
+        userName: currentUserName,
+        userEmail: user.email || '',
+        timestamp: serverTimestamp(),
+        field: 'NÃO CONFORMIDADE RESOLVIDA',
+        oldValue: 'Não conforme',
+        newValue: `NC resolvida por ${currentUserName}`
+      });
+      setSuccessMessage(`Não conformidade resolvida.`);
+      setTimeout(() => setSuccessMessage(null), 3000);
+    } catch (err) {
+      console.error("Error resolving non conformity:", err);
+      setGlobalError("Erro ao resolver não conformidade.");
+    }
+  };
+
+  const handleImportFleetConfirmed = async (
+    items: Partial<FleetEquipment>[],
+    onProgress?: (msg: string, current: number, total: number) => void
+  ) => {
+    if (!user) {
+      throw new Error("Usuário não autenticado. Faça login para continuar.");
+    }
+
+    let createdCount = 0;
+    let updatedCount = 0;
+    const errorsList: { equipmentNumber: string; reason: string }[] = [];
+
+    onProgress?.("Iniciando leitura da planilha...", 0, items.length);
+
+    // Filter and validate equipment records before saving
+    const validItems = items.filter(item => {
+      const tag = (item.equipmentNumber || '').trim().toUpperCase();
+      if (!tag || tag.length === 0) return false;
+      if (isDateOrInvalidEquipmentNumber(tag) || isDateOrInvalidEquipmentNumber(item.equipmentNumber)) {
+        errorsList.push({
+          equipmentNumber: String(item.equipmentNumber || 'DESCONHECIDO'),
+          reason: 'Número do equipamento cancelado por ser identificado como data, objeto Date ou valor inválido.'
+        });
+        return false;
+      }
+      return true;
+    });
+
+    onProgress?.(`${validItems.length} equipamentos válidos encontrados.`, 0, validItems.length);
+
+    // Fetch fresh snapshot directly from Firestore database
+    const fleetSnap = await getDocs(collection(db, 'fleetEquipment'));
+    const existingMap = new Map<string, { id: string; status: string; type: string; equipmentNumber: string }>();
+
+    // Scan existing documents in Firestore: map valid ones and auto-clean old corrupt date documents
+    for (const d of fleetSnap.docs) {
+      const data = d.data();
+      const rawTag = (data.equipmentNumber || '').trim();
+      const rawType = (data.type || 'CCU').trim();
+      if (isDateOrInvalidEquipmentNumber(rawTag) || isDateOrInvalidEquipmentNumber(data.equipmentNumber)) {
+        try {
+          await deleteDoc(doc(db, 'fleetEquipment', d.id));
+          console.info(`[CLEANUP] Documento corrompido com tag de data removido do Firestore: ${d.id} (${rawTag})`);
+        } catch (delErr) {
+          console.warn("Cleanup warning:", delErr);
+        }
+      } else {
+        const tagUpper = rawTag.toUpperCase();
+        const typeUpper = rawType.toUpperCase();
+        if (tagUpper && typeUpper) {
+          const key = `${typeUpper}|${tagUpper}`;
+          existingMap.set(key, { id: d.id, status: data.status || '—', type: typeUpper, equipmentNumber: tagUpper });
+        }
+      }
+    }
+
+    const CHUNK_SIZE = 50;
+    for (let i = 0; i < validItems.length; i += CHUNK_SIZE) {
+      const chunk = validItems.slice(i, i + CHUNK_SIZE);
+      const batch = writeBatch(db);
+
+      chunk.forEach((item, chunkIdx) => {
+        const itemIdx = i + chunkIdx + 1;
+        const tag = (item.equipmentNumber || '').trim().toUpperCase();
+        const type = (item.type || 'CCU').trim().toUpperCase();
+        const key = `${type}|${tag}`;
+        
+        onProgress?.(`Gravando equipamento ${itemIdx} de ${validItems.length}...`, itemIdx, validItems.length);
+
+        const existing = existingMap.get(key);
+        if (existing) {
+          updatedCount++;
+          const ref = doc(db, 'fleetEquipment', existing.id);
+          batch.update(ref, {
+            equipmentNumber: tag,
+            type: type,
+            status: 'Cadastro Pendente de Validação',
+            isPendingValidation: true,
+            validationStatus: 'pending',
+            updatedAt: serverTimestamp()
+          });
+
+          const hRef = doc(collection(db, 'fleetHistory'));
+          batch.set(hRef, {
+            equipmentId: existing.id,
+            equipmentNumber: tag,
+            userName: currentUserName,
+            userEmail: user.email || '',
+            timestamp: serverTimestamp(),
+            field: 'MIGRAÇÃO PLANILHA OEG',
+            oldValue: existing.status,
+            newValue: `Atualizado via migração oficial por ${currentUserName}`
+          });
+        } else {
+          createdCount++;
+          const newRef = doc(collection(db, 'fleetEquipment'));
+          batch.set(newRef, {
+            equipmentNumber: tag,
+            type: type,
+            userId: user.uid,
+            location: 'BASE',
+            clientId: '',
+            status: 'Cadastro Pendente de Validação',
+            isPendingValidation: true,
+            validationStatus: 'pending',
+            nonConformities: [],
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp()
+          });
+
+          // Register in map so duplicates within sheet update rather than duplicate
+          existingMap.set(key, { id: newRef.id, status: 'Cadastro Pendente de Validação', type: type, equipmentNumber: tag });
+
+          const hRef = doc(collection(db, 'fleetHistory'));
+          batch.set(hRef, {
+            equipmentId: newRef.id,
+            equipmentNumber: tag,
+            userName: currentUserName,
+            userEmail: user.email || '',
+            timestamp: serverTimestamp(),
+            field: 'MIGRAÇÃO PLANILHA OEG',
+            oldValue: '—',
+            newValue: `Cadastrado via migração oficial OEG por ${currentUserName}`
+          });
+        }
+      });
+
+      try {
+        await batch.commit();
+      } catch (batchErr: any) {
+        console.error("Error committing batch:", batchErr);
+        chunk.forEach(item => {
+          if (item.equipmentNumber) {
+            errorsList.push({
+              equipmentNumber: item.equipmentNumber,
+              reason: batchErr?.message || 'Falha na gravação do documento no Firestore'
+            });
+          }
+        });
+      }
+    }
+
+    // AUTOMATIC POST-IMPORT VERIFICATION CHECK
+    onProgress?.("Realizando verificação automática no banco de dados...", validItems.length, validItems.length);
+    const postVerifySnap = await getDocs(collection(db, 'fleetEquipment'));
+    const savedDocs: FleetEquipment[] = postVerifySnap.docs.map(d => ({ id: d.id, ...d.data() } as FleetEquipment));
+    const savedTagsSet = new Set(savedDocs.map(d => (d.equipmentNumber || '').trim().toUpperCase()));
+
+    const missingTags: string[] = [];
+    validItems.forEach(item => {
+      const tag = (item.equipmentNumber || '').trim().toUpperCase();
+      if (tag && !savedTagsSet.has(tag)) {
+        missingTags.push(tag);
+      }
+    });
+
+    if (missingTags.length > 0) {
+      missingTags.forEach(tag => {
+        errorsList.push({
+          equipmentNumber: tag,
+          reason: 'Registro não foi localizado no banco de dados durante a verificação pós-importação.'
+        });
+      });
+      throw new Error(`Diferença identificada na verificação: ${missingTags.length} equipamento(s) não foram gravados no banco (${missingTags.slice(0, 5).join(', ')}). Importação não concluída.`);
+    }
+
+    // Update React local state immediately to trigger synchronous UI/Dashboard refresh
+    setFleetEquipment(savedDocs);
+
+    try {
+      await addAuditLog('CREATE', 'FLEET', 'MIGRATION', `Migração OEG concluída: ${createdCount} cadastrados, ${updatedCount} atualizados.`);
+    } catch (auditErr) {
+      console.warn("Audit log notice:", auditErr);
+    }
+
+    const successMsg = `Importação concluída com sucesso. ${createdCount} equipamentos cadastrados e ${updatedCount} equipamentos atualizados.`;
+    setSuccessMessage(successMsg);
+    setTimeout(() => setSuccessMessage(null), 5000);
+
+    onProgress?.("Importação concluída.", validItems.length, validItems.length);
+
+    return { created: createdCount, updated: updatedCount, errors: errorsList };
+  };
+
+  const handleSaveDecontaminationOperation = async (data: Partial<DecontaminationOperation>) => {
+    if (!user) return;
+    try {
+      const cleanData: Record<string, any> = {};
+      Object.entries(data).forEach(([key, value]) => {
+        if (value !== undefined) {
+          cleanData[key] = value;
+        } else {
+          cleanData[key] = '';
+        }
+      });
+
+      if (cleanData.id) {
+        const id = cleanData.id;
+        delete cleanData.id;
+        const docRef = doc(db, 'decontaminationOperations', id);
+        await updateDoc(docRef, {
+          ...cleanData,
+          updatedAt: serverTimestamp()
+        });
+        await addAuditLog('UPDATE', 'FLEET', id, `Operação de descontaminação atualizada para o tanque ${data.equipmentNumber || ''}`);
+      } else {
+        delete cleanData.id;
+        const docRef = await addDoc(collection(db, 'decontaminationOperations'), {
+          ...cleanData,
+          userId: user.uid,
+          userName: currentUserName,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp()
+        });
+        await addAuditLog('CREATE', 'FLEET', docRef.id, `Nova operação de descontaminação cadastrada para o tanque ${data.equipmentNumber || ''}`);
+      }
+      setSuccessMessage("Operação de descontaminação salva com sucesso!");
+      setTimeout(() => setSuccessMessage(null), 4000);
+    } catch (error: any) {
+      console.error("Error saving decontamination operation:", error);
+      setGlobalError("Erro ao salvar operação de descontaminação.");
+      try {
+        handleFirestoreError(error, OperationType.WRITE, 'decontaminationOperations');
+      } catch (e) {}
+      throw error;
+    }
+  };
+
+  const handleDeleteDecontaminationOperation = async (id: string) => {
+    if (!user) return;
+    const op = decontaminationOperations.find(o => o.id === id);
+    handleOpenDeleteModal('Operação de Descontaminação', id, 'decontaminationOperations', op?.equipmentNumber || 'Tanque');
+  };
+
+  const handleOpenDeleteModal = (itemType: string, itemId: string, itemCollection: string, itemName: string) => {
+    setDeleteModalState({
+      isOpen: true,
+      itemType,
+      itemId,
+      itemCollection,
+      itemName
+    });
+  };
+
+  const handleSubmitDeleteRequest = async (reason: string) => {
+    if (!user) return;
+    const { itemType, itemId, itemCollection, itemName } = deleteModalState;
+
+    try {
+      await addDoc(collection(db, 'deletionRequests'), {
+        requestedBy: currentUserName,
+        requestedByUid: user.uid,
+        userRole: currentUserRole,
+        requestedAt: serverTimestamp(),
+        itemType,
+        itemId,
+        itemCollection,
+        itemName,
+        reason,
+        status: 'Pendente'
+      });
+
+      const mapEntity = (col: string): AuditLog['entity'] => {
+        const u = col.toUpperCase();
+        if (u.includes('FLEET') || u.includes('DECONTAMINATION')) return 'FLEET';
+        if (u.includes('EQUIPMENT')) return 'EQUIPMENT';
+        if (u.includes('CLIENT')) return 'CLIENT';
+        if (u.includes('USER')) return 'USER';
+        if (u.includes('SETTING')) return 'SETTINGS';
+        return 'OS';
+      };
+
+      await addAuditLog(
+        'DELETE',
+        mapEntity(itemCollection),
+        itemId,
+        `Solicitou exclusão de ${itemType} "${itemName}". Motivo: ${reason}`
+      );
+
+      setSuccessMessage(`Solicitação de exclusão enviada com sucesso para aprovação do Moderador!`);
+      setTimeout(() => setSuccessMessage(null), 4000);
+    } catch (err: any) {
+      console.error("Error submitting deletion request:", err);
+      setGlobalError("Erro ao enviar solicitação de exclusão.");
+      throw err;
+    }
+  };
+
+  const handleApproveDeletionRequest = async (req: DeletionRequest) => {
+    if (!user) return;
+    try {
+      await deleteDoc(doc(db, req.itemCollection, req.itemId));
+
+      await updateDoc(doc(db, 'deletionRequests', req.id), {
+        status: 'Aprovada',
+        decidedBy: currentUserName,
+        decidedAt: serverTimestamp()
+      });
+
+      const mapEntity = (col: string): AuditLog['entity'] => {
+        const u = col.toUpperCase();
+        if (u.includes('FLEET') || u.includes('DECONTAMINATION')) return 'FLEET';
+        if (u.includes('EQUIPMENT')) return 'EQUIPMENT';
+        if (u.includes('CLIENT')) return 'CLIENT';
+        if (u.includes('USER')) return 'USER';
+        if (u.includes('SETTING')) return 'SETTINGS';
+        return 'OS';
+      };
+
+      await addAuditLog(
+        'DELETE',
+        mapEntity(req.itemCollection),
+        req.itemId,
+        `Aprovou a exclusão de ${req.itemType} "${req.itemName}". Solicitado originalmente por ${req.requestedBy}.`
+      );
+
+      setSuccessMessage(`Exclusão do item "${req.itemName}" aprovada e executada!`);
+      setTimeout(() => setSuccessMessage(null), 4000);
+    } catch (err: any) {
+      console.error("Error approving deletion:", err);
+      setGlobalError("Erro ao aprovar exclusão.");
+      throw err;
+    }
+  };
+
+  const handleRejectDeletionRequest = async (req: DeletionRequest, reason: string) => {
+    if (!user) return;
+    try {
+      await updateDoc(doc(db, 'deletionRequests', req.id), {
+        status: 'Rejeitada',
+        decidedBy: currentUserName,
+        decidedAt: serverTimestamp(),
+        rejectionReason: reason
+      });
+
+      const mapEntity = (col: string): AuditLog['entity'] => {
+        const u = col.toUpperCase();
+        if (u.includes('FLEET') || u.includes('DECONTAMINATION')) return 'FLEET';
+        if (u.includes('EQUIPMENT')) return 'EQUIPMENT';
+        if (u.includes('CLIENT')) return 'CLIENT';
+        if (u.includes('USER')) return 'USER';
+        if (u.includes('SETTING')) return 'SETTINGS';
+        return 'OS';
+      };
+
+      await addAuditLog(
+        'UPDATE',
+        mapEntity(req.itemCollection),
+        req.itemId,
+        `Rejeitou a exclusão de ${req.itemType} "${req.itemName}". Motivo: ${reason}`
+      );
+
+      setSuccessMessage(`Solicitação de exclusão rejeitada.`);
+      setTimeout(() => setSuccessMessage(null), 4000);
+    } catch (err: any) {
+      console.error("Error rejecting deletion:", err);
+      setGlobalError("Erro ao rejeitar solicitação.");
+      throw err;
+    }
+  };
+
+  const handleUpdateModuleVisibility = async (newConfig: ModuleVisibilityConfig) => {
+    if (!user) return;
+    try {
+      await setDoc(doc(db, 'settings', 'moduleVisibility'), newConfig);
+      await addAuditLog(
+        'UPDATE',
+        'SETTINGS',
+        'MODULE_VISIBILITY',
+        `Atualizou a matriz de visibilidade dos módulos do sistema.`
+      );
+      setSuccessMessage("Matriz de permissões salva com sucesso!");
+      setTimeout(() => setSuccessMessage(null), 4000);
+    } catch (err: any) {
+      console.error("Error updating module visibility:", err);
+      setGlobalError("Erro ao salvar permissões.");
+      throw err;
+    }
+  };
+
+  const handleUpdateUserRole = async (userId: string, newRole: UserRole) => {
+    if (!user) return;
+    try {
+      await updateDoc(doc(db, 'users', userId), {
+        role: newRole,
+        updatedAt: serverTimestamp()
+      });
+
+      const targetUser = appUsers.find(u => u.id === userId);
+      await addAuditLog(
+        'UPDATE',
+        'USER',
+        userId,
+        `Alterou o perfil do usuário ${targetUser?.name || userId} para ${newRole.toUpperCase()}.`
+      );
+
+      setSuccessMessage(`Perfil do usuário atualizado para ${newRole.toUpperCase()}!`);
+      setTimeout(() => setSuccessMessage(null), 4000);
+    } catch (err: any) {
+      console.error("Error updating user role:", err);
+      setGlobalError("Erro ao atualizar perfil do usuário.");
+      throw err;
+    }
+  };
+
+  const handleDeleteAllFleetEquipment = async () => {
+    if (!user) {
+      const err = new Error("Usuário não autenticado para realizar a exclusão.");
+      setGlobalError(err.message);
+      throw err;
+    }
+
+    try {
+      console.log("Iniciando exclusão de TODOS os ativos da frota ('fleetEquipment')...");
+      const snap = await getDocs(collection(db, 'fleetEquipment'));
+      const docs = snap.docs;
+
+      if (docs.length > 0) {
+        const CHUNK_SIZE = 400;
+        for (let i = 0; i < docs.length; i += CHUNK_SIZE) {
+          const chunk = docs.slice(i, i + CHUNK_SIZE);
+          const batch = writeBatch(db);
+          for (const d of chunk) {
+            batch.delete(doc(db, 'fleetEquipment', d.id));
+          }
+          await batch.commit();
+        }
+      }
+
+      setFleetEquipment([]);
+
+      try {
+        await addAuditLog('DELETE', 'FLEET', 'RESET_ALL', `Reinício da implantação: Excluídos todos os ${docs.length} ativos da Gestão da Frota.`);
+      } catch (auditErr) {
+        console.warn("Audit log notice:", auditErr);
+      }
+
+      const msg = `Reinício executado com sucesso! ${docs.length} ativos da frota foram excluídos. Usuários, Clientes, Ordens de Serviço e outros módulos não foram alterados.`;
+      setSuccessMessage(msg);
+      setTimeout(() => setSuccessMessage(null), 5000);
+
+      return { deletedCount: docs.length };
+    } catch (err: any) {
+      console.error("Erro ao reiniciar a frota:", err);
+      const detailedError = err?.message || String(err);
+      setGlobalError(`Erro ao reiniciar cadastros da frota: ${detailedError}`);
+      throw err;
+    }
+  };
+
+  const handleRecoverUnimportedFleetEquipment = async (
+    items: Partial<FleetEquipment>[],
+    onProgress?: (msg: string, current: number, total: number) => void
+  ) => {
+    if (!user) {
+      throw new Error("Usuário não autenticado. Faça login para continuar.");
+    }
+
+    let alreadyExistingCount = 0;
+    let recoveredCount = 0;
+    const breakdownByType: Record<string, number> = {};
+
+    onProgress?.("Iniciando leitura da planilha e validação de registros...", 0, items.length);
+
+    // Filter out invalid items
+    const validItems = items.filter(item => {
+      const tag = (item.equipmentNumber || '').trim().toUpperCase();
+      if (!tag || tag.length === 0) return false;
+      if (isDateOrInvalidEquipmentNumber(tag) || isDateOrInvalidEquipmentNumber(item.equipmentNumber)) {
+        return false;
+      }
+      return true;
+    });
+
+    onProgress?.(`${validItems.length} registros válidos na planilha. Consultando banco de dados...`, 0, validItems.length);
+
+    // Fetch fresh database snapshot
+    const fleetSnap = await getDocs(collection(db, 'fleetEquipment'));
+    
+    // Clean up any corrupt tank documents in Firestore where equipmentNumber was saved as a date/timestamp
+    // User directive: "Permitir reprocessar apenas os tanques já importados incorretamente. Não alterar CCU's, REEFER's, SPOOLER's ou SLING's."
+    const corruptTankDocsToDelete: string[] = [];
+    for (const d of fleetSnap.docs) {
+      const data = d.data();
+      const rawTag = (data.equipmentNumber || '').trim().toUpperCase();
+      const rawType = (data.type || '').trim().toUpperCase();
+
+      const isTankType = rawType.includes('TANQUE') || rawType.includes('TANK');
+      const isCorruptTag = isDateOrInvalidEquipmentNumber(rawTag) || isDateOrInvalidEquipmentNumber(data.equipmentNumber);
+
+      // ONLY delete if it's a TANK type and has a corrupt date tag! Never touch CCU, REEFER, SPOOLER, or SLING!
+      if (isTankType && isCorruptTag) {
+        corruptTankDocsToDelete.push(d.id);
+      }
+    }
+
+    if (corruptTankDocsToDelete.length > 0) {
+      onProgress?.(`Limpando ${corruptTankDocsToDelete.length} registros corrompidos de Tanques...`, 0, validItems.length);
+      const CHUNK_SIZE = 400;
+      for (let i = 0; i < corruptTankDocsToDelete.length; i += CHUNK_SIZE) {
+        const chunk = corruptTankDocsToDelete.slice(i, i + CHUNK_SIZE);
+        const batch = writeBatch(db);
+        for (const id of chunk) {
+          batch.delete(doc(db, 'fleetEquipment', id));
+        }
+        await batch.commit();
+      }
+    }
+
+    // Re-query database after cleaning corrupt tank docs
+    const freshFleetSnap = await getDocs(collection(db, 'fleetEquipment'));
+    const existingMap = new Map<string, { id: string; type: string; equipmentNumber: string }>();
+
+    for (const d of freshFleetSnap.docs) {
+      const data = d.data();
+      const rawTag = (data.equipmentNumber || '').trim().toUpperCase();
+      const rawType = (data.type || 'CCU').trim().toUpperCase();
+      if (!isDateOrInvalidEquipmentNumber(rawTag) && rawTag && rawType) {
+        const key = `${rawType}|${rawTag}`;
+        existingMap.set(key, { id: d.id, type: rawType, equipmentNumber: rawTag });
+      }
+    }
+
+    const CHUNK_SIZE = 50;
+    for (let i = 0; i < validItems.length; i += CHUNK_SIZE) {
+      const chunk = validItems.slice(i, i + CHUNK_SIZE);
+      const batch = writeBatch(db);
+      let batchHasWrites = false;
+
+      chunk.forEach((item, chunkIdx) => {
+        const itemIdx = i + chunkIdx + 1;
+        const tag = (item.equipmentNumber || '').trim().toUpperCase();
+        const type = (item.type || 'CCU').trim().toUpperCase();
+        const key = `${type}|${tag}`;
+
+        onProgress?.(`Analisando registro ${itemIdx} de ${validItems.length}...`, itemIdx, validItems.length);
+
+        if (existingMap.has(key)) {
+          // Record exists: IGNORE COMPLETELY. DO NOT UPDATE OR OVERWRITE.
+          alreadyExistingCount++;
+        } else {
+          // Record does NOT exist: CREATE AUTOMATICALLY
+          recoveredCount++;
+          batchHasWrites = true;
+
+          const displayType = item.type || 'CCU';
+          breakdownByType[displayType] = (breakdownByType[displayType] || 0) + 1;
+
+          const newRef = doc(collection(db, 'fleetEquipment'));
+          batch.set(newRef, {
+            equipmentNumber: tag,
+            type: type,
+            userId: user.uid,
+            location: 'BASE',
+            clientId: '',
+            status: 'Cadastro Pendente de Validação',
+            isPendingValidation: true,
+            validationStatus: 'pending',
+            nonConformities: [],
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp()
+          });
+
+          // Register in map so intra-sheet duplicates are ignored
+          existingMap.set(key, { id: newRef.id, type: type, equipmentNumber: tag });
+
+          const hRef = doc(collection(db, 'fleetHistory'));
+          batch.set(hRef, {
+            equipmentId: newRef.id,
+            equipmentNumber: tag,
+            userName: currentUserName,
+            userEmail: user.email || '',
+            timestamp: serverTimestamp(),
+            field: 'RECUPERAÇÃO DE REGISTROS',
+            oldValue: '—',
+            newValue: `Recuperado e cadastrado via ferramenta de resgate por ${currentUserName}`
+          });
+        }
+      });
+
+      if (batchHasWrites) {
+        await batch.commit();
+      }
+    }
+
+    // Refresh state and database snapshot
+    const postVerifySnap = await getDocs(collection(db, 'fleetEquipment'));
+    const savedDocs: FleetEquipment[] = postVerifySnap.docs.map(d => ({ id: d.id, ...d.data() } as FleetEquipment));
+    setFleetEquipment(savedDocs);
+
+    try {
+      await addAuditLog('CREATE', 'FLEET', 'RECOVERY', `Ferramenta de Recuperação: ${recoveredCount} novos registros recuperados de ${validItems.length} analisados.`);
+    } catch (auditErr) {
+      console.warn("Audit log notice:", auditErr);
+    }
+
+    const successMsg = `Recuperação concluída: ${recoveredCount} novos registros adicionados (${alreadyExistingCount} mantidos intactos).`;
+    setSuccessMessage(successMsg);
+    setTimeout(() => setSuccessMessage(null), 5000);
+
+    return {
+      totalAnalyzed: validItems.length,
+      alreadyExisting: alreadyExistingCount,
+      recoveredCount: recoveredCount,
+      breakdownByType: breakdownByType
+    };
   };
 
   // Dashboard Calculations (Strictly by month for stats)
@@ -2004,6 +2969,25 @@ const generatePDF = (order: any) => {
   useEffect(() => {
     setCurrentPage(1);
   }, [viewMode, activeOrderSubTab, inProgressSearchTerm, completedSearchTerm, selectedMonth]);
+
+  const pcpFleetAlertStats = useMemo(() => {
+    let overdueVis = 0;
+    let overdueEnd = 0;
+    let exp30 = 0;
+    let pendingValCount = 0;
+
+    fleetEquipment.forEach(e => {
+      const v = calculateDaysRemaining(e.nextVisualInspectionDate);
+      const ed = calculateDaysRemaining(e.nextEndInspectionDate);
+
+      if (v < 0) overdueVis++;
+      if (ed < 0) overdueEnd++;
+      if ((v >= 0 && v <= 30) || (ed >= 0 && ed <= 30)) exp30++;
+      if (e.isPendingValidation !== false || e.validationStatus === 'pending') pendingValCount++;
+    });
+
+    return { overdueVis, overdueEnd, exp30, pendingValCount };
+  }, [fleetEquipment]);
 
   const getFamilyIcon = (family: string, className = "w-4 h-4") => {
     if (family === 'CCUs') return <LayoutGrid className={className} />;
@@ -2290,60 +3274,161 @@ const generatePDF = (order: any) => {
           </div>
 
           <nav className="space-y-2">
-            <button
-              onClick={() => setActiveTab('dashboard')}
-              className={cn(
-                "sidebar-item w-full group",
-                activeTab === 'dashboard' ? "sidebar-item-active" : "sidebar-item-inactive"
-              )}
-            >
-              <div className={cn("p-2 rounded-xl transition-all duration-300", activeTab === 'dashboard' ? "bg-blue-600 text-white" : "bg-slate-50 dark:bg-slate-800 group-hover:bg-blue-50 dark:group-hover:bg-blue-900/30 group-hover:text-blue-600 dark:group-hover:text-blue-400")}>
-                <LayoutDashboard className="w-4 h-4" />
+            {currentUserRole === 'moderator' && (
+              <div className="mb-4 p-3 bg-slate-100 dark:bg-slate-800/80 rounded-2xl border border-slate-200/60 dark:border-slate-700/50">
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-[10px] font-black uppercase text-slate-500 tracking-wider">Simular Visão:</span>
+                  {activeRolePreview && (
+                    <button
+                      onClick={() => setActiveRolePreview(null)}
+                      className="text-[9px] font-black text-rose-500 hover:underline uppercase"
+                    >
+                      Sair
+                    </button>
+                  )}
+                </div>
+                <div className="grid grid-cols-3 gap-1">
+                  {(['moderator', 'admin', 'user'] as UserRole[]).map(r => (
+                    <button
+                      key={r}
+                      onClick={() => setActiveRolePreview(r === currentUserRole ? null : r)}
+                      className={cn(
+                        "py-1 px-1.5 rounded-lg text-[9px] font-black uppercase transition-all cursor-pointer",
+                        effectiveRole === r
+                          ? "bg-blue-600 text-white shadow-sm"
+                          : "bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 hover:bg-slate-200"
+                      )}
+                    >
+                      {r === 'moderator' ? 'Mod' : r === 'admin' ? 'Adm' : 'User'}
+                    </button>
+                  ))}
+                </div>
               </div>
-              Dashboard
-              {activeTab === 'dashboard' && <motion.div layoutId="active-pill" className="absolute right-4 w-1.5 h-1.5 bg-blue-600 dark:bg-blue-400 rounded-full" />}
-            </button>
-            <button
-              onClick={() => setActiveTab('orders')}
-              className={cn(
-                "sidebar-item w-full group",
-                activeTab === 'orders' ? "sidebar-item-active" : "sidebar-item-inactive"
-              )}
-            >
-              <div className={cn("p-2 rounded-xl transition-all duration-300", activeTab === 'orders' ? "bg-blue-600 text-white" : "bg-slate-50 dark:bg-slate-800 group-hover:bg-blue-50 dark:group-hover:bg-blue-900/30 group-hover:text-blue-600 dark:group-hover:text-blue-400")}>
-                <ClipboardList className="w-4 h-4" />
-              </div>
-              Ordens de Serviço
-              {activeTab === 'orders' && <motion.div layoutId="active-pill" className="absolute right-4 w-1.5 h-1.5 bg-blue-600 dark:bg-blue-400 rounded-full" />}
-            </button>
-            <button
-              onClick={() => setActiveTab('clients')}
-              className={cn(
-                "sidebar-item w-full group",
-                activeTab === 'clients' ? "sidebar-item-active" : "sidebar-item-inactive"
-              )}
-            >
-              <div className={cn("p-2 rounded-xl transition-all duration-300", activeTab === 'clients' ? "bg-blue-600 text-white" : "bg-slate-50 dark:bg-slate-800 group-hover:bg-blue-50 dark:group-hover:bg-blue-900/30 group-hover:text-blue-600 dark:group-hover:text-blue-400")}>
-                <Building2 className="w-4 h-4" />
-              </div>
-              Clientes
-              {activeTab === 'clients' && <motion.div layoutId="active-pill" className="absolute right-4 w-1.5 h-1.5 bg-blue-600 dark:bg-blue-400 rounded-full" />}
-            </button>
-            <button
-              onClick={() => setActiveTab('equipments')}
-              className={cn(
-                "sidebar-item w-full group",
-                activeTab === 'equipments' ? "sidebar-item-active" : "sidebar-item-inactive"
-              )}
-            >
-              <div className={cn("p-2 rounded-xl transition-all duration-300", activeTab === 'equipments' ? "bg-blue-600 text-white" : "bg-slate-50 dark:bg-slate-800 group-hover:bg-blue-50 dark:group-hover:bg-blue-900/30 group-hover:text-blue-600 dark:group-hover:text-blue-400")}>
-                <Boxes className="w-4 h-4" />
-              </div>
-              Equipamentos
-              {activeTab === 'equipments' && <motion.div layoutId="active-pill" className="absolute right-4 w-1.5 h-1.5 bg-blue-600 dark:bg-blue-400 rounded-full" />}
-            </button>
-            {(currentUserRole === 'moderator' || user.email === "almeidacesar2010@gmail.com") && (
+            )}
+
+            {moduleVisibility.dashboard?.[effectiveRole] && (
+              <button
+                onClick={() => setActiveTab('dashboard')}
+                className={cn(
+                  "sidebar-item w-full group",
+                  activeTab === 'dashboard' ? "sidebar-item-active" : "sidebar-item-inactive"
+                )}
+              >
+                <div className={cn("p-2 rounded-xl transition-all duration-300", activeTab === 'dashboard' ? "bg-blue-600 text-white" : "bg-slate-50 dark:bg-slate-800 group-hover:bg-blue-50 dark:group-hover:bg-blue-900/30 group-hover:text-blue-600 dark:group-hover:text-blue-400")}>
+                  <LayoutDashboard className="w-4 h-4" />
+                </div>
+                Dashboard
+                {activeTab === 'dashboard' && <motion.div layoutId="active-pill" className="absolute right-4 w-1.5 h-1.5 bg-blue-600 dark:bg-blue-400 rounded-full" />}
+              </button>
+            )}
+
+            {moduleVisibility.orders?.[effectiveRole] && (
+              <button
+                onClick={() => setActiveTab('orders')}
+                className={cn(
+                  "sidebar-item w-full group",
+                  activeTab === 'orders' ? "sidebar-item-active" : "sidebar-item-inactive"
+                )}
+              >
+                <div className={cn("p-2 rounded-xl transition-all duration-300", activeTab === 'orders' ? "bg-blue-600 text-white" : "bg-slate-50 dark:bg-slate-800 group-hover:bg-blue-50 dark:group-hover:bg-blue-900/30 group-hover:text-blue-600 dark:group-hover:text-blue-400")}>
+                  <ClipboardList className="w-4 h-4" />
+                </div>
+                Ordens de Serviço
+                {activeTab === 'orders' && <motion.div layoutId="active-pill" className="absolute right-4 w-1.5 h-1.5 bg-blue-600 dark:bg-blue-400 rounded-full" />}
+              </button>
+            )}
+
+            {moduleVisibility.fleet?.[effectiveRole] && (
+              <button
+                onClick={() => setActiveTab('fleet')}
+                className={cn(
+                  "sidebar-item w-full group",
+                  activeTab === 'fleet' ? "sidebar-item-active" : "sidebar-item-inactive"
+                )}
+              >
+                <div className={cn("p-2 rounded-xl transition-all duration-300", activeTab === 'fleet' ? "bg-blue-600 text-white" : "bg-slate-50 dark:bg-slate-800 group-hover:bg-blue-50 dark:group-hover:bg-blue-900/30 group-hover:text-blue-600 dark:group-hover:text-blue-400")}>
+                  <Container className="w-4 h-4" />
+                </div>
+                Gestão da Frota
+                {activeTab === 'fleet' && <motion.div layoutId="active-pill" className="absolute right-4 w-1.5 h-1.5 bg-blue-600 dark:bg-blue-400 rounded-full" />}
+              </button>
+            )}
+
+            {moduleVisibility.decontamination?.[effectiveRole] && (
+              <button
+                onClick={() => setActiveTab('decontamination')}
+                className={cn(
+                  "sidebar-item w-full group",
+                  activeTab === 'decontamination' ? "sidebar-item-active" : "sidebar-item-inactive"
+                )}
+              >
+                <div className={cn("p-2 rounded-xl transition-all duration-300", activeTab === 'decontamination' ? "bg-blue-600 text-white" : "bg-slate-50 dark:bg-slate-800 group-hover:bg-blue-50 dark:group-hover:bg-blue-900/30 group-hover:text-blue-600 dark:group-hover:text-blue-400")}>
+                  <Droplet className="w-4 h-4" />
+                </div>
+                Descontaminação
+                {activeTab === 'decontamination' && <motion.div layoutId="active-pill" className="absolute right-4 w-1.5 h-1.5 bg-blue-600 dark:bg-blue-400 rounded-full" />}
+              </button>
+            )}
+
+            {moduleVisibility.clients?.[effectiveRole] && (
+              <button
+                onClick={() => setActiveTab('clients')}
+                className={cn(
+                  "sidebar-item w-full group",
+                  activeTab === 'clients' ? "sidebar-item-active" : "sidebar-item-inactive"
+                )}
+              >
+                <div className={cn("p-2 rounded-xl transition-all duration-300", activeTab === 'clients' ? "bg-blue-600 text-white" : "bg-slate-50 dark:bg-slate-800 group-hover:bg-blue-50 dark:group-hover:bg-blue-900/30 group-hover:text-blue-600 dark:group-hover:text-blue-400")}>
+                  <Building2 className="w-4 h-4" />
+                </div>
+                Clientes
+                {activeTab === 'clients' && <motion.div layoutId="active-pill" className="absolute right-4 w-1.5 h-1.5 bg-blue-600 dark:bg-blue-400 rounded-full" />}
+              </button>
+            )}
+
+            {moduleVisibility.equipments?.[effectiveRole] && (
+              <button
+                onClick={() => setActiveTab('equipments')}
+                className={cn(
+                  "sidebar-item w-full group",
+                  activeTab === 'equipments' ? "sidebar-item-active" : "sidebar-item-inactive"
+                )}
+              >
+                <div className={cn("p-2 rounded-xl transition-all duration-300", activeTab === 'equipments' ? "bg-blue-600 text-white" : "bg-slate-50 dark:bg-slate-800 group-hover:bg-blue-50 dark:group-hover:bg-blue-900/30 group-hover:text-blue-600 dark:group-hover:text-blue-400")}>
+                  <Boxes className="w-4 h-4" />
+                </div>
+                Equipamentos
+                {activeTab === 'equipments' && <motion.div layoutId="active-pill" className="absolute right-4 w-1.5 h-1.5 bg-blue-600 dark:bg-blue-400 rounded-full" />}
+              </button>
+            )}
+
+            {(currentUserRole === 'moderator' || user?.email === "almeidacesar2010@gmail.com") && (
               <>
+                <div className="pt-3 pb-1 border-t border-slate-200/60 dark:border-slate-800/60">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500 px-3">
+                    Moderação
+                  </span>
+                </div>
+
+                <button
+                  onClick={() => setActiveTab('approvals')}
+                  className={cn(
+                    "sidebar-item w-full group relative",
+                    activeTab === 'approvals' ? "sidebar-item-active" : "sidebar-item-inactive"
+                  )}
+                >
+                  <div className={cn("p-2 rounded-xl transition-all duration-300", activeTab === 'approvals' ? "bg-amber-600 text-white" : "bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 group-hover:bg-amber-100")}>
+                    <AlertTriangle className="w-4 h-4" />
+                  </div>
+                  <span>Aprovações</span>
+                  {deletionRequests.filter(r => r.status === 'Pendente').length > 0 && (
+                    <span className="ml-auto px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-500 text-slate-950">
+                      {deletionRequests.filter(r => r.status === 'Pendente').length}
+                    </span>
+                  )}
+                  {activeTab === 'approvals' && <motion.div layoutId="active-pill" className="absolute right-4 w-1.5 h-1.5 bg-amber-600 rounded-full" />}
+                </button>
+
                 <button
                   onClick={() => setActiveTab('access')}
                   className={cn(
@@ -2354,9 +3439,10 @@ const generatePDF = (order: any) => {
                   <div className={cn("p-2 rounded-xl transition-all duration-300", activeTab === 'access' ? "bg-blue-600 text-white" : "bg-slate-50 dark:bg-slate-800 group-hover:bg-blue-50 dark:group-hover:bg-blue-900/30 group-hover:text-blue-600 dark:group-hover:text-blue-400")}>
                     <ShieldCheck className="w-4 h-4" />
                   </div>
-                  Acessos
+                  Permissões & Perfis
                   {activeTab === 'access' && <motion.div layoutId="active-pill" className="absolute right-4 w-1.5 h-1.5 bg-blue-600 dark:bg-blue-400 rounded-full" />}
                 </button>
+
                 <button
                   onClick={() => setActiveTab('settings')}
                   className={cn(
@@ -2370,6 +3456,7 @@ const generatePDF = (order: any) => {
                   Configurações
                   {activeTab === 'settings' && <motion.div layoutId="active-pill" className="absolute right-4 w-1.5 h-1.5 bg-blue-600 dark:bg-blue-400 rounded-full" />}
                 </button>
+
                 <button
                   onClick={() => setActiveTab('audits')}
                   className={cn(
@@ -2474,6 +3561,7 @@ const generatePDF = (order: any) => {
               >
                 {activeTab === 'dashboard' ? 'Painel de Produtividade' : 
                  activeTab === 'orders' ? 'Gestão de OS' :
+                 activeTab === 'fleet' ? 'Gestão da Frota' :
                  activeTab === 'clients' ? 'Gestão de Clientes' : 
                  activeTab === 'equipments' ? 'Gestão de Equipamentos' :
                  activeTab === 'settings' ? 'Configurações' : 
@@ -2489,6 +3577,7 @@ const generatePDF = (order: any) => {
                   {activeTab === 'dashboard' 
                     ? 'Performance em tempo real' 
                     : activeTab === 'orders' ? 'Controle operacional' :
+                    activeTab === 'fleet' ? 'Controle de ativos e inspeções PCP' :
                     activeTab === 'clients' ? 'Base de parceiros' :
                     activeTab === 'equipments' ? 'Ativos registrados' :
                     activeTab === 'settings' ? 'Preferências do sistema' :
@@ -2558,6 +3647,9 @@ const generatePDF = (order: any) => {
                       status: 'Em Manutenção',
                       priority: 'Média' as const,
                       maintenanceScope: '',
+                      createdBy: currentUserName,
+                      maintenanceTechnician: '',
+                      closedBy: '',
                       slingCheck: { status: 'NA', value: '' },
                       damagedSlingCheck: { status: 'NA', value: '' },
                       excessiveCorrosionCheck: { status: 'NA', value: '' },
@@ -2637,6 +3729,73 @@ const generatePDF = (order: any) => {
 
               {activeTab === 'dashboard' ? (
                 <div className="space-y-8">
+                  {/* PCP Fleet Inspection & Validation Alert Widget */}
+                  {(() => {
+                    const { overdueVis, overdueEnd, exp30, pendingValCount } = pcpFleetAlertStats;
+
+                    if (overdueVis === 0 && overdueEnd === 0 && exp30 === 0 && pendingValCount === 0) return null;
+
+                    return (
+                      <div className="space-y-4">
+                        {/* Validation Pending Card */}
+                        {pendingValCount > 0 && (
+                          <div className="p-6 bg-gradient-to-r from-amber-500/10 via-amber-500/5 to-transparent border border-amber-500/30 rounded-3xl flex flex-col md:flex-row items-center justify-between gap-4 shadow-sm">
+                            <div className="flex items-center gap-4">
+                              <div className="p-3 bg-amber-500 text-slate-950 rounded-2xl shadow-lg shadow-amber-500/20">
+                                <AlertTriangle className="w-6 h-6" />
+                              </div>
+                              <div>
+                                <h4 className="text-sm font-black uppercase text-slate-900 dark:text-white tracking-wide flex items-center gap-2">
+                                  <span>Avisos de Validação do Cadastro da Frota</span>
+                                  <span className="px-2 py-0.5 rounded-full text-[10px] bg-amber-500 text-slate-950 font-black">
+                                    {pendingValCount} {pendingValCount === 1 ? 'pendente' : 'pendentes'}
+                                  </span>
+                                </h4>
+                                <p className="text-xs text-slate-600 dark:text-slate-300 font-medium mt-0.5">
+                                  Atenção PCP: A planilha legada foi importada apenas com Número e Tipo. Os dados completos (Cliente, Localização, Datas) aguardam conferência física.
+                                </p>
+                              </div>
+                            </div>
+
+                            <button
+                              onClick={() => setActiveTab('fleet')}
+                              className="px-5 py-2.5 bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-black uppercase tracking-wider rounded-2xl shadow-lg shadow-amber-500/25 transition-all shrink-0 active:scale-95 flex items-center gap-2"
+                            >
+                              <ShieldCheck className="w-4 h-4" />
+                              Ver Equipamentos Pendentes
+                            </button>
+                          </div>
+                        )}
+
+                        {/* Overdue Inspections Card */}
+                        {(overdueVis > 0 || overdueEnd > 0 || exp30 > 0) && (
+                          <div className="p-6 bg-gradient-to-r from-red-500/10 via-amber-500/10 to-transparent border border-red-500/30 rounded-3xl flex flex-col md:flex-row items-center justify-between gap-4">
+                            <div className="flex items-center gap-4">
+                              <div className="p-3 bg-red-600 text-white rounded-2xl animate-pulse shadow-lg shadow-red-600/30">
+                                <AlertTriangle className="w-6 h-6" />
+                              </div>
+                              <div>
+                                <h4 className="text-sm font-black uppercase text-slate-900 dark:text-white tracking-wide">
+                                  Alerta de Inspeções da Frota (Setor PCP)
+                                </h4>
+                                <p className="text-xs text-slate-600 dark:text-slate-300 font-medium mt-0.5">
+                                  Atenção PCP: <strong className="text-red-600">{overdueVis} visuais vencidas</strong>, <strong className="text-red-600">{overdueEnd} ENDs vencidos</strong> e <strong className="text-amber-600">{exp30} a vencer nos próximos 30 dias</strong>.
+                                </p>
+                              </div>
+                            </div>
+
+                            <button
+                              onClick={() => setActiveTab('fleet')}
+                              className="px-5 py-2.5 bg-red-600 hover:bg-red-700 text-white text-xs font-black uppercase tracking-wider rounded-2xl shadow-lg shadow-red-600/25 transition-all shrink-0"
+                            >
+                              Ir para Gestão da Frota
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+
                   {/* Stats Cards */}
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
                     <motion.div 
@@ -3048,6 +4207,28 @@ const generatePDF = (order: any) => {
                     </div>
                   </div>
                 </div>
+              ) : activeTab === 'fleet' ? (
+                <FleetManagement
+                  equipments={fleetEquipment}
+                  historyEntries={fleetHistory}
+                  clients={clients}
+                  serviceOrders={orders}
+                  onSaveEquipment={handleSaveFleetEquipment}
+                  onDeleteEquipment={handleDeleteFleetEquipment}
+                  onDeleteAllEquipment={handleDeleteAllFleetEquipment}
+                  onAddNonConformity={handleAddFleetNonConformity}
+                  onResolveNonConformity={handleResolveFleetNonConformity}
+                  onImportConfirmed={handleImportFleetConfirmed}
+                  onRecoverConfirmed={handleRecoverUnimportedFleetEquipment}
+                />
+              ) : activeTab === 'decontamination' ? (
+                <DecontaminationManagement
+                  operations={decontaminationOperations}
+                  fleetEquipments={fleetEquipment}
+                  clients={clients}
+                  onSaveOperation={handleSaveDecontaminationOperation}
+                  onDeleteOperation={handleDeleteDecontaminationOperation}
+                />
               ) : activeTab === 'orders' ? (
                 <div className="space-y-6">
                   {/* Equipment Type Global Filters */}
@@ -4156,162 +5337,24 @@ const generatePDF = (order: any) => {
                     </div>
                   </div>
                 </div>
+              ) : activeTab === 'approvals' ? (
+                <PendingApprovals
+                  requests={deletionRequests}
+                  onApprove={handleApproveDeletionRequest}
+                  onReject={handleRejectDeletionRequest}
+                />
               ) : (
-                <div className="space-y-6">
-                  <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200/60 dark:border-slate-800 shadow-sm overflow-hidden transition-colors duration-300">
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left border-collapse">
-                      <thead>
-                        <tr className="bg-slate-50/50 dark:bg-slate-800/50 border-b border-slate-200/60 dark:border-slate-800">
-                          <th className="px-6 py-5 text-[11px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest">Nome</th>
-                          <th className="px-6 py-5 text-[11px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest">Usuário (Login)</th>
-                          <th className="px-6 py-5 text-[11px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest">Permissão</th>
-                          <th className="px-6 py-5 text-[11px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest text-right">Ações</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                        {appUsers.length === 0 ? (
-                          <tr>
-                            <td colSpan={4} className="px-6 py-20 text-center">
-                              <div className="flex flex-col items-center gap-3">
-                                <div className="w-12 h-12 bg-slate-50 dark:bg-slate-800 rounded-2xl flex items-center justify-center">
-                                  <ShieldCheck className="w-6 h-6 text-slate-300 dark:text-slate-600" />
-                                </div>
-                                <p className="text-sm font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest">Nenhum acesso configurado</p>
-                              </div>
-                            </td>
-                          </tr>
-                        ) : appUsers.map((appUser) => (
-                          <tr key={appUser.id} className="group hover:bg-slate-50/50 dark:hover:bg-slate-800/50 transition-all duration-200">
-                            <td className="px-6 py-4">
-                              <div className="flex items-center gap-3">
-                                <div className="w-8 h-8 bg-purple-50 dark:bg-purple-900/30 rounded-lg flex items-center justify-center text-purple-600 dark:text-purple-400 font-bold text-xs uppercase">
-                                  {appUser.name.charAt(0)}
-                                </div>
-                                <span className="font-bold text-slate-900 dark:text-white">{appUser.name}</span>
-                              </div>
-                            </td>
-                            <td className="px-6 py-4">
-                              {editingUserId === appUser.id ? (
-                                <div className="flex items-center gap-2">
-                                  <input
-                                    type="text"
-                                    value={editingUsername}
-                                    onChange={(e) => setEditingUsername(e.target.value)}
-                                    className="w-32 px-2 py-1 text-xs font-bold bg-slate-50 dark:bg-slate-800 border border-blue-500 rounded-lg outline-none"
-                                    autoFocus
-                                    onKeyDown={async (e) => {
-                                      if (e.key === 'Enter') {
-                                        let clean = editingUsername.trim();
-                                        if (clean.startsWith('@')) clean = clean.slice(1);
-                                        await updateDoc(doc(db, 'users', appUser.id), { username: clean });
-                                        setEditingUserId(null);
-                                      } else if (e.key === 'Escape') {
-                                        setEditingUserId(null);
-                                      }
-                                    }}
-                                  />
-                                  <button 
-                                    onClick={async () => {
-                                      let clean = editingUsername.trim();
-                                      if (clean.startsWith('@')) clean = clean.slice(1);
-                                      await updateDoc(doc(db, 'users', appUser.id), { username: clean });
-                                      setEditingUserId(null);
-                                    }}
-                                    className="p-1 text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 rounded-lg"
-                                  >
-                                    <Check className="w-3 h-3" />
-                                  </button>
-                                </div>
-                              ) : (
-                                <div className="flex items-center gap-2 group/user">
-                                  <p className="text-sm font-bold text-blue-600 dark:text-blue-400">@{appUser.username || appUser.email.split('@')[0]}</p>
-                                  {(currentUserRole === 'moderator' || user?.email === 'almeidacesar2010@gmail.com') && (
-                                    <button 
-                                      onClick={() => {
-                                        setEditingUserId(appUser.id);
-                                        setEditingUsername(appUser.username || appUser.email.split('@')[0]);
-                                      }}
-                                      className="p-1 text-slate-400 hover:text-blue-600 opacity-0 group-hover/user:opacity-100 transition-all"
-                                    >
-                                      <Edit className="w-3 h-3" />
-                                    </button>
-                                  )}
-                                </div>
-                              )}
-                            </td>
-                            <td className="px-6 py-4">
-                              <button
-                                onClick={async () => {
-                                  const isSuperAdmin = user?.email === 'almeidacesar2010@gmail.com';
-                                  const isModerator = currentUserRole === 'moderator' || isSuperAdmin;
-                                  
-                                  if (!isModerator) return;
-
-                                  let newRole: 'moderator' | 'admin' | 'user';
-                                  if (appUser.role === 'user') newRole = 'admin';
-                                  else if (appUser.role === 'admin') {
-                                    // Only super admin can promote to moderator
-                                    newRole = isSuperAdmin ? 'moderator' : 'user';
-                                  } else {
-                                    newRole = 'user';
-                                  }
-
-                                  await updateDoc(doc(db, 'users', appUser.id), { role: newRole });
-                                  await addAuditLog('UPDATE', 'USER', appUser.id, `Alterou cargo de ${appUser.name} para ${newRole}`);
-                                }}
-                                className={cn(
-                                  "inline-flex items-center px-2.5 py-1 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all shadow-sm active:scale-95",
-                                  appUser.role === 'moderator'
-                                    ? "bg-rose-50 dark:bg-rose-900/30 text-rose-600 dark:text-rose-400 border border-rose-100 dark:border-rose-900/30 hover:bg-rose-100 dark:hover:bg-rose-900/50"
-                                    : appUser.role === 'admin' 
-                                      ? "bg-purple-50 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 border border-purple-100 dark:border-purple-900/30 hover:bg-purple-100 dark:hover:bg-purple-900/50" 
-                                      : "bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 border border-blue-100 dark:border-blue-900/30 hover:bg-blue-100 dark:hover:bg-blue-900/50"
-                                )}
-                              >
-                                {appUser.role === 'moderator' ? 'Moderador' : appUser.role === 'admin' ? 'Administrador' : 'Usuário'}
-                              </button>
-                            </td>
-                            <td className="px-6 py-4 text-right">
-                              <button
-                                onClick={async () => {
-                                  const isSuperAdmin = user?.email === 'almeidacesar2010@gmail.com';
-                                  const isModerator = currentUserRole === 'moderator' || isSuperAdmin;
-                                  if (!isModerator) return;
-                                  
-                                  setConfirmModal({
-                                    isOpen: true,
-                                    title: 'Excluir Acesso',
-                                    message: `Tem certeza que deseja excluir o acesso de "${appUser.name}"? Esta ação não pode ser desfeita.`,
-                                    type: 'danger',
-                                    onConfirm: async () => {
-                                      try {
-                                        await deleteDoc(doc(db, 'users', appUser.id));
-                                        await addAuditLog('DELETE', 'USER', appUser.id, `Excluiu usuário: ${appUser.name}`);
-                                        setSuccessMessage('Acesso excluído com sucesso!');
-                                        setTimeout(() => setSuccessMessage(null), 3000);
-                                      } catch (error) {
-                                        console.error('Error deleting user:', error);
-                                        setGlobalError('Erro ao excluir acesso.');
-                                      } finally {
-                                        setConfirmModal(prev => ({ ...prev, isOpen: false }));
-                                      }
-                                    }
-                                  });
-                                }}
-                                className="p-2 text-slate-300 dark:text-slate-600 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-xl transition-all opacity-100 md:opacity-0 md:group-hover:opacity-100"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              </div>
-            )}
+                <PermissionsManagement
+                  appUsers={appUsers}
+                  moduleVisibility={moduleVisibility}
+                  onUpdateModuleVisibility={handleUpdateModuleVisibility}
+                  onUpdateUserRole={handleUpdateUserRole}
+                  activeRolePreview={activeRolePreview}
+                  setActiveRolePreview={setActiveRolePreview}
+                  currentUserId={user?.uid || ''}
+                  currentUserRole={effectiveRole}
+                />
+              )}
           </motion.div>
           </AnimatePresence>
         </div>
@@ -4585,15 +5628,32 @@ const generatePDF = (order: any) => {
                             value={formData.equipmentNumber}
                             onChange={e => {
                               const val = e.target.value.toUpperCase();
-                              const matched = equipments.find(eq => eq.tag.toUpperCase() === val);
-                              if (matched) {
-                                const isPredefined = ['CCUs', 'Tanques de 1500L', 'Tanques de 5000/5200L'].includes(matched.family);
+                              const matchedFleet = fleetEquipment.find(fe => (fe.equipmentNumber || '').toUpperCase() === val);
+                              const matchedOld = equipments.find(eq => eq.tag.toUpperCase() === val);
+
+                              if (matchedFleet) {
+                                // Match in new Fleet Management database
+                                const fleetClient = clients.find(c => c.razaoSocial.toUpperCase() === (matchedFleet.clientId || '').toUpperCase());
+                                let mappedFamily = 'Outros';
+                                if (matchedFleet.type.includes('CCU')) mappedFamily = 'CCUs';
+                                else if (matchedFleet.type.includes('1500L')) mappedFamily = 'Tanques de 1500L';
+                                else if (matchedFleet.type.includes('5000') || matchedFleet.type.includes('5200')) mappedFamily = 'Tanques de 5000/5200L';
+
                                 setFormData(prev => ({
                                   ...prev,
                                   equipmentNumber: val,
-                                  family: isPredefined ? matched.family : 'Outros',
-                                  otherFamily: isPredefined ? '' : matched.family,
-                                  subFamily: matched.subFamily || ''
+                                  clientId: fleetClient ? fleetClient.id : prev.clientId,
+                                  family: mappedFamily,
+                                  otherFamily: mappedFamily === 'Outros' ? matchedFleet.type : ''
+                                }));
+                              } else if (matchedOld) {
+                                const isPredefined = ['CCUs', 'Tanques de 1500L', 'Tanques de 5000/5200L'].includes(matchedOld.family);
+                                setFormData(prev => ({
+                                  ...prev,
+                                  equipmentNumber: val,
+                                  family: isPredefined ? matchedOld.family : 'Outros',
+                                  otherFamily: isPredefined ? '' : matchedOld.family,
+                                  subFamily: matchedOld.subFamily || ''
                                 }));
                               } else {
                                 setFormData(prev => ({ ...prev, equipmentNumber: val }));
@@ -4603,10 +5663,46 @@ const generatePDF = (order: any) => {
                             className="w-full mt-0.5 px-3 py-1.5 text-base font-black uppercase bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                           />
                           <datalist id="equipment-list">
-                            {equipments.map(e => (
-                              <option key={e.id} value={e.tag}>{e.family} {e.subFamily ? `(${e.subFamily})` : ''}</option>
+                            {fleetEquipment.map((fe, idx) => (
+                              <option key={`fe-${fe.id}-${idx}`} value={fe.equipmentNumber}>
+                                {fe.type} | {fe.clientId || 'BASE'}
+                              </option>
+                            ))}
+                            {equipments.map((e, idx) => (
+                              <option key={e.id ? `${e.id}-${idx}` : `eq-${e.tag}-${idx}`} value={e.tag}>
+                                {e.family} {e.subFamily ? `(${e.subFamily})` : ''}
+                              </option>
                             ))}
                           </datalist>
+
+                          {/* Fleet Pending Validation Alert in OS Form */}
+                          {(() => {
+                            const matchedFleet = fleetEquipment.find(fe => (fe.equipmentNumber || '').trim().toUpperCase() === (formData.equipmentNumber || '').trim().toUpperCase());
+                            if (matchedFleet && (matchedFleet.isPendingValidation !== false || matchedFleet.validationStatus === 'pending')) {
+                              return (
+                                <div className="mt-2.5 p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl text-amber-800 dark:text-amber-200 text-[11px] font-medium flex items-center justify-between gap-2 shadow-sm">
+                                  <div className="flex items-center gap-2">
+                                    <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0 animate-pulse" />
+                                    <span>
+                                      <strong>Aviso PCP:</strong> O equipamento <strong>#{matchedFleet.equipmentNumber}</strong> possui <strong>cadastro pendente de validação</strong>.
+                                    </span>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setIsModalOpen(false);
+                                      setActiveTab('fleet');
+                                    }}
+                                    className="px-2.5 py-1 bg-amber-500 hover:bg-amber-600 text-slate-950 font-black uppercase text-[9px] tracking-wider rounded-lg shrink-0 flex items-center gap-1 active:scale-95 transition-all shadow"
+                                  >
+                                    <ShieldCheck className="w-3.5 h-3.5" />
+                                    Validar na Frota
+                                  </button>
+                                </div>
+                              );
+                            }
+                            return null;
+                          })()}
                         </div>
 
                         <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-200 dark:border-slate-800">
@@ -4662,8 +5758,8 @@ const generatePDF = (order: any) => {
                           >
                             <option value="">SELECIONE UM CLIENTE</option>
                             <option value="na">NÃO DEFINIDO / N/A</option>
-                            {clients.map(c => (
-                              <option key={c.id} value={c.id}>{c.razaoSocial}</option>
+                            {clients.map((c, idx) => (
+                              <option key={c.id ? `${c.id}-${idx}` : `cl-${idx}`} value={c.id}>{c.razaoSocial}</option>
                             ))}
                           </select>
                         </div>
@@ -4765,6 +5861,51 @@ const generatePDF = (order: any) => {
                               onChange={e => setFormData({ ...formData, endDate: e.target.value })}
                               className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-xs text-slate-900 dark:text-white"
                             />
+                          </div>
+                        </div>
+
+                        <div className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-slate-200/80 dark:border-slate-800 space-y-3">
+                          <p className="text-[10px] font-black uppercase text-slate-400 dark:text-slate-500 tracking-wider">RESPONSÁVEIS PELA OS</p>
+                          
+                          <div className="space-y-1">
+                            <label className="font-bold text-slate-500 uppercase text-[10px] block">RESPONSÁVEL PELA ABERTURA DA OS</label>
+                            <input
+                              type="text"
+                              list="app-users-list"
+                              placeholder="Nome do responsável pela abertura da OS..."
+                              value={formData.createdBy}
+                              onChange={e => setFormData({ ...formData, createdBy: e.target.value })}
+                              className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-xs uppercase text-slate-900 dark:text-white"
+                            />
+                          </div>
+
+                          <div className="space-y-1">
+                            <label className="font-bold text-slate-500 uppercase text-[10px] block">EXECUTOR DA MANUTENÇÃO (TÉCNICO)</label>
+                            <input
+                              type="text"
+                              list="app-users-list"
+                              placeholder="Nome do técnico executante da manutenção..."
+                              value={formData.maintenanceTechnician}
+                              onChange={e => setFormData({ ...formData, maintenanceTechnician: e.target.value })}
+                              className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-xs uppercase text-slate-900 dark:text-white"
+                            />
+                          </div>
+
+                          <div className="space-y-1">
+                            <label className="font-bold text-slate-500 uppercase text-[10px] block">RESPONSÁVEL PELO FECHAMENTO DA OS</label>
+                            <input
+                              type="text"
+                              list="app-users-list"
+                              placeholder="Nome do responsável pelo fechamento..."
+                              value={formData.closedBy}
+                              onChange={e => setFormData({ ...formData, closedBy: e.target.value })}
+                              className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-xs uppercase text-slate-900 dark:text-white"
+                            />
+                            <datalist id="app-users-list">
+                              {appUsers.map((u, idx) => (
+                                <option key={u.id ? `${u.id}-${idx}` : `us-${idx}`} value={u.name} />
+                              ))}
+                            </datalist>
                           </div>
                         </div>
                       </div>
@@ -4905,13 +6046,13 @@ const generatePDF = (order: any) => {
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-10 text-center text-xs">
                         <div className="space-y-2">
                           <div className="border-b-2 border-slate-400 dark:border-slate-600 w-3/4 mx-auto mb-2"></div>
-                          <p className="font-black text-slate-900 dark:text-white uppercase">RESPONSÁVEL TÉCNICO (INSPEÇÃO)</p>
-                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">NOME / REGISTRO / ASSINATURA</p>
+                          <p className="font-black text-slate-900 dark:text-white uppercase">{formData.maintenanceTechnician || '_______________________'}</p>
+                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">EXECUTOR DA MANUTENÇÃO (TÉCNICO)</p>
                         </div>
                         <div className="space-y-2">
                           <div className="border-b-2 border-slate-400 dark:border-slate-600 w-3/4 mx-auto mb-2"></div>
-                          <p className="font-black text-slate-900 dark:text-white uppercase">SUPERVISOR DE OPERAÇÕES</p>
-                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">VALIDAÇÃO DE QUALIDADE & LIBERAÇÃO</p>
+                          <p className="font-black text-slate-900 dark:text-white uppercase">{formData.closedBy || (formData.status === 'Concluído' ? '_______________________' : 'PENDENTE DE FECHAMENTO')}</p>
+                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">RESPONSÁVEL PELO FECHAMENTO</p>
                         </div>
                       </div>
 

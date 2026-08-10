@@ -69,7 +69,7 @@ service cloud.firestore {
              data.userName is string &&
              data.userEmail is string &&
              data.action in ['CREATE', 'UPDATE', 'DELETE'] &&
-             data.entity in ['OS', 'CLIENT', 'USER', 'SETTINGS'] &&
+             data.entity in ['OS', 'CLIENT', 'USER', 'SETTINGS', 'EQUIPMENT', 'FLEET'] &&
              data.entityId is string &&
              data.details is string &&
              data.timestamp is timestamp;
@@ -81,6 +81,19 @@ service cloud.firestore {
              data.family is string && data.family.size() > 0 &&
              data.userId is string &&
              data.createdAt is timestamp;
+    }
+
+    match /fleetEquipment/{fleetId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    match /fleetHistory/{historyId} {
+      allow read, create: if isAuthenticated();
+      allow update, delete: if false;
+    }
+
+    match /decontaminationOperations/{opId} {
+      allow read, write: if isAuthenticated();
     }
 
     match /serviceOrders/{osId} {
@@ -126,7 +139,13 @@ service cloud.firestore {
 
     match /settings/{settingId} {
       allow read: if isAuthenticated();
-      allow write: if isAdmin();
+      allow write: if isModerator();
+    }
+
+    match /deletionRequests/{requestId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update, delete: if isModerator();
     }
 
     match /auditLogs/{logId} {

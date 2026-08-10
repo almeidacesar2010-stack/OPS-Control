@@ -189,6 +189,71 @@
         }
       },
       "required": ["tag", "family", "userId", "createdAt"]
+    },
+    "decontaminationOperation": {
+      "title": "Decontamination Operation",
+      "description": "Represents a decontamination operation performed on a tank equipment.",
+      "type": "object",
+      "properties": {
+        "equipmentNumber": {
+          "type": "string",
+          "description": "The equipment tank number (from fleet)."
+        },
+        "model": {
+          "type": "string",
+          "description": "The model/type of tank auto-populated from Fleet Management."
+        },
+        "client": {
+          "type": "string",
+          "description": "Client name associated with the operation."
+        },
+        "product": {
+          "type": "string",
+          "description": "Product or content in the tank."
+        },
+        "invoiceNumber": {
+          "type": "string",
+          "description": "Invoice number (Nota Fiscal) of entry."
+        },
+        "arrivalDate": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Arrival date at base."
+        },
+        "startDate": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Decontamination start date."
+        },
+        "endDate": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Decontamination completion date."
+        },
+        "hasContamination": {
+          "type": "boolean",
+          "description": "Indicates whether contamination was detected."
+        },
+        "notes": {
+          "type": "string",
+          "description": "General observations."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["waiting", "in_progress", "completed"],
+          "description": "Current status of the decontamination operation."
+        },
+        "userId": {
+          "type": "string",
+          "description": "UID of the user who registered the operation."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Creation timestamp."
+        }
+      },
+      "required": ["equipmentNumber", "model", "client", "arrivalDate", "hasContamination", "status"]
     }
   },
   "firestore": {
@@ -207,6 +272,10 @@
     "/equipments/{equipmentId}": {
       "schema": "equipment",
       "description": "Collection of registered equipments."
+    },
+    "/decontaminationOperations/{decontaminationId}": {
+      "schema": "decontaminationOperation",
+      "description": "Collection of decontamination operations."
     }
   }
 }

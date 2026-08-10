@@ -1,6 +1,6 @@
 /**
  * Auth & Security Utilities for User Management
- * Implements password hashing (SHA-256 via Web Crypto API) and temporary password generation
+ * Implements password hashing (SHA-256 via Web Crypto API) and password generation
  */
 
 const SALT = "opscontrol_sec_salt_2026_v1";
@@ -28,7 +28,7 @@ export async function verifyPassword(password: string, hash: string): Promise<bo
 }
 
 /**
- * Generates a strong random temporary password for first access or password resets.
+ * Generates a strong random password for first access or password resets.
  * E.g. "xK9#mQ2!pL"
  */
 export function generateTempPassword(length: number = 10): string {
@@ -52,45 +52,4 @@ export function generateTempPassword(length: number = 10): string {
 
   // Shuffle the generated password
   return password.split("").sort(() => 0.5 - Math.random()).join("");
-}
-
-/**
- * Calls backend API to send credentials email securely.
- */
-export async function sendUserCredentialsEmail(params: {
-  to: string;
-  name: string;
-  email: string;
-  tempPassword: string;
-  isReset?: boolean;
-}): Promise<{ success: boolean; message: string }> {
-  try {
-    const response = await fetch("/api/send-email", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        type: params.isReset ? "reset_password" : "welcome_credentials",
-        to: params.to,
-        userName: params.name,
-        email: params.email,
-        tempPassword: params.tempPassword
-      })
-    });
-
-    if (!response.ok) {
-      const errData = await response.json().catch(() => ({}));
-      throw new Error(errData.message || "Falha ao enviar e-mail pelo servidor.");
-    }
-
-    return await response.json();
-  } catch (error: any) {
-    console.error("Error sending email via API:", error);
-    // Return gracefully so user creation/reset is not completely blocked if server email service fails
-    return {
-      success: false,
-      message: error?.message || "Não foi possível enviar o e-mail automaticamente."
-    };
-  }
 }

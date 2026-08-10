@@ -875,7 +875,7 @@ function AppContent() {
 
     // User Role Listener
     const userRef = doc(db, 'users', user.uid);
-    const unsubUser = onSnapshot(userRef, (docSnap) => {
+    const unsubUser = onSnapshot(userRef, async (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
 
@@ -906,21 +906,46 @@ function AppContent() {
           username: data.username || user.email?.split('@')[0] || ''
         });
       } else {
-        // If document doesn't exist and it's not the owner, it means the user was deleted
-        if (user.email !== "almeidacesar2010@gmail.com") {
-          console.warn("User document not found. Signing out...");
-          signOut(auth);
-          setGlobalError("Sua conta não existe mais no sistema.");
-        } else {
-          // Bootstrap first user as admin if it's the owner email
-          console.log("Bootstrapping owner as admin...");
-          setCurrentUserRole('admin');
-          setDoc(userRef, {
-            email: user.email,
-            name: user.displayName || 'Admin',
-            role: 'admin',
-            createdAt: serverTimestamp()
-          }).catch(err => console.error("Error bootstrapping admin:", err));
+        // If document doesn't exist under user.uid, try to heal by looking up by email
+        let healed = false;
+        if (user.email) {
+          try {
+            const q = query(collection(db, 'users'), where('email', '==', user.email.toLowerCase()));
+            const snap = await getDocs(q);
+            if (!snap.empty) {
+              const matchedDoc = snap.docs[0];
+              const matchedData = matchedDoc.data();
+              await setDoc(userRef, {
+                ...matchedData,
+                id: user.uid,
+                updatedAt: serverTimestamp()
+              });
+              if (matchedDoc.id !== user.uid) {
+                await deleteDoc(doc(db, 'users', matchedDoc.id));
+              }
+              healed = true;
+            }
+          } catch (healErr) {
+            console.error('Auto-heal error:', healErr);
+          }
+        }
+
+        if (!healed) {
+          if (user.email !== "almeidacesar2010@gmail.com") {
+            console.warn("User document not found. Signing out...");
+            signOut(auth);
+            setGlobalError("Sua conta não existe mais no sistema.");
+          } else {
+            // Bootstrap first user as admin if it's the owner email
+            console.log("Bootstrapping owner as admin...");
+            setCurrentUserRole('admin');
+            setDoc(userRef, {
+              email: user.email,
+              name: user.displayName || 'Admin',
+              role: 'admin',
+              createdAt: serverTimestamp()
+            }).catch(err => console.error("Error bootstrapping admin:", err));
+          }
         }
       }
     });
@@ -974,6 +999,7 @@ function AppContent() {
 
         // 1. Search user in Firestore first to verify status and password hash
         let userDocData: any = null;
+        let oldDocId: string | null = null;
         try {
           const usersRef = collection(db, 'users');
           const qEmail = query(usersRef, where('email', '==', targetEmail));
@@ -981,11 +1007,14 @@ function AppContent() {
 
           if (!snapEmail.empty) {
             userDocData = snapEmail.docs[0].data();
+            oldDocId = snapEmail.docs[0].id;
           } else {
-            const qUser = query(usersRef, where('username', '==', inputClean.replace(/^@/, '')));
+            const cleanUserStr = inputClean.replace(/^@/, '');
+            const qUser = query(usersRef, where('username', '==', cleanUserStr));
             const snapUser = await getDocs(qUser);
             if (!snapUser.empty) {
               userDocData = snapUser.docs[0].data();
+              oldDocId = snapUser.docs[0].id;
               if (userDocData.email) targetEmail = userDocData.email.toLowerCase();
             }
           }
@@ -1011,31 +1040,51 @@ function AppContent() {
           }
         }
 
-        // 2. Perform Firebase Auth login
+        // 2. Perform Firebase Auth login or bootstrap
         try {
-          const userCredential = await signInWithEmailAndPassword(auth, targetEmail, authForm.password);
-          const userRef = doc(db, 'users', userCredential.user.uid);
-          const userDoc = await getDoc(userRef);
-          
-          if (!userDoc.exists() && targetEmail !== "almeidacesar2010@gmail.com") {
-            await signOut(auth);
-            setLoginError('Não existe cadastro para este usuário ou sua conta foi removida.');
-            return;
+          let userCredential;
+          try {
+            userCredential = await signInWithEmailAndPassword(auth, targetEmail, authForm.password);
+          } catch (signInErr: any) {
+            // If sign-in failed BUT we verified userDocData & passwordHash in Firestore, bootstrap/create Firebase Auth user
+            if (userDocData) {
+              try {
+                userCredential = await createUserWithEmailAndPassword(auth, targetEmail, authForm.password);
+              } catch (createErr) {
+                console.error('Error creating Firebase Auth user:', createErr);
+                setLoginError('Usuário ou senha incorretos.');
+                setIsSubmitting(false);
+                return;
+              }
+            } else {
+              throw signInErr;
+            }
+          }
+
+          if (userCredential && userCredential.user) {
+            const newUid = userCredential.user.uid;
+            const userRef = doc(db, 'users', newUid);
+            const userDoc = await getDoc(userRef);
+
+            if (!userDoc.exists() && userDocData) {
+              await setDoc(userRef, {
+                ...userDocData,
+                id: newUid,
+                email: targetEmail,
+                updatedAt: serverTimestamp()
+              });
+              if (oldDocId && oldDocId !== newUid) {
+                try {
+                  await deleteDoc(doc(db, 'users', oldDocId));
+                } catch (delErr) {
+                  console.error('Error removing old user doc:', delErr);
+                }
+              }
+            }
           }
         } catch (authErr: any) {
-          if (authErr.code === 'auth/user-not-found' && userDocData) {
-            // User created in Firestore by Moderator -> Bootstrap in Firebase Auth
-            try {
-              await createUserWithEmailAndPassword(auth, targetEmail, authForm.password);
-            } catch (createErr) {
-              console.error('Error bootstrapping Firebase Auth user:', createErr);
-              setLoginError('Erro ao autenticar. Verifique sua senha temporária.');
-            }
-          } else if (authErr.code === 'auth/wrong-password' || authErr.code === 'auth/invalid-credential') {
-            setLoginError('Usuário ou senha incorretos.');
-          } else {
-            setLoginError('Erro ao entrar. Verifique seu usuário e senha.');
-          }
+          console.error('Auth error:', authErr);
+          setLoginError('Usuário ou senha incorretos.');
         }
       }
     } catch (error: any) {

@@ -30,13 +30,15 @@ import {
   Clock,
   RefreshCw,
   Send,
-  Sparkles
+  Sparkles,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { collection, addDoc, updateDoc, deleteDoc, doc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../firebase';
 import { AppUser, UserRole, ModuleVisibilityConfig } from '../types';
-import { hashPassword, generateTempPassword, sendUserCredentialsEmail } from '../utils/authUtils';
+import { hashPassword, generateTempPassword } from '../utils/authUtils';
 
 interface PermissionsManagementProps {
   appUsers: AppUser[];
@@ -124,6 +126,10 @@ export function PermissionsManagement({
 
   // Reset password state
   const [userToResetPassword, setUserToResetPassword] = useState<AppUser | null>(null);
+  const [resetPasswordInput, setResetPasswordInput] = useState({
+    password: generateTempPassword(10),
+    showPassword: true
+  });
   const [isResettingPassword, setIsResettingPassword] = useState(false);
 
   // Success modal after creation / reset
@@ -132,17 +138,17 @@ export function PermissionsManagement({
     title: string;
     userName: string;
     userEmail: string;
+    username: string;
     tempPassword: string;
     isReset: boolean;
-    emailSent: boolean;
   }>({
     isOpen: false,
     title: '',
     userName: '',
     userEmail: '',
+    username: '',
     tempPassword: '',
-    isReset: false,
-    emailSent: false
+    isReset: false
   });
 
   const [copiedPassword, setCopiedPassword] = useState(false);
@@ -152,7 +158,9 @@ export function PermissionsManagement({
     name: '',
     username: '',
     email: '',
-    role: 'user' as UserRole
+    role: 'user' as UserRole,
+    initialPassword: generateTempPassword(10),
+    showPassword: true
   });
   const [isSubmittingUser, setIsSubmittingUser] = useState(false);
   const [accessError, setAccessError] = useState<string | null>(null);
@@ -262,30 +270,24 @@ export function PermissionsManagement({
 
   const handleConfirmResetPassword = async () => {
     if (!userToResetPassword) return;
+    const finalPass = resetPasswordInput.password.trim();
+    if (!finalPass || finalPass.length < 6) {
+      setSaveError('A nova senha deve possuir no mínimo 6 caracteres.');
+      return;
+    }
     setIsResettingPassword(true);
     setSaveError(null);
 
     try {
-      const tempPassword = generateTempPassword(10);
-      const passwordHash = await hashPassword(tempPassword);
+      const passwordHash = await hashPassword(finalPass);
 
-      // Invalidate previous password and set mustChangePassword to true
       await updateDoc(doc(db, 'users', userToResetPassword.id), {
         passwordHash,
         mustChangePassword: true,
+        isFirstLoginCompleted: false,
         updatedAt: serverTimestamp()
       });
 
-      // Send email via backend service
-      const emailRes = await sendUserCredentialsEmail({
-        to: userToResetPassword.email,
-        name: userToResetPassword.name,
-        email: userToResetPassword.email,
-        tempPassword,
-        isReset: true
-      });
-
-      // Audit log (never log password)
       await addDoc(collection(db, 'auditLogs'), {
         userId: currentUserId,
         userName: 'Moderador',
@@ -293,7 +295,7 @@ export function PermissionsManagement({
         action: 'UPDATE',
         entity: 'USER',
         entityId: userToResetPassword.id,
-        details: `Redefiniu a senha do usuário "${userToResetPassword.name}". Nova senha temporária gerada e e-mail enviado.`,
+        details: `Redefiniu a senha do usuário "${userToResetPassword.name}". Nova senha configurada pelo moderador.`,
         timestamp: serverTimestamp()
       });
 
@@ -302,9 +304,9 @@ export function PermissionsManagement({
         title: 'Senha Redefinida com Sucesso!',
         userName: userToResetPassword.name,
         userEmail: userToResetPassword.email,
-        tempPassword,
-        isReset: true,
-        emailSent: emailRes.success
+        username: userToResetPassword.username || userToResetPassword.email.split('@')[0],
+        tempPassword: finalPass,
+        isReset: true
       });
 
       setUserToResetPassword(null);
@@ -358,6 +360,12 @@ export function PermissionsManagement({
       return;
     }
 
+    const definedPassword = accessForm.initialPassword.trim();
+    if (!definedPassword || definedPassword.length < 6) {
+      setAccessError('A senha inicial deve conter no mínimo 6 caracteres.');
+      return;
+    }
+
     setIsSubmittingUser(true);
     try {
       let cleanUsername = accessForm.username.trim();
@@ -366,11 +374,8 @@ export function PermissionsManagement({
       }
       if (cleanUsername.startsWith('@')) cleanUsername = cleanUsername.slice(1);
 
-      // Generate random temporary password
-      const tempPassword = generateTempPassword(10);
-      const passwordHash = await hashPassword(tempPassword);
+      const passwordHash = await hashPassword(definedPassword);
 
-      // Save user to Firestore with hashed temp password and mustChangePassword = true
       const newUserRef = await addDoc(collection(db, 'users'), {
         name: accessForm.name.trim(),
         username: cleanUsername,
@@ -384,16 +389,6 @@ export function PermissionsManagement({
         updatedAt: serverTimestamp()
       });
 
-      // Send credentials email via backend API
-      const emailRes = await sendUserCredentialsEmail({
-        to: accessForm.email.trim().toLowerCase(),
-        name: accessForm.name.trim(),
-        email: accessForm.email.trim().toLowerCase(),
-        tempPassword,
-        isReset: false
-      });
-
-      // Write audit log
       await addDoc(collection(db, 'auditLogs'), {
         userId: currentUserId,
         userName: 'Moderador',
@@ -401,21 +396,28 @@ export function PermissionsManagement({
         action: 'CREATE',
         entity: 'USER',
         entityId: newUserRef.id,
-        details: `Cadastrou o novo usuário "${accessForm.name.trim()}" (${accessForm.role.toUpperCase()}). Senha temporária enviada por e-mail.`,
+        details: `Cadastrou o novo usuário "${accessForm.name.trim()}" (${accessForm.role.toUpperCase()}) com senha definida pelo moderador.`,
         timestamp: serverTimestamp()
       });
 
       setCreatedCredentialsModal({
         isOpen: true,
-        title: 'Novo Usuário Cadastrado!',
+        title: 'Usuário Cadastrado e Acesso Liberado!',
         userName: accessForm.name.trim(),
         userEmail: accessForm.email.trim().toLowerCase(),
-        tempPassword,
-        isReset: false,
-        emailSent: emailRes.success
+        username: cleanUsername,
+        tempPassword: definedPassword,
+        isReset: false
       });
 
-      setAccessForm({ name: '', username: '', email: '', role: 'user' });
+      setAccessForm({
+        name: '',
+        username: '',
+        email: '',
+        role: 'user',
+        initialPassword: generateTempPassword(10),
+        showPassword: true
+      });
       setActiveTab('users');
     } catch (err: any) {
       console.error('Error creating user:', err);
@@ -500,7 +502,7 @@ export function PermissionsManagement({
               Gerenciamento de Usuários e Permissões
             </h1>
             <p className="text-slate-300 text-xs max-w-2xl leading-relaxed">
-              Crie e gerencie contas de usuários com senhas temporárias enviadas por e-mail, controle níveis de acesso e redefina credenciais com total segurança.
+              Crie e gerencie contas de usuários com senhas iniciais configuradas, controle níveis de acesso e redefina credenciais com total segurança.
             </p>
           </div>
 
@@ -582,7 +584,7 @@ export function PermissionsManagement({
                 Usuários Registrados ({appUsers.length})
               </h2>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                Como Moderador, você pode visualizar dados dos usuários, alterar perfis de acesso, ativar/desativar contas e redefinir senhas com envio de e-mail.
+                Como Moderador, você pode visualizar dados dos usuários, alterar perfis de acesso, ativar/desativar contas e definir/redefinir senhas de acesso.
               </p>
             </div>
 
@@ -754,7 +756,7 @@ export function PermissionsManagement({
                 Cadastrar Novo Usuário
               </h2>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                O sistema gerará automaticamente uma senha temporária segura e enviará as credenciais de acesso para o e-mail do usuário.
+                Defina os dados e a senha inicial do usuário. O usuário poderá utilizar essa senha para entrar imediatamente no site.
               </p>
             </div>
           </div>
@@ -829,15 +831,49 @@ export function PermissionsManagement({
               </select>
             </div>
 
+            {/* DEFINIR SENHA INICIAL */}
+            <div className="space-y-1.5 pt-2">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                  <KeyRound className="w-3.5 h-3.5 text-amber-500" />
+                  Senha Inicial do Usuário *
+                </label>
+                <button
+                  type="button"
+                  onClick={() => setAccessForm(prev => ({ ...prev, initialPassword: generateTempPassword(10) }))}
+                  className="text-[11px] font-bold text-blue-600 dark:text-blue-400 hover:underline cursor-pointer flex items-center gap-1"
+                >
+                  <RefreshCw className="w-3 h-3" />
+                  Gerar Senha Aleatória
+                </button>
+              </div>
+              <div className="relative">
+                <input
+                  type={accessForm.showPassword ? 'text' : 'password'}
+                  required
+                  value={accessForm.initialPassword}
+                  onChange={(e) => setAccessForm(prev => ({ ...prev, initialPassword: e.target.value }))}
+                  placeholder="Digite a senha inicial (Mín. 6 caracteres)"
+                  className="w-full px-4 py-3 pr-12 rounded-2xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-mono font-bold focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <button
+                  type="button"
+                  onClick={() => setAccessForm(prev => ({ ...prev, showPassword: !prev.showPassword }))}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1 cursor-pointer"
+                >
+                  {accessForm.showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
+
             <div className="p-4 rounded-2xl bg-blue-50 dark:bg-blue-950/40 border border-blue-200/60 dark:border-blue-800/60 text-xs text-blue-800 dark:text-blue-300 space-y-1.5">
               <p className="font-bold flex items-center gap-1.5">
                 <Sparkles className="w-4 h-4 text-blue-500 shrink-0" />
-                Início Seguro com Senha Temporária:
+                Acesso Imediato ao Site:
               </p>
               <p className="text-[11px] leading-relaxed text-slate-600 dark:text-slate-300">
-                • Uma senha aleatória temporária será gerada no cadastro.<br />
-                • As instruções e dados de login serão automaticamente enviados por e-mail.<br />
-                • No primeiro login, o usuário será obrigado a cadastrar sua nova senha pessoal.
+                • O usuário poderá realizar login imediatamente utilizando o e-mail/usuário e a senha informada acima.<br />
+                • No primeiro login, o sistema exigirá obrigatoriamente que o usuário cadastre sua senha pessoal e definitiva.
               </p>
             </div>
 
@@ -855,8 +891,8 @@ export function PermissionsManagement({
                 disabled={isSubmittingUser}
                 className="flex-1 py-3.5 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs uppercase tracking-wider transition-all shadow-lg shadow-emerald-600/20 active:scale-95 disabled:opacity-50 cursor-pointer flex items-center justify-center gap-2"
               >
-                <Send className="w-4 h-4" />
-                {isSubmittingUser ? 'Cadastrando e Enviando E-mail...' : 'Cadastrar Usuário'}
+                <CheckCircle2 className="w-4 h-4" />
+                {isSubmittingUser ? 'Criando Usuário...' : 'Cadastrar e Liberar Acesso'}
               </button>
             </div>
           </form>
@@ -1018,19 +1054,16 @@ export function PermissionsManagement({
                   </div>
                 </div>
 
-                <div className="p-3.5 rounded-2xl bg-slate-100 dark:bg-slate-800 text-xs text-slate-600 dark:text-slate-300 space-y-1 leading-relaxed">
+                <div className="p-3.5 rounded-2xl bg-slate-100 dark:bg-slate-800 text-xs text-slate-600 dark:text-slate-300 space-y-1.5 leading-relaxed">
                   <p className="font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
-                    <Send className="w-3.5 h-3.5 text-blue-500" />
-                    Status do Envio de E-mail:
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
+                    Orientação ao Usuário:
                   </p>
                   <p>
-                    {createdCredentialsModal.emailSent
-                      ? `✓ As instruções e a senha temporária foram enviadas por e-mail para ${createdCredentialsModal.userEmail}.`
-                      : `• O e-mail foi registrado. Caso necessário, forneça a senha temporária acima ao usuário.`
-                    }
+                    Forneça o e-mail/usuário e a senha inicial acima ao usuário para que ele possa acessar o sistema.
                   </p>
                   <p className="text-[11px] text-slate-400 pt-1">
-                    • No próximo login, o usuário será obrigado a cadastrar sua nova senha pessoal.
+                    • Ao realizar o primeiro login no site, o usuário será solicitado a redefinir esta senha para uma senha pessoal definitiva.
                   </p>
                 </div>
               </div>

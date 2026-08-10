@@ -550,6 +550,7 @@ function AppContent() {
   } | null>(null);
   const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
   const effectiveRole: UserRole = activeRolePreview || currentUserRole;
+  const canDelete = effectiveRole === 'admin' || effectiveRole === 'moderator' || user?.email === "almeidacesar2010@gmail.com";
   const [deleteModalState, setDeleteModalState] = useState<{
     isOpen: boolean;
     itemType: string;
@@ -3839,7 +3840,7 @@ const generatePDF = (order: any) => {
                     {isSubmitting ? 'Processando...' : 'Gerar 50 Demos'}
                   </button>
                   
-                  {orders.some(o => (o as any).isDemo) && (
+                  {canDelete && orders.some(o => (o as any).isDemo) && (
                     <button
                       onClick={clearDemoOrders}
                       disabled={isSubmitting}
@@ -4454,6 +4455,7 @@ const generatePDF = (order: any) => {
                   historyEntries={fleetHistory}
                   clients={clients}
                   serviceOrders={orders}
+                  userRole={effectiveRole}
                   onSaveEquipment={handleSaveFleetEquipment}
                   onDeleteEquipment={handleDeleteFleetEquipment}
                   onDeleteAllEquipment={handleDeleteAllFleetEquipment}
@@ -4467,6 +4469,7 @@ const generatePDF = (order: any) => {
                   operations={decontaminationOperations}
                   fleetEquipments={fleetEquipment}
                   clients={clients}
+                  userRole={effectiveRole}
                   onSaveOperation={handleSaveDecontaminationOperation}
                   onDeleteOperation={handleDeleteDecontaminationOperation}
                 />
@@ -4788,13 +4791,15 @@ const generatePDF = (order: any) => {
                                               >
                                                 <FileText className="w-4 h-4" />
                                               </button>
-                                              <button 
-                                                onClick={() => handleDeleteOrder(order.id)}
-                                                className="p-2 text-slate-300 dark:text-slate-600 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/30 rounded-xl transition-all"
-                                                title="Excluir OS"
-                                              >
-                                                <Trash2 className="w-4 h-4" />
-                                              </button>
+                                              {canDelete && (
+                                                <button 
+                                                  onClick={() => handleDeleteOrder(order.id)}
+                                                  className="p-2 text-slate-300 dark:text-slate-600 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/30 rounded-xl transition-all"
+                                                  title="Excluir OS"
+                                                >
+                                                  <Trash2 className="w-4 h-4" />
+                                                </button>
+                                              )}
                                             </div>
                                           </div>
                                           
@@ -5043,13 +5048,15 @@ const generatePDF = (order: any) => {
                                         >
                                           <Edit className="w-5 h-5" />
                                         </button>
-                                        <button 
-                                          onClick={() => handleDeleteOrder(order.id)}
-                                          title="Excluir OS"
-                                          className="p-2.5 text-slate-300 dark:text-slate-600 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/30 rounded-xl transition-all"
-                                        >
-                                          <Trash2 className="w-5 h-5" />
-                                        </button>
+                                        {canDelete && (
+                                          <button 
+                                            onClick={() => handleDeleteOrder(order.id)}
+                                            title="Excluir OS"
+                                            className="p-2.5 text-slate-300 dark:text-slate-600 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/30 rounded-xl transition-all"
+                                          >
+                                            <Trash2 className="w-5 h-5" />
+                                          </button>
+                                        )}
                                       </div>
                                     </td>
                                   </tr>
@@ -5109,15 +5116,17 @@ const generatePDF = (order: any) => {
                               {logoUrl ? (
                                 <div className="relative group/logo">
                                   <img src={logoUrl} alt="Logo Preview" className="max-h-32 object-contain rounded-2xl shadow-xl" referrerPolicy="no-referrer" />
-                                  <button 
-                                    onClick={async () => {
-                                      await setDoc(doc(db, 'settings', 'appConfig'), { logoUrl: null }, { merge: true });
-                                      await addAuditLog('UPDATE', 'SETTINGS', 'appConfig', 'Removeu logo da empresa');
-                                    }}
-                                    className="absolute -top-3 -right-3 w-8 h-8 bg-rose-500 text-white rounded-full flex items-center justify-center shadow-lg opacity-0 group-hover/logo:opacity-100 transition-all hover:scale-110"
-                                  >
-                                    <Trash2 className="w-4 h-4" />
-                                  </button>
+                                  {canDelete && (
+                                    <button 
+                                      onClick={async () => {
+                                        await setDoc(doc(db, 'settings', 'appConfig'), { logoUrl: null }, { merge: true });
+                                        await addAuditLog('UPDATE', 'SETTINGS', 'appConfig', 'Removeu logo da empresa');
+                                      }}
+                                      className="absolute -top-3 -right-3 w-8 h-8 bg-rose-500 text-white rounded-full flex items-center justify-center shadow-lg opacity-0 group-hover/logo:opacity-100 transition-all hover:scale-110"
+                                    >
+                                      <Trash2 className="w-4 h-4" />
+                                    </button>
+                                  )}
                                 </div>
                               ) : (
                                 <div className="w-32 h-32 bg-white dark:bg-slate-800 rounded-3xl flex flex-col items-center justify-center text-slate-300 dark:text-slate-600 border border-slate-100 dark:border-slate-700 shadow-sm">
@@ -5441,45 +5450,47 @@ const generatePDF = (order: any) => {
                             </td>
                             <td className="px-8 py-5 text-right">
                               <div className="flex items-center justify-end gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-all duration-300">
-                                <button
-                                  onClick={() => {
-                                    setConfirmModal({
-                                      isOpen: true,
-                                      title: 'Excluir Cliente',
-                                      message: `Tem certeza que deseja excluir o cliente "${client.razaoSocial}"? Esta ação não pode ser desfeita.`,
-                                      type: 'danger',
-                                      onConfirm: async () => {
-                                        try {
-                                          // 1. Delete all service orders for this client
-                                          const ordersQuery = query(collection(db, 'serviceOrders'), where('clientId', '==', client.id));
-                                          const ordersSnapshot = await getDocs(ordersQuery);
-                                          
-                                          const batch = writeBatch(db);
-                                          ordersSnapshot.docs.forEach((doc) => {
-                                            batch.delete(doc.ref);
-                                          });
-                                          
-                                          // 2. Delete the client
-                                          batch.delete(doc(db, 'clients', client.id));
-                                          
-                                          await batch.commit();
-                                          
-                                          await addAuditLog('DELETE', 'CLIENT', client.id, `Excluiu cliente: ${client.razaoSocial} e todas as suas OS`);
-                                          setSuccessMessage('Cliente e suas ordens excluídos com sucesso!');
-                                          setTimeout(() => setSuccessMessage(null), 3000);
-                                        } catch (error) {
-                                          console.error('Error deleting client and orders:', error);
-                                          setGlobalError('Erro ao excluir cliente e suas ordens.');
-                                        } finally {
-                                          setConfirmModal(prev => ({ ...prev, isOpen: false }));
+                                {canDelete && (
+                                  <button
+                                    onClick={() => {
+                                      setConfirmModal({
+                                        isOpen: true,
+                                        title: 'Excluir Cliente',
+                                        message: `Tem certeza que deseja excluir o cliente "${client.razaoSocial}"? Esta ação não pode ser desfeita.`,
+                                        type: 'danger',
+                                        onConfirm: async () => {
+                                          try {
+                                            // 1. Delete all service orders for this client
+                                            const ordersQuery = query(collection(db, 'serviceOrders'), where('clientId', '==', client.id));
+                                            const ordersSnapshot = await getDocs(ordersQuery);
+                                            
+                                            const batch = writeBatch(db);
+                                            ordersSnapshot.docs.forEach((doc) => {
+                                              batch.delete(doc.ref);
+                                            });
+                                            
+                                            // 2. Delete the client
+                                            batch.delete(doc(db, 'clients', client.id));
+                                            
+                                            await batch.commit();
+                                            
+                                            await addAuditLog('DELETE', 'CLIENT', client.id, `Excluiu cliente: ${client.razaoSocial} e todas as suas OS`);
+                                            setSuccessMessage('Cliente e suas ordens excluídos com sucesso!');
+                                            setTimeout(() => setSuccessMessage(null), 3000);
+                                          } catch (error) {
+                                            console.error('Error deleting client and orders:', error);
+                                            setGlobalError('Erro ao excluir cliente e suas ordens.');
+                                          } finally {
+                                            setConfirmModal(prev => ({ ...prev, isOpen: false }));
+                                          }
                                         }
-                                      }
-                                    });
-                                  }}
-                                  className="p-2.5 text-slate-300 dark:text-slate-600 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/30 rounded-xl transition-all"
-                                >
-                                  <Trash2 className="w-4.5 h-4.5" />
-                                </button>
+                                      });
+                                    }}
+                                    className="p-2.5 text-slate-300 dark:text-slate-600 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/30 rounded-xl transition-all"
+                                  >
+                                    <Trash2 className="w-4.5 h-4.5" />
+                                  </button>
+                                )}
                               </div>
                             </td>
                           </tr>
@@ -5564,12 +5575,14 @@ const generatePDF = (order: any) => {
                                 </span>
                               </td>
                               <td className="px-10 py-6 text-right">
-                                <button 
-                                  onClick={() => handleDeleteEquipment(equipment.id)}
-                                  className="p-3 text-slate-300 dark:text-slate-600 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/30 rounded-2xl transition-all opacity-100 md:opacity-0 md:group-hover:opacity-100"
-                                >
-                                  <Trash2 className="w-5 h-5" />
-                                </button>
+                                {canDelete && (
+                                  <button 
+                                    onClick={() => handleDeleteEquipment(equipment.id)}
+                                    className="p-3 text-slate-300 dark:text-slate-600 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/30 rounded-2xl transition-all opacity-100 md:opacity-0 md:group-hover:opacity-100"
+                                  >
+                                    <Trash2 className="w-5 h-5" />
+                                  </button>
+                                )}
                               </td>
                             </tr>
                           ))}

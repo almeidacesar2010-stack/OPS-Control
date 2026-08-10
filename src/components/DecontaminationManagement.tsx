@@ -72,6 +72,7 @@ import {
   generateEvolutionChartData,
   EvolutionChartMode
 } from '../utils/decontaminationUtils';
+import { UserRole } from '../types';
 import { DecontaminationModal } from './DecontaminationModal';
 import { TankHistoryModal } from './TankHistoryModal';
 
@@ -79,6 +80,7 @@ interface DecontaminationManagementProps {
   operations: DecontaminationOperation[];
   fleetEquipments: FleetEquipment[];
   clients: { id: string; razaoSocial: string }[];
+  userRole?: UserRole;
   onSaveOperation: (operation: Partial<DecontaminationOperation>) => Promise<void>;
   onDeleteOperation: (id: string) => Promise<void>;
 }
@@ -117,9 +119,11 @@ export function DecontaminationManagement({
   operations,
   fleetEquipments,
   clients,
+  userRole = 'user',
   onSaveOperation,
   onDeleteOperation
 }: DecontaminationManagementProps) {
+  const canDelete = userRole === 'admin' || userRole === 'moderator';
   // Modal states
   const [isOpModalOpen, setIsOpModalOpen] = useState(false);
   const [editingOp, setEditingOp] = useState<DecontaminationOperation | null>(null);
@@ -1430,17 +1434,19 @@ export function DecontaminationManagement({
                             <Edit3 className="w-4 h-4" />
                           </button>
 
-                          <button
-                            onClick={() => {
-                              if (window.confirm(`Tem certeza que deseja excluir esta operação do tanque ${op.equipmentNumber}?`)) {
-                                onDeleteOperation(op.id);
-                              }
-                            }}
-                            className="p-2 text-slate-400 hover:text-rose-600 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-                            title="Excluir Operação"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+                          {canDelete && (
+                            <button
+                              onClick={() => {
+                                if (window.confirm(`Tem certeza que deseja excluir esta operação do tanque ${op.equipmentNumber}?`)) {
+                                  onDeleteOperation(op.id);
+                                }
+                              }}
+                              className="p-2 text-slate-400 hover:text-rose-600 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                              title="Excluir Operação"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>

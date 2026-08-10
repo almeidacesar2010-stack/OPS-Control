@@ -5,7 +5,7 @@ import {
   Trash2, Edit, FileSpreadsheet, ShieldAlert, Boxes, ArrowUpDown, Layers, AlertCircle, ShieldCheck, Award, X, RotateCcw
 } from 'lucide-react';
 import { FleetEquipment, FleetType, FleetLocation, FleetStatus, FleetHistoryEntry } from '../types/fleet';
-import { Client, ServiceOrder } from '../types';
+import { Client, ServiceOrder, UserRole } from '../types';
 import { calculateDaysRemaining, getExpirationStatus, formatDateBR, calculateCompletenessScore, auditFleetDuplicates } from '../utils/fleetUtils';
 import { FleetEquipmentModal, FLEET_TYPES, FLEET_LOCATIONS, FLEET_STATUSES } from './FleetEquipmentModal';
 import { FleetImportModal } from './FleetImportModal';
@@ -16,7 +16,7 @@ const FleetRowItem = React.memo<{
   eq: FleetEquipment;
   onOpenDrawer: (eq: FleetEquipment) => void;
   onEdit: (eq: FleetEquipment) => void;
-  onDeleteRequest: (eq: FleetEquipment) => void;
+  onDeleteRequest?: (eq: FleetEquipment) => void;
 }>(({ eq, onOpenDrawer, onEdit, onDeleteRequest }) => {
   const visDays = calculateDaysRemaining(eq.nextVisualInspectionDate);
   const visStatus = getExpirationStatus(visDays);
@@ -142,16 +142,18 @@ const FleetRowItem = React.memo<{
           >
             <Edit className="w-4 h-4" />
           </button>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onDeleteRequest(eq);
-            }}
-            title="Excluir Equipamento"
-            className="p-1.5 text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
-          >
-            <Trash2 className="w-4 h-4" />
-          </button>
+          {onDeleteRequest && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onDeleteRequest(eq);
+              }}
+              title="Excluir Equipamento"
+              className="p-1.5 text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+            >
+              <Trash2 className="w-4 h-4" />
+            </button>
+          )}
         </div>
       </td>
     </tr>
@@ -163,6 +165,7 @@ interface FleetManagementProps {
   historyEntries: FleetHistoryEntry[];
   clients: Client[];
   serviceOrders: ServiceOrder[];
+  userRole?: UserRole;
   onSaveEquipment: (data: Partial<FleetEquipment>) => Promise<void>;
   onDeleteEquipment: (id: string, equipmentNumber: string) => Promise<void>;
   onDeleteAllEquipment?: () => Promise<{ deletedCount: number }>;
@@ -188,6 +191,7 @@ export const FleetManagement: React.FC<FleetManagementProps> = ({
   historyEntries,
   clients,
   serviceOrders,
+  userRole = 'user',
   onSaveEquipment,
   onDeleteEquipment,
   onDeleteAllEquipment,
@@ -196,6 +200,8 @@ export const FleetManagement: React.FC<FleetManagementProps> = ({
   onImportConfirmed,
   onRecoverConfirmed
 }) => {
+  const canDelete = userRole === 'admin' || userRole === 'moderator';
+
   // Views
   const [activeSubTab, setActiveSubTab] = useState<'overview' | 'expirations'>('overview');
 
@@ -1045,10 +1051,10 @@ export const FleetManagement: React.FC<FleetManagementProps> = ({
                           setEditingEquipment(item);
                           setIsEquipmentModalOpen(true);
                         }}
-                        onDeleteRequest={(item) => {
+                        onDeleteRequest={canDelete ? (item) => {
                           setDeleteError(null);
                           setDeletingEquipment(item);
-                        }}
+                        } : undefined}
                       />
                     ))
                   )}
@@ -1453,10 +1459,10 @@ export const FleetManagement: React.FC<FleetManagementProps> = ({
           setEditingEquipment(eq);
           setIsEquipmentModalOpen(true);
         }}
-        onDeleteClick={(eq) => {
+        onDeleteClick={canDelete ? (eq) => {
           setDeleteError(null);
           setDeletingEquipment(eq);
-        }}
+        } : undefined}
       />
 
       {/* Confirmation & Deletion Modal */}

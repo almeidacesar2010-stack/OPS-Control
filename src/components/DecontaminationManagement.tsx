@@ -64,6 +64,7 @@ import {
   getLeadTimeHours, 
   formatHours, 
   formatDays,
+  formatDailyAverage,
   isOperationInPeriod, 
   calculateDecontaminationKPIs, 
   calculateClientIndicators, 
@@ -188,8 +189,8 @@ export function DecontaminationManagement({
 
   // Compute Overview KPIs with comparative percentage vs previous period
   const kpis = useMemo(() => {
-    return calculateDecontaminationKPIs(dateFilteredOperations, filterPeriod, customStartDate, customEndDate);
-  }, [dateFilteredOperations, filterPeriod, customStartDate, customEndDate]);
+    return calculateDecontaminationKPIs(dateFilteredOperations, filterPeriod, customStartDate, customEndDate, operations);
+  }, [dateFilteredOperations, filterPeriod, customStartDate, customEndDate, operations]);
 
   // Generate Evolution Chart Data
   const chartData = useMemo(() => {
@@ -432,37 +433,6 @@ export function DecontaminationManagement({
     }
   };
 
-  // Helper for Comparative Badge
-  const renderComparisonBadge = (comp: ComparisonResult | null, inverseColors = false) => {
-    if (!comp || !comp.hasSufficientData) {
-      return (
-        <span className="inline-flex items-center gap-1 text-[10px] font-bold text-slate-400 bg-slate-100 dark:bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-200/50 dark:border-slate-700/50">
-          Sem comparação
-        </span>
-      );
-    }
-
-    if (comp.isNeutral) {
-      return (
-        <span className="inline-flex items-center gap-1 text-[10px] font-bold text-slate-400 bg-slate-100 dark:bg-slate-800 px-2.5 py-1 rounded-lg">
-          <Minus className="w-3 h-3" /> 0% vs período anterior
-        </span>
-      );
-    }
-
-    const isGood = inverseColors ? !comp.isIncrease : comp.isIncrease;
-    const colorClasses = isGood
-      ? 'text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800/50'
-      : 'text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/60 border border-rose-200 dark:border-rose-800/50';
-
-    return (
-      <span className={`inline-flex items-center gap-1 text-[10px] font-black px-2.5 py-1 rounded-lg ${colorClasses}`}>
-        {comp.isIncrease ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
-        {comp.isIncrease ? '+' : '-'}{comp.percent}% vs período anterior
-      </span>
-    );
-  };
-
   return (
     <div className="space-y-8 animate-fade-in pb-12">
       {/* Top Header Banner */}
@@ -564,8 +534,8 @@ export function DecontaminationManagement({
         )}
       </div>
 
-      {/* DASHBOARD: 4 MAIN PROMINENT KPI CARDS */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+      {/* DASHBOARD: 5 MAIN PROMINENT KPI CARDS */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-5">
         {/* Card 1: Tanques Descontaminados (Green) */}
         <motion.div 
           whileHover={{ y: -3 }}
@@ -584,7 +554,6 @@ export function DecontaminationManagement({
             <span className="text-4xl font-black text-emerald-600 dark:text-emerald-400 tracking-tight">
               {kpis.completedCount}
             </span>
-            {renderComparisonBadge(kpis.comparisons.completed)}
           </div>
           <p className="text-[10px] font-bold text-slate-400 mt-2">
             Operações finalizadas no período
@@ -609,7 +578,6 @@ export function DecontaminationManagement({
             <span className="text-4xl font-black text-amber-600 dark:text-amber-400 tracking-tight">
               {kpis.waitingCount}
             </span>
-            {renderComparisonBadge(kpis.comparisons.waiting, true)}
           </div>
           <p className="text-[10px] font-bold text-slate-400 mt-2">
             Tanques na fila aguardando início
@@ -634,7 +602,6 @@ export function DecontaminationManagement({
             <span className="text-4xl font-black text-blue-600 dark:text-blue-400 tracking-tight">
               {kpis.inProgressCount}
             </span>
-            {renderComparisonBadge(kpis.comparisons.inProgress)}
           </div>
           <p className="text-[10px] font-bold text-slate-400 mt-2">
             Processo de lavagem em andamento
@@ -659,10 +626,33 @@ export function DecontaminationManagement({
             <span className="text-3xl font-black text-purple-600 dark:text-purple-400 tracking-tight">
               {formatDays(kpis.avgDeconTimeHours)}
             </span>
-            {renderComparisonBadge(kpis.comparisons.avgDecon, true)}
           </div>
           <p className="text-[10px] font-bold text-slate-400 mt-2">
             Início → Finalização (em dias)
+          </p>
+        </motion.div>
+
+        {/* Card 5: Média de Tanques Descontaminados por Dia (Teal / Cyan) */}
+        <motion.div 
+          whileHover={{ y: -3 }}
+          className="bg-white dark:bg-slate-900 p-7 rounded-[32px] border-2 border-teal-500/20 dark:border-teal-500/30 shadow-md relative overflow-hidden group"
+        >
+          <div className="flex items-center justify-between mb-4">
+            <span className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+              Média de Tanques Descontaminados por Dia
+            </span>
+            <div className="w-12 h-12 bg-teal-500/10 text-teal-600 dark:text-teal-400 rounded-2xl flex items-center justify-center border border-teal-500/20">
+              <TrendingUp className="w-6 h-6" />
+            </div>
+          </div>
+
+          <div className="flex items-baseline justify-between gap-2">
+            <span className="text-3xl font-black text-teal-600 dark:text-teal-400 tracking-tight">
+              {formatDailyAverage(kpis.avgDailyDecon)} <span className="text-xs font-extrabold text-slate-400">tanques/dia</span>
+            </span>
+          </div>
+          <p className="text-[10px] font-bold text-slate-400 mt-2">
+            Produtividade diária no período
           </p>
         </motion.div>
       </div>

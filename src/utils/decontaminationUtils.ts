@@ -246,18 +246,130 @@ export function calculatePercentageChange(current: number, previous: number | nu
 }
 
 /**
+ * Formats daily average with 1 decimal place (e.g. 1,9 or 0,0)
+ */
+export function formatDailyAverage(val: number | null | undefined): string {
+  if (val === null || val === undefined || isNaN(val)) return '0,0';
+  return val.toFixed(1).replace('.', ',');
+}
+
+/**
+ * Calculates days elapsed in a given filter period
+ */
+export function calculatePeriodElapsedDays(
+  period: FilterPeriod,
+  customStart?: string,
+  customEnd?: string,
+  allOperations: DecontaminationOperation[] = []
+): number {
+  const now = startOfDay(new Date());
+
+  if (period === 'today') {
+    return 1;
+  }
+
+  let periodStart: Date;
+  let periodEnd: Date;
+
+  if (period === 'week') {
+    periodStart = startOfWeek(now, { weekStartsOn: 0 });
+    periodEnd = endOfWeek(now, { weekStartsOn: 0 });
+  } else if (period === 'month') {
+    periodStart = startOfMonth(now);
+    periodEnd = endOfMonth(now);
+  } else if (period === 'quarter') {
+    periodStart = startOfQuarter(now);
+    periodEnd = endOfQuarter(now);
+  } else if (period === 'semester') {
+    periodStart = startOfDay(subMonths(now, 6));
+    periodEnd = endOfDay(now);
+  } else if (period === 'year') {
+    periodStart = startOfYear(now);
+    periodEnd = endOfYear(now);
+  } else if (period === 'custom' && customStart && customEnd) {
+    try {
+      periodStart = startOfDay(parseISO(customStart));
+      periodEnd = endOfDay(parseISO(customEnd));
+    } catch {
+      return 1;
+    }
+  } else if (period === 'all') {
+    if (!allOperations || allOperations.length === 0) return 1;
+    let minTime = now.getTime();
+    allOperations.forEach(op => {
+      const dateStr = op.arrivalDate || op.startDate || op.endDate;
+      if (dateStr) {
+        try {
+          const d = startOfDay(parseISO(dateStr));
+          if (!isNaN(d.getTime()) && d.getTime() < minTime) {
+            minTime = d.getTime();
+          }
+        } catch {}
+      }
+    });
+    periodStart = new Date(minTime);
+    periodEnd = now;
+  } else {
+    return 1;
+  }
+
+  // Determine if period is ongoing vs past
+  if (now.getTime() < periodStart.getTime()) {
+    return 1;
+  }
+
+  if (now.getTime() <= periodEnd.getTime()) {
+    // Ongoing period: count days from periodStart up to today inclusive
+    const diffMs = now.getTime() - periodStart.getTime();
+    const days = Math.floor(diffMs / (1000 * 60 * 60 * 24)) + 1;
+    return Math.max(1, days);
+  } else {
+    // Past/Completed period: total duration of period in days
+    const diffMs = periodEnd.getTime() - periodStart.getTime();
+    const days = Math.round(diffMs / (1000 * 60 * 60 * 24));
+    return Math.max(1, days);
+  }
+}
+
+/**
+ * Calculates duration in days for an explicit Date interval
+ */
+export function calculateElapsedDaysForBounds(start: Date, end: Date): number {
+  const now = startOfDay(new Date());
+  const startDay = startOfDay(start);
+  const endDay = endOfDay(end);
+
+  if (now.getTime() < startDay.getTime()) {
+    return 1;
+  }
+
+  if (now.getTime() <= endDay.getTime()) {
+    // Ongoing interval
+    const diffMs = now.getTime() - startDay.getTime();
+    const days = Math.floor(diffMs / (1000 * 60 * 60 * 24)) + 1;
+    return Math.max(1, days);
+  } else {
+    // Past interval
+    const diffMs = endDay.getTime() - startDay.getTime();
+    const days = Math.round(diffMs / (1000 * 60 * 60 * 24));
+    return Math.max(1, days);
+  }
+}
+
+/**
  * Dashboard Overview KPIs with comparative percentage vs previous period
  */
 export function calculateDecontaminationKPIs(
   operations: DecontaminationOperation[],
   period: FilterPeriod = 'all',
   customStart?: string,
-  customEnd?: string
+  customEnd?: string,
+  allOperations?: DecontaminationOperation[]
 ) {
   const totalReceived = operations.length;
   const waitingOps = operations.filter(o => o.status === 'waiting');
   const inProgressOps = operations.filter(o => o.status === 'in_progress');
-  const completedOps = operations.filter(o => o.status === 'completed');
+  const completedOps = operations.filter(o => o.status === 'completed' && o.endDate && o.endDate.trim() !== '');
 
   const waitTimes = operations.map(getWaitTimeHours);
   const deconTimes = completedOps.map(getDeconTimeHours);
@@ -267,18 +379,32 @@ export function calculateDecontaminationKPIs(
   const avgDeconTime = computeAverage(deconTimes);
   const avgLeadTime = computeAverage(leadTimes);
 
+  // Compute daily average of completed decontaminations
+  const sourceAllOps = allOperations && allOperations.length > 0 ? allOperations : operations;
+  const elapsedDays = calculatePeriodElapsedDays(period, customStart, customEnd, sourceAllOps);
+  const avgDailyDecon = completedOps.length / elapsedDays;
+
   const completionRate = totalReceived > 0 ? (completedOps.length / totalReceived) * 100 : 0;
 
   // Compute previous period comparative
   const prevBounds = getPreviousPeriodBounds(period, customStart, customEnd);
-  let prevKPIs = null;
+  let prevKPIs: {
+    totalReceived: number;
+    completedCount: number;
+    waitingCount: number;
+    inProgressCount: number;
+    avgWaitTimeHours: number | null;
+    avgDeconTimeHours: number | null;
+    avgLeadTimeHours: number | null;
+    avgDailyDecon: number | null;
+  } | null = null;
 
   if (prevBounds) {
-    // Note: We need all operations to find previous period ops
-    // We filter operations that match prevBounds
-    const prevOps = operations.filter(o => isOperationInDateBounds(o, prevBounds));
-    const prevCompleted = prevOps.filter(o => o.status === 'completed');
-    
+    const prevOps = sourceAllOps.filter(o => isOperationInDateBounds(o, prevBounds));
+    const prevCompleted = prevOps.filter(o => o.status === 'completed' && o.endDate && o.endDate.trim() !== '');
+    const prevElapsedDays = calculateElapsedDaysForBounds(prevBounds.start, prevBounds.end);
+    const prevAvgDailyDecon = prevCompleted.length / prevElapsedDays;
+
     prevKPIs = {
       totalReceived: prevOps.length,
       completedCount: prevCompleted.length,
@@ -286,7 +412,8 @@ export function calculateDecontaminationKPIs(
       inProgressCount: prevOps.filter(o => o.status === 'in_progress').length,
       avgWaitTimeHours: computeAverage(prevOps.map(getWaitTimeHours)),
       avgDeconTimeHours: computeAverage(prevCompleted.map(getDeconTimeHours)),
-      avgLeadTimeHours: computeAverage(prevCompleted.map(getLeadTimeHours))
+      avgLeadTimeHours: computeAverage(prevCompleted.map(getLeadTimeHours)),
+      avgDailyDecon: prevAvgDailyDecon
     };
   }
 
@@ -298,6 +425,7 @@ export function calculateDecontaminationKPIs(
     avgWaitTimeHours: avgWaitTime,
     avgDeconTimeHours: avgDeconTime,
     avgLeadTimeHours: avgLeadTime,
+    avgDailyDecon,
     completionRatePercent: completionRate,
     comparisons: {
       received: prevKPIs ? calculatePercentageChange(totalReceived, prevKPIs.totalReceived) : null,
@@ -306,7 +434,8 @@ export function calculateDecontaminationKPIs(
       inProgress: prevKPIs ? calculatePercentageChange(inProgressOps.length, prevKPIs.inProgressCount) : null,
       avgWait: prevKPIs && avgWaitTime !== null && prevKPIs.avgWaitTimeHours !== null ? calculatePercentageChange(avgWaitTime, prevKPIs.avgWaitTimeHours) : null,
       avgDecon: prevKPIs && avgDeconTime !== null && prevKPIs.avgDeconTimeHours !== null ? calculatePercentageChange(avgDeconTime, prevKPIs.avgDeconTimeHours) : null,
-      avgLead: prevKPIs && avgLeadTime !== null && prevKPIs.avgLeadTimeHours !== null ? calculatePercentageChange(avgLeadTime, prevKPIs.avgLeadTimeHours) : null
+      avgLead: prevKPIs && avgLeadTime !== null && prevKPIs.avgLeadTimeHours !== null ? calculatePercentageChange(avgLeadTime, prevKPIs.avgLeadTimeHours) : null,
+      avgDailyDecon: prevKPIs && prevKPIs.avgDailyDecon !== null && prevKPIs.avgDailyDecon > 0 ? calculatePercentageChange(avgDailyDecon, prevKPIs.avgDailyDecon) : null
     }
   };
 }

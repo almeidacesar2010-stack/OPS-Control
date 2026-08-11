@@ -1047,7 +1047,7 @@ function AppContent() {
 
   // Synchronize browser tab/window icon (favicon) with the OEG logo
   useEffect(() => {
-    const defaultFavicon = `data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect width=%22100%22 height=%22100%22 rx=%2220%22 fill=%22url(%23grad)%22/><defs><linearGradient id=%22grad%22 x1=%220%25%22 y1=%220%25%22 x2=%22100%25%22 y2=%22100%25%22><stop offset=%220%25%22 style=%22stop-color:%232563eb;stop-opacity:1%22 /><stop offset=%22100%25%22 style=%22stop-color:%236d28d9;stop-opacity:1%22 /></linearGradient></defs><text x=%2250%22 y=%2265%22 font-family=%22system-ui, sans-serif%22 font-weight=%22900%22 font-size=%2240%22 fill=%22white%22 text-anchor=%22middle%22>OEG</text></svg>`;
+    const defaultFavicon = '/oeg-logo.svg';
 
     let faviconEl = document.getElementById('favicon') as HTMLLinkElement | null;
     if (!faviconEl) {
@@ -3550,9 +3550,7 @@ const generatePDF = (order: any) => {
           {logoUrl ? (
             <img src={logoUrl} alt="OEG Logo" className="w-16 h-16 object-contain rounded-2xl mx-auto mb-6 shadow-lg shadow-blue-500/20" referrerPolicy="no-referrer" />
           ) : (
-            <div className="w-16 h-16 bg-gradient-to-br from-blue-600 via-indigo-600 to-violet-700 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-lg shadow-blue-500/30">
-              <span className="text-white font-black text-2xl tracking-tighter">OEG</span>
-            </div>
+            <img src="/oeg-logo.svg" alt="OEG Logo" className="w-16 h-16 object-contain rounded-2xl mx-auto mb-6 shadow-lg shadow-blue-500/20" />
           )}
           <h1 className="text-2xl font-bold text-slate-900 dark:text-white mb-2 text-center tracking-tight">OPS Control</h1>
           <p className="text-slate-500 dark:text-slate-400 mb-8 text-center font-medium">
@@ -3663,9 +3661,7 @@ const generatePDF = (order: any) => {
             {logoUrl ? (
               <img src={logoUrl} alt="Logo" className="w-12 h-12 object-contain rounded-2xl shadow-2xl shadow-blue-500/20 transition-transform duration-500 group-hover:scale-110" referrerPolicy="no-referrer" />
             ) : (
-              <div className="w-12 h-12 bg-gradient-to-br from-blue-600 via-indigo-600 to-violet-700 rounded-2xl flex items-center justify-center shadow-2xl shadow-blue-500/30 transition-all duration-500 group-hover:rotate-6 group-hover:scale-110">
-                <span className="text-white font-black text-lg tracking-tighter">OEG</span>
-              </div>
+              <img src="/oeg-logo.svg" alt="OEG Logo" className="w-12 h-12 object-contain rounded-2xl shadow-2xl shadow-blue-500/20 transition-transform duration-500 group-hover:scale-110" />
             )}
             <div className="flex flex-col">
               <span className="font-black text-slate-900 dark:text-white text-xl tracking-tight leading-none">OPS Control</span>
@@ -5354,9 +5350,9 @@ const generatePDF = (order: any) => {
                                   )}
                                 </div>
                               ) : (
-                                <div className="w-32 h-32 bg-white dark:bg-slate-800 rounded-3xl flex flex-col items-center justify-center text-slate-300 dark:text-slate-600 border border-slate-100 dark:border-slate-700 shadow-sm">
-                                  <ImageIcon className="w-10 h-10 mb-2" />
-                                  <span className="text-[10px] font-black uppercase tracking-widest">Sem Logo</span>
+                                <div className="flex flex-col items-center">
+                                  <img src="/oeg-logo.svg" alt="Logo Padrão OEG" className="max-h-32 object-contain rounded-2xl shadow-xl mb-3" />
+                                  <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Logo Padrão OEG Ativo</span>
                                 </div>
                               )}
                             </div>

@@ -11,17 +11,13 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
+    // STRICT MODERATOR CHECK: Only users with role == 'moderator' or superadmin
     function isModerator() {
       return isAuthenticated() &&
         (
           (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
-           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['moderator', 'admin']) ||
-          (request.auth.token.email != null && (
-            request.auth.token.email == "almeidacesar2010@gmail.com" ||
-            request.auth.token.email.matches('.*moderador.*') ||
-            request.auth.token.email.matches('.*admin.*') ||
-            request.auth.token.email.matches('.*opscontrol.*')
-          ))
+           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'moderator') ||
+          (request.auth.token.email != null && request.auth.token.email == "almeidacesar2010@gmail.com")
         );
     }
 
@@ -30,12 +26,7 @@ service cloud.firestore {
         (
           (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
            get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['moderator', 'admin']) ||
-          (request.auth.token.email != null && (
-            request.auth.token.email == "almeidacesar2010@gmail.com" ||
-            request.auth.token.email.matches('.*moderador.*') ||
-            request.auth.token.email.matches('.*admin.*') ||
-            request.auth.token.email.matches('.*opscontrol.*')
-          ))
+          (request.auth.token.email != null && request.auth.token.email == "almeidacesar2010@gmail.com")
         );
     }
 
@@ -44,11 +35,13 @@ service cloud.firestore {
       allow list: if true;
       allow create: if true;
       allow update: if true;
-      allow delete: if isAuthenticated() && (isModerator() || isAdmin());
+      allow delete: if isAuthenticated() && isModerator();
     }
 
     match /fleetEquipment/{fleetId} {
-      allow read, write: if isAuthenticated();
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated();
+      allow delete: if isAuthenticated() && isModerator();
     }
 
     match /fleetHistory/{historyId} {
@@ -57,36 +50,39 @@ service cloud.firestore {
     }
 
     match /decontaminationOperations/{opId} {
-      allow read, write: if isAuthenticated();
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated();
+      allow delete: if isAuthenticated() && isModerator();
     }
 
     match /serviceOrders/{osId} {
       allow read: if isAuthenticated();
       allow create, update: if isAuthenticated();
-      allow delete: if isAuthenticated() && (isAdmin() || isModerator());
+      allow delete: if isAuthenticated() && isModerator();
     }
 
     match /equipments/{equipmentId} {
       allow read: if isAuthenticated();
       allow create, update: if isAuthenticated();
-      allow delete: if isAuthenticated() && (isAdmin() || isModerator());
+      allow delete: if isAuthenticated() && isModerator();
     }
 
     match /clients/{clientId} {
       allow read: if isAuthenticated();
       allow create, update: if isAuthenticated();
-      allow delete: if isAuthenticated() && (isAdmin() || isModerator());
+      allow delete: if isAuthenticated() && isModerator();
     }
 
     match /settings/{settingId} {
       allow read: if isAuthenticated();
-      allow write: if isAuthenticated();
+      allow create, update: if isAuthenticated();
+      allow delete: if isAuthenticated() && isModerator();
     }
 
     match /deletionRequests/{requestId} {
       allow read: if isAuthenticated();
       allow create: if isAuthenticated();
-      allow update, delete: if isAuthenticated() && (isModerator() || isAdmin());
+      allow update, delete: if isAuthenticated() && isModerator();
     }
 
     match /auditLogs/{logId} {

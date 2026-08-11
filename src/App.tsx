@@ -1034,16 +1034,40 @@ function AppContent() {
   }, [user, isAuthReady, currentUserRole]);
 
   useEffect(() => {
-    if (!user) return;
-    
-    const unsubscribe = onSnapshot(doc(db, 'settings', 'appConfig'), (doc) => {
-      if (doc.exists()) {
-        setLogoUrl(doc.data().logoUrl || null);
+    const unsubscribe = onSnapshot(doc(db, 'settings', 'appConfig'), (docSnap) => {
+      if (docSnap.exists()) {
+        setLogoUrl(docSnap.data().logoUrl || null);
       }
+    }, (err) => {
+      console.warn("Could not load appConfig logo:", err);
     });
 
     return () => unsubscribe();
-  }, [user]);
+  }, []);
+
+  // Synchronize browser tab/window icon (favicon) with the OEG logo
+  useEffect(() => {
+    const defaultFavicon = `data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect width=%22100%22 height=%22100%22 rx=%2220%22 fill=%22url(%23grad)%22/><defs><linearGradient id=%22grad%22 x1=%220%25%22 y1=%220%25%22 x2=%22100%25%22 y2=%22100%25%22><stop offset=%220%25%22 style=%22stop-color:%232563eb;stop-opacity:1%22 /><stop offset=%22100%25%22 style=%22stop-color:%236d28d9;stop-opacity:1%22 /></linearGradient></defs><text x=%2250%22 y=%2265%22 font-family=%22system-ui, sans-serif%22 font-weight=%22900%22 font-size=%2240%22 fill=%22white%22 text-anchor=%22middle%22>OEG</text></svg>`;
+
+    let faviconEl = document.getElementById('favicon') as HTMLLinkElement | null;
+    if (!faviconEl) {
+      faviconEl = document.querySelector("link[rel*='icon']");
+    }
+    if (!faviconEl) {
+      faviconEl = document.createElement('link');
+      faviconEl.id = 'favicon';
+      faviconEl.rel = 'icon';
+      document.head.appendChild(faviconEl);
+    }
+
+    if (logoUrl) {
+      faviconEl.href = logoUrl;
+      faviconEl.type = logoUrl.startsWith('data:image/svg') ? 'image/svg+xml' : 'image/png';
+    } else {
+      faviconEl.href = defaultFavicon;
+      faviconEl.type = 'image/svg+xml';
+    }
+  }, [logoUrl]);
 
   const handleLogin = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -2863,7 +2887,23 @@ const generatePDF = (order: any) => {
       throw new Error("Apenas o Moderador do sistema pode aprovar e executar exclusões.");
     }
     try {
-      await deleteDoc(doc(db, req.itemCollection, req.itemId));
+      if (req.itemCollection === 'clients') {
+        const ordersQuery = query(collection(db, 'serviceOrders'), where('clientId', '==', req.itemId));
+        const ordersSnapshot = await getDocs(ordersQuery);
+        const batch = writeBatch(db);
+        ordersSnapshot.docs.forEach((d) => {
+          batch.delete(d.ref);
+        });
+        batch.delete(doc(db, 'clients', req.itemId));
+        await batch.commit();
+      } else if (req.itemId === 'all' && req.itemCollection === 'fleetEquipment') {
+        const snap = await getDocs(collection(db, 'fleetEquipment'));
+        const batch = writeBatch(db);
+        snap.docs.forEach(d => batch.delete(doc(db, 'fleetEquipment', d.id)));
+        await batch.commit();
+      } else {
+        await deleteDoc(doc(db, req.itemCollection, req.itemId));
+      }
 
       await updateDoc(doc(db, 'deletionRequests', req.id), {
         status: 'Aprovada',
@@ -2885,14 +2925,15 @@ const generatePDF = (order: any) => {
         'DELETE',
         mapEntity(req.itemCollection),
         req.itemId,
-        `Aprovou a exclusão de ${req.itemType} "${req.itemName}". Solicitado originalmente por ${req.requestedBy}.`
+        `Exclusão executada pelo Moderador (${currentUserName}). Item: ${req.itemType} "${req.itemName}" (ID: ${req.itemId}). Solicitado por: ${req.requestedBy || 'Admin'} (Perfil: ${req.userRole || 'admin'}). Aprovado por: ${currentUserName} (Perfil: ${effectiveRole}). Motivo: ${req.reason || 'N/A'}`
       );
 
-      setSuccessMessage(`Exclusão do item "${req.itemName}" aprovada e executada!`);
+      setSuccessMessage(`Exclusão do item "${req.itemName}" aprovada e executada pelo Moderador!`);
       setTimeout(() => setSuccessMessage(null), 4000);
     } catch (err: any) {
       console.error("Error approving deletion:", err);
-      setGlobalError("Erro ao aprovar exclusão.");
+      setGlobalError("Erro ao aprovar e executar exclusão.");
+      handleFirestoreError(err, OperationType.DELETE, `${req.itemCollection}/${req.itemId}`);
       throw err;
     }
   };
@@ -3506,9 +3547,13 @@ const generatePDF = (order: any) => {
           animate={{ opacity: 1, y: 0 }}
           className="max-w-md w-full bg-white dark:bg-slate-900 rounded-2xl shadow-xl p-8 border border-slate-100 dark:border-slate-800 transition-colors duration-300"
         >
-          <div className="w-16 h-16 bg-blue-600 rounded-full flex items-center justify-center mx-auto mb-6 shadow-lg">
-            <span className="text-white font-black text-2xl tracking-tighter">OEG</span>
-          </div>
+          {logoUrl ? (
+            <img src={logoUrl} alt="OEG Logo" className="w-16 h-16 object-contain rounded-2xl mx-auto mb-6 shadow-lg shadow-blue-500/20" referrerPolicy="no-referrer" />
+          ) : (
+            <div className="w-16 h-16 bg-gradient-to-br from-blue-600 via-indigo-600 to-violet-700 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-lg shadow-blue-500/30">
+              <span className="text-white font-black text-2xl tracking-tighter">OEG</span>
+            </div>
+          )}
           <h1 className="text-2xl font-bold text-slate-900 dark:text-white mb-2 text-center tracking-tight">OPS Control</h1>
           <p className="text-slate-500 dark:text-slate-400 mb-8 text-center font-medium">
             Entre na sua conta de equipe

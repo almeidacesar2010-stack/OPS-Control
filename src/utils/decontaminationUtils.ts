@@ -221,20 +221,27 @@ export function isOperationInDateBounds(op: DecontaminationOperation, bounds: { 
   }
 }
 
+export interface ComparisonResult {
+  percent: number;
+  isIncrease: boolean;
+  isNeutral: boolean;
+  hasSufficientData: boolean;
+}
+
 /**
  * Calculates percentage change between current value and previous value
  */
-export function calculatePercentageChange(current: number, previous: number): { percent: number; isIncrease: boolean; isNeutral: boolean } {
-  if (previous === 0) {
-    if (current === 0) return { percent: 0, isIncrease: false, isNeutral: true };
-    return { percent: 100, isIncrease: true, isNeutral: false };
+export function calculatePercentageChange(current: number, previous: number | null | undefined): ComparisonResult {
+  if (previous === null || previous === undefined || previous === 0) {
+    return { percent: 0, isIncrease: false, isNeutral: false, hasSufficientData: false };
   }
   const diff = current - previous;
   const percent = Math.round((diff / previous) * 100);
   return {
     percent: Math.abs(percent),
     isIncrease: diff > 0,
-    isNeutral: diff === 0
+    isNeutral: diff === 0,
+    hasSufficientData: true
   };
 }
 
@@ -398,6 +405,7 @@ export function calculateProductIndicators(operations: DecontaminationOperation[
  */
 export function calculateContaminationIndicators(operations: DecontaminationOperation[]) {
   const contaminatedOps = operations.filter(o => o.hasContamination === true);
+  const nonContaminatedOps = operations.filter(o => o.hasContamination !== true);
 
   // Group by Client
   const clientCounts = new Map<string, number>();
@@ -410,21 +418,10 @@ export function calculateContaminationIndicators(operations: DecontaminationOper
     .map(([client, count]) => ({ client, count }))
     .sort((a, b) => b.count - a.count);
 
-  // Group by Product
-  const prodCounts = new Map<string, number>();
-  contaminatedOps.forEach(op => {
-    const p = op.product?.trim() || 'Não Informado';
-    prodCounts.set(p, (prodCounts.get(p) || 0) + 1);
-  });
-
-  const topContaminatedProducts = Array.from(prodCounts.entries())
-    .map(([product, count]) => ({ product, count }))
-    .sort((a, b) => b.count - a.count);
-
   return {
     totalContaminatedCount: contaminatedOps.length,
-    topContaminatedClients,
-    topContaminatedProducts
+    nonContaminatedCount: nonContaminatedOps.length,
+    topContaminatedClients
   };
 }
 
@@ -435,6 +432,7 @@ export interface EvolutionChartDataPoint {
   recebidos: number;
   descontaminados: number;
   emAndamento: number;
+  avgDeconTimeDays: number | null;
 }
 
 /**
@@ -450,7 +448,7 @@ export function generateEvolutionChartData(operations: DecontaminationOperation[
     return da - db;
   });
 
-  const map = new Map<string, { label: string; recebidos: number; descontaminados: number; emAndamento: number }>();
+  const map = new Map<string, { label: string; recebidos: number; descontaminados: number; emAndamento: number; deconTimes: number[] }>();
 
   sorted.forEach(op => {
     if (!op.arrivalDate) return;
@@ -477,19 +475,22 @@ export function generateEvolutionChartData(operations: DecontaminationOperation[
         key = `${date.getFullYear()}-S${s}`;
         label = `${s}º Sem. ${date.getFullYear()}`;
       } else {
-        // Mode 'rx_vs_dc' - group by Month or Day depending on date spread
         key = format(date, 'yyyy-MM');
         label = format(date, 'MMM/yy', { locale: ptBR }).toUpperCase();
       }
 
       if (!map.has(key)) {
-        map.set(key, { label, recebidos: 0, descontaminados: 0, emAndamento: 0 });
+        map.set(key, { label, recebidos: 0, descontaminados: 0, emAndamento: 0, deconTimes: [] });
       }
 
       const item = map.get(key)!;
       item.recebidos += 1;
       if (op.status === 'completed') {
         item.descontaminados += 1;
+        const dt = getDeconTimeHours(op);
+        if (dt !== null && !isNaN(dt)) {
+          item.deconTimes.push(dt);
+        }
       } else if (op.status === 'in_progress' || op.status === 'waiting') {
         item.emAndamento += 1;
       }
@@ -498,6 +499,12 @@ export function generateEvolutionChartData(operations: DecontaminationOperation[
     }
   });
 
-  return Array.from(map.values());
+  return Array.from(map.values()).map(item => ({
+    label: item.label,
+    recebidos: item.recebidos,
+    descontaminados: item.descontaminados,
+    emAndamento: item.emAndamento,
+    avgDeconTimeDays: computeAverage(item.deconTimes)
+  }));
 }
 

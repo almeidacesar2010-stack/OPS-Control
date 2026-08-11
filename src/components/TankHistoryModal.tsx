@@ -280,20 +280,15 @@ export function TankHistoryModal({
                           </div>
                         </div>
 
-                        {/* Calculated Times */}
-                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs font-black">
-                          <div className="bg-slate-200/50 dark:bg-slate-700/40 p-3 rounded-xl flex items-center justify-between">
-                            <span className="text-slate-500 dark:text-slate-400">Tempo de Espera:</span>
-                            <span className="text-blue-600 dark:text-blue-400 font-black">{formatHours(waitHours)}</span>
-                          </div>
-                          <div className="bg-slate-200/50 dark:bg-slate-700/40 p-3 rounded-xl flex items-center justify-between">
-                            <span className="text-slate-500 dark:text-slate-400">Tempo de Lavagem:</span>
-                            <span className="text-amber-600 dark:text-amber-400 font-black">{formatHours(deconHours)}</span>
-                          </div>
-                          <div className="bg-slate-200/50 dark:bg-slate-700/40 p-3 rounded-xl flex items-center justify-between">
-                            <span className="text-slate-500 dark:text-slate-400">Lead Time Total:</span>
-                            <span className="text-emerald-600 dark:text-emerald-400 font-black">{formatHours(leadHours)}</span>
-                          </div>
+                        {/* Main Decontamination Time Indicator */}
+                        <div className="bg-amber-500/10 dark:bg-amber-950/30 border border-amber-500/30 p-3.5 rounded-xl flex items-center justify-between text-xs font-black">
+                          <span className="text-amber-800 dark:text-amber-300 uppercase tracking-wide flex items-center gap-2">
+                            <Clock className="w-4 h-4 text-amber-500" />
+                            Tempo de Descontaminação (Início → Finalização):
+                          </span>
+                          <span className="text-amber-600 dark:text-amber-400 font-black text-sm">
+                            {formatHours(deconHours)}
+                          </span>
                         </div>
 
                         {/* Notes */}

@@ -63,14 +63,15 @@ import {
   getDeconTimeHours, 
   getLeadTimeHours, 
   formatHours, 
+  formatDays,
   isOperationInPeriod, 
   calculateDecontaminationKPIs, 
   calculateClientIndicators, 
   calculateModelIndicators, 
-  calculateProductIndicators, 
   calculateContaminationIndicators,
   generateEvolutionChartData,
-  EvolutionChartMode
+  EvolutionChartMode,
+  ComparisonResult
 } from '../utils/decontaminationUtils';
 import { UserRole } from '../types';
 import { DecontaminationModal } from './DecontaminationModal';
@@ -133,6 +134,9 @@ export function DecontaminationManagement({
 
   // Active view tab for indicators & rankings section
   const [activeIndicatorTab, setActiveIndicatorTab] = useState<'clients' | 'models' | 'contamination'>('clients');
+
+  // Client sorting option
+  const [clientSortOption, setClientSortOption] = useState<'decon_desc' | 'decon_asc' | 'tempo_desc' | 'tempo_asc'>('decon_desc');
 
   // Chart mode
   const [chartMode, setChartMode] = useState<EvolutionChartMode>('monthly');
@@ -197,14 +201,31 @@ export function DecontaminationManagement({
     return calculateClientIndicators(dateFilteredOperations);
   }, [dateFilteredOperations]);
 
+  // Sorted Client Indicators based on selected sorting option
+  const sortedClientIndicators = useMemo(() => {
+    const list = [...clientIndicators];
+    if (clientSortOption === 'decon_desc') {
+      return list.sort((a, b) => b.completedCount - a.completedCount || b.totalReceived - a.totalReceived);
+    }
+    if (clientSortOption === 'decon_asc') {
+      return list.sort((a, b) => a.completedCount - b.completedCount || a.totalReceived - b.totalReceived);
+    }
+    if (clientSortOption === 'tempo_desc') {
+      return list.sort((a, b) => (b.avgDeconTime ?? 0) - (a.avgDeconTime ?? 0));
+    }
+    if (clientSortOption === 'tempo_asc') {
+      return list.sort((a, b) => {
+        const valA = a.avgDeconTime === null ? 999999 : a.avgDeconTime;
+        const valB = b.avgDeconTime === null ? 999999 : b.avgDeconTime;
+        return valA - valB;
+      });
+    }
+    return list;
+  }, [clientIndicators, clientSortOption]);
+
   // Compute Model Indicators
   const modelIndicators = useMemo(() => {
     return calculateModelIndicators(dateFilteredOperations);
-  }, [dateFilteredOperations]);
-
-  // Compute Product Indicators
-  const productIndicators = useMemo(() => {
-    return calculateProductIndicators(dateFilteredOperations);
   }, [dateFilteredOperations]);
 
   // Compute Contamination Indicators
@@ -418,11 +439,19 @@ export function DecontaminationManagement({
   };
 
   // Helper for Comparative Badge
-  const renderComparisonBadge = (comp: { percent: number; isIncrease: boolean; isNeutral: boolean } | null, inverseColors = false) => {
-    if (!comp || comp.isNeutral) {
+  const renderComparisonBadge = (comp: ComparisonResult | null, inverseColors = false) => {
+    if (!comp || !comp.hasSufficientData) {
       return (
-        <span className="inline-flex items-center gap-1 text-[10px] font-bold text-slate-400 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-md">
-          <Minus className="w-3 h-3" /> 0% vs ant.
+        <span className="inline-flex items-center gap-1 text-[10px] font-bold text-slate-400 bg-slate-100 dark:bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-200/50 dark:border-slate-700/50">
+          Sem comparação
+        </span>
+      );
+    }
+
+    if (comp.isNeutral) {
+      return (
+        <span className="inline-flex items-center gap-1 text-[10px] font-bold text-slate-400 bg-slate-100 dark:bg-slate-800 px-2.5 py-1 rounded-lg">
+          <Minus className="w-3 h-3" /> 0% vs período anterior
         </span>
       );
     }
@@ -433,9 +462,9 @@ export function DecontaminationManagement({
       : 'text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/60 border border-rose-200 dark:border-rose-800/50';
 
     return (
-      <span className={`inline-flex items-center gap-1 text-[10px] font-black px-2 py-0.5 rounded-md ${colorClasses}`}>
+      <span className={`inline-flex items-center gap-1 text-[10px] font-black px-2.5 py-1 rounded-lg ${colorClasses}`}>
         {comp.isIncrease ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
-        {comp.isIncrease ? '+' : '-'}{comp.percent}% vs ant.
+        {comp.isIncrease ? '+' : '-'}{comp.percent}% vs período anterior
       </span>
     );
   };
@@ -541,41 +570,16 @@ export function DecontaminationManagement({
         )}
       </div>
 
-      {/* DASHBOARD TIER 1: 4 MAIN PROMINENT KPI CARDS */}
+      {/* DASHBOARD: 4 MAIN PROMINENT KPI CARDS */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-        {/* Card 1: Tanques Recebidos (Blue) */}
-        <motion.div 
-          whileHover={{ y: -3 }}
-          className="bg-white dark:bg-slate-900 p-7 rounded-[32px] border-2 border-blue-500/20 dark:border-blue-500/30 shadow-md relative overflow-hidden group"
-        >
-          <div className="flex items-center justify-between mb-4">
-            <span className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
-              Tanques Recebidos
-            </span>
-            <div className="w-12 h-12 bg-blue-500/10 text-blue-600 dark:text-blue-400 rounded-2xl flex items-center justify-center border border-blue-500/20">
-              <Container className="w-6 h-6" />
-            </div>
-          </div>
-
-          <div className="flex items-baseline justify-between gap-2">
-            <span className="text-4xl font-black text-slate-900 dark:text-white tracking-tight">
-              {kpis.totalReceived}
-            </span>
-            {renderComparisonBadge(kpis.comparisons.received)}
-          </div>
-          <p className="text-[10px] font-bold text-slate-400 mt-2">
-            Operações registradas na base
-          </p>
-        </motion.div>
-
-        {/* Card 2: Descontaminações Concluídas (Green) */}
+        {/* Card 1: Tanques Descontaminados (Green) */}
         <motion.div 
           whileHover={{ y: -3 }}
           className="bg-white dark:bg-slate-900 p-7 rounded-[32px] border-2 border-emerald-500/20 dark:border-emerald-500/30 shadow-md relative overflow-hidden group"
         >
           <div className="flex items-center justify-between mb-4">
             <span className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
-              Descontaminações Concluídas
+              Tanques Descontaminados
             </span>
             <div className="w-12 h-12 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 rounded-2xl flex items-center justify-center border border-emerald-500/20">
               <CheckCircle2 className="w-6 h-6" />
@@ -588,12 +592,12 @@ export function DecontaminationManagement({
             </span>
             {renderComparisonBadge(kpis.comparisons.completed)}
           </div>
-          <p className="text-[10px] font-bold text-emerald-600/80 dark:text-emerald-400/80 mt-2">
-            {kpis.completionRatePercent.toFixed(0)}% da demanda finalizada
+          <p className="text-[10px] font-bold text-slate-400 mt-2">
+            Operações finalizadas no período
           </p>
         </motion.div>
 
-        {/* Card 3: Aguardando Descontaminação (Yellow / Amber) */}
+        {/* Card 2: Aguardando Descontaminação (Amber) */}
         <motion.div 
           whileHover={{ y: -3 }}
           className="bg-white dark:bg-slate-900 p-7 rounded-[32px] border-2 border-amber-500/20 dark:border-amber-500/30 shadow-md relative overflow-hidden group"
@@ -614,11 +618,11 @@ export function DecontaminationManagement({
             {renderComparisonBadge(kpis.comparisons.waiting, true)}
           </div>
           <p className="text-[10px] font-bold text-slate-400 mt-2">
-            Tanques na fila de espera
+            Tanques na fila aguardando início
           </p>
         </motion.div>
 
-        {/* Card 4: Em Descontaminação (Blue) */}
+        {/* Card 3: Em Descontaminação (Blue) */}
         <motion.div 
           whileHover={{ y: -3 }}
           className="bg-white dark:bg-slate-900 p-7 rounded-[32px] border-2 border-blue-500/20 dark:border-blue-500/30 shadow-md relative overflow-hidden group"
@@ -639,54 +643,34 @@ export function DecontaminationManagement({
             {renderComparisonBadge(kpis.comparisons.inProgress)}
           </div>
           <p className="text-[10px] font-bold text-slate-400 mt-2">
-            Processo de lavagem ativo
+            Processo de lavagem em andamento
           </p>
         </motion.div>
-      </div>
 
-      {/* DASHBOARD TIER 2: 3 TIME KPI CARDS */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-        {/* Tempo Médio de Espera */}
-        <div className="bg-gradient-to-br from-slate-900 to-slate-950 p-6 rounded-[28px] text-white border border-slate-800 shadow-xl relative overflow-hidden">
-          <p className="text-[10px] font-black uppercase tracking-widest text-blue-400 mb-2">Tempo Médio de Espera</p>
-          <div className="flex items-baseline justify-between">
-            <span className="text-3xl font-black tracking-tight text-white">
-              {formatHours(kpis.avgWaitTimeHours)}
+        {/* Card 4: Tempo Médio de Descontaminação (Purple / Indigo) */}
+        <motion.div 
+          whileHover={{ y: -3 }}
+          className="bg-white dark:bg-slate-900 p-7 rounded-[32px] border-2 border-purple-500/20 dark:border-purple-500/30 shadow-md relative overflow-hidden group"
+        >
+          <div className="flex items-center justify-between mb-4">
+            <span className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+              Tempo Médio de Descontaminação
             </span>
-            {renderComparisonBadge(kpis.comparisons.avgWait, true)}
+            <div className="w-12 h-12 bg-purple-500/10 text-purple-600 dark:text-purple-400 rounded-2xl flex items-center justify-center border border-purple-500/20">
+              <Sparkles className="w-6 h-6" />
+            </div>
           </div>
-          <p className="text-[10px] font-bold text-slate-400 mt-2">
-            Tempo da Chegada até Início da Lavagem
-          </p>
-        </div>
 
-        {/* Tempo Médio de Descontaminação */}
-        <div className="bg-gradient-to-br from-slate-900 to-slate-950 p-6 rounded-[28px] text-white border border-slate-800 shadow-xl relative overflow-hidden">
-          <p className="text-[10px] font-black uppercase tracking-widest text-amber-400 mb-2">Tempo Médio de Descontaminação</p>
-          <div className="flex items-baseline justify-between">
-            <span className="text-3xl font-black tracking-tight text-white">
-              {formatHours(kpis.avgDeconTimeHours)}
+          <div className="flex items-baseline justify-between gap-2">
+            <span className="text-3xl font-black text-purple-600 dark:text-purple-400 tracking-tight">
+              {formatDays(kpis.avgDeconTimeHours)}
             </span>
             {renderComparisonBadge(kpis.comparisons.avgDecon, true)}
           </div>
           <p className="text-[10px] font-bold text-slate-400 mt-2">
-            Duração do Processo de Lavagem/Descontaminação
+            Início → Finalização (em dias)
           </p>
-        </div>
-
-        {/* Lead Time Médio Total */}
-        <div className="bg-gradient-to-br from-slate-900 to-slate-950 p-6 rounded-[28px] text-white border border-slate-800 shadow-xl relative overflow-hidden">
-          <p className="text-[10px] font-black uppercase tracking-widest text-emerald-400 mb-2">Lead Time Médio Total</p>
-          <div className="flex items-baseline justify-between">
-            <span className="text-3xl font-black tracking-tight text-white">
-              {formatHours(kpis.avgLeadTimeHours)}
-            </span>
-            {renderComparisonBadge(kpis.comparisons.avgLead, true)}
-          </div>
-          <p className="text-[10px] font-bold text-slate-400 mt-2">
-            Tempo Total da Chegada até Finalização Completa
-          </p>
-        </div>
+        </motion.div>
       </div>
 
       {/* EVOLUTION CHARTS SECTION */}
@@ -695,21 +679,21 @@ export function DecontaminationManagement({
           <div>
             <h2 className="text-lg font-black uppercase tracking-tight text-slate-900 dark:text-white flex items-center gap-2.5">
               <BarChart3 className="w-5 h-5 text-blue-600 dark:text-blue-400" />
-              Evolução Temporal das Operações
+              Evolução Temporal das Operações de Descontaminação
             </h2>
             <p className="text-xs text-slate-500 font-bold mt-0.5">
-              Acompanhamento gráfico comparativo do fluxo de tanques recebidos e descontaminados
+              Acompanhamento da quantidade de descontaminações concluídas e tempo médio (em dias)
             </p>
           </div>
 
           {/* Chart View Toggles */}
           <div className="flex flex-wrap items-center gap-1.5 bg-slate-100 dark:bg-slate-800 p-1.5 rounded-2xl border border-slate-200/60 dark:border-slate-700/60">
             {[
-              { id: 'rx_vs_dc', label: 'Recebidos x Descontaminados' },
               { id: 'weekly', label: 'Semanal' },
               { id: 'monthly', label: 'Mensal' },
               { id: 'quarterly', label: 'Trimestral' },
-              { id: 'semestral', label: 'Semestral' }
+              { id: 'semestral', label: 'Semestral' },
+              { id: 'rx_vs_dc', label: 'Geral' }
             ].map(m => (
               <button
                 key={m.id}
@@ -748,11 +732,16 @@ export function DecontaminationManagement({
                     fontWeight: 'bold',
                     fontSize: '12px'
                   }}
+                  formatter={(value: any, name: string) => {
+                    if (name === 'Tempo Médio (dias)') {
+                      return [value ? `${value} dia(s)` : 'Sem dados', name];
+                    }
+                    return [value, name];
+                  }}
                 />
                 <Legend wrapperStyle={{ paddingTop: '10px', fontSize: '11px', fontWeight: 'bold' }} />
-                <Bar dataKey="recebidos" name="Tanques Recebidos" fill="#3b82f6" radius={[6, 6, 0, 0]} />
-                <Bar dataKey="descontaminados" name="Descontaminados Concluídos" fill="#10b981" radius={[6, 6, 0, 0]} />
-                <Bar dataKey="emAndamento" name="Em Andamento / Fila" fill="#f59e0b" radius={[6, 6, 0, 0]} />
+                <Bar dataKey="descontaminados" name="Descontaminações Concluídas" fill="#10b981" radius={[6, 6, 0, 0]} />
+                <Bar dataKey="emAndamento" name="Em Andamento / Aguardando" fill="#f59e0b" radius={[6, 6, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           )}
@@ -765,7 +754,7 @@ export function DecontaminationManagement({
           <div className="flex items-center gap-3">
             <PieChartIcon className="w-6 h-6 text-blue-600 dark:text-blue-400" />
             <h2 className="text-lg font-black uppercase tracking-tight text-slate-900 dark:text-white">
-              Indicadores Gerenciais e Rankings
+              Análise Específica de Descontaminação
             </h2>
           </div>
 
@@ -780,7 +769,7 @@ export function DecontaminationManagement({
               }`}
             >
               <Building2 className="w-4 h-4" />
-              <span>Por Cliente</span>
+              <span>Indicadores por Cliente</span>
             </button>
 
             <button
@@ -792,7 +781,7 @@ export function DecontaminationManagement({
               }`}
             >
               <Container className="w-4 h-4" />
-              <span>Por Modelo</span>
+              <span>Indicadores por Modelo</span>
             </button>
 
             <button
@@ -812,20 +801,48 @@ export function DecontaminationManagement({
         {/* TAB 1: Indicadores por Cliente */}
         {activeIndicatorTab === 'clients' && (
           <div className="space-y-6">
+            {/* Sorting Toolbar */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-50 dark:bg-slate-800/40 p-4 rounded-2xl border border-slate-200/80 dark:border-slate-800">
+              <span className="text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300 flex items-center gap-2">
+                <ArrowUpDown className="w-4 h-4 text-blue-600" />
+                Ordenar Tabela de Clientes por:
+              </span>
+              <div className="flex flex-wrap gap-2">
+                {[
+                  { id: 'decon_desc', label: 'Maior Qtde. Descontaminações' },
+                  { id: 'decon_asc', label: 'Menor Qtde. Descontaminações' },
+                  { id: 'tempo_desc', label: 'Maior Tempo Médio' },
+                  { id: 'tempo_asc', label: 'Menor Tempo Médio' }
+                ].map(opt => (
+                  <button
+                    key={opt.id}
+                    onClick={() => setClientSortOption(opt.id as any)}
+                    className={`px-3 py-1.5 rounded-xl text-[11px] font-black uppercase tracking-wider transition-all ${
+                      clientSortOption === opt.id
+                        ? 'bg-blue-600 text-white shadow-sm'
+                        : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:border-blue-500'
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               {/* Chart */}
               <div className="lg:col-span-1 bg-slate-50 dark:bg-slate-800/40 p-6 rounded-2xl border border-slate-200/80 dark:border-slate-800">
                 <h3 className="text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-4">
-                  Top Clientes por Tanques Recebidos
+                  Top Clientes por Descontaminações Concluídas
                 </h3>
                 <div className="h-64">
                   <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={clientIndicators.slice(0, 5)} layout="vertical">
+                    <BarChart data={sortedClientIndicators.slice(0, 5)} layout="vertical">
                       <CartesianGrid strokeDasharray="3 3" horizontal={false} />
                       <XAxis type="number" />
                       <YAxis dataKey="client" type="category" width={90} tick={{ fontSize: 10, fontWeight: 700 }} />
                       <Tooltip />
-                      <Bar dataKey="totalReceived" name="Recebidos" fill="#3b82f6" radius={[0, 8, 8, 0]} />
+                      <Bar dataKey="completedCount" name="Descontaminações" fill="#10b981" radius={[0, 8, 8, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
@@ -837,27 +854,23 @@ export function DecontaminationManagement({
                   <thead>
                     <tr className="bg-slate-100 dark:bg-slate-800/80 text-slate-500 uppercase text-[10px] tracking-wider border-b border-slate-200 dark:border-slate-700">
                       <th className="p-3.5">Cliente</th>
-                      <th className="p-3.5 text-center">Recebidos</th>
-                      <th className="p-3.5 text-center">Concluídos</th>
-                      <th className="p-3.5 text-center">Tempo Médio Espera</th>
-                      <th className="p-3.5 text-center">Tempo Médio Descont.</th>
-                      <th className="p-3.5 text-center">Lead Time Médio</th>
+                      <th className="p-3.5 text-center">Operações Registradas</th>
+                      <th className="p-3.5 text-center">Tanques Descontaminados</th>
+                      <th className="p-3.5 text-center">Tempo Médio de Descontaminação</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-200/60 dark:divide-slate-800">
-                    {clientIndicators.length === 0 ? (
+                    {sortedClientIndicators.length === 0 ? (
                       <tr>
-                        <td colSpan={6} className="p-6 text-center text-slate-400">Nenhum registro para o período.</td>
+                        <td colSpan={4} className="p-6 text-center text-slate-400">Nenhum registro para o período.</td>
                       </tr>
                     ) : (
-                      clientIndicators.map(ci => (
+                      sortedClientIndicators.map(ci => (
                         <tr key={ci.client} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
                           <td className="p-3.5 text-slate-900 dark:text-white font-black uppercase">{ci.client}</td>
                           <td className="p-3.5 text-center text-slate-700 dark:text-slate-300">{ci.totalReceived}</td>
-                          <td className="p-3.5 text-center text-emerald-600 dark:text-emerald-400">{ci.completedCount}</td>
-                          <td className="p-3.5 text-center text-slate-600 dark:text-slate-400">{formatHours(ci.avgWaitTime)}</td>
-                          <td className="p-3.5 text-center text-slate-600 dark:text-slate-400">{formatHours(ci.avgDeconTime)}</td>
-                          <td className="p-3.5 text-center text-blue-600 dark:text-blue-400 font-black">{formatHours(ci.avgLeadTime)}</td>
+                          <td className="p-3.5 text-center text-emerald-600 dark:text-emerald-400 font-black">{ci.completedCount}</td>
+                          <td className="p-3.5 text-center text-purple-600 dark:text-purple-400 font-black">{formatDays(ci.avgDeconTime)}</td>
                         </tr>
                       ))
                     )}
@@ -895,20 +908,12 @@ export function DecontaminationManagement({
 
                     <div className="space-y-2 text-xs font-bold pt-1">
                       <div className="flex justify-between">
-                        <span className="text-slate-400">Descontaminados:</span>
-                        <span className="text-emerald-600 dark:text-emerald-400">{info.completedCount}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-slate-400">Tempo Médio Espera:</span>
-                        <span className="text-slate-700 dark:text-slate-300">{formatHours(info.avgWaitTime)}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-slate-400">Tempo Descontaminação:</span>
-                        <span className="text-slate-700 dark:text-slate-300">{formatHours(info.avgDeconTime)}</span>
+                        <span className="text-slate-400">Tanques Descontaminados:</span>
+                        <span className="text-emerald-600 dark:text-emerald-400 font-black">{info.completedCount}</span>
                       </div>
                       <div className="flex justify-between border-t border-slate-200 dark:border-slate-700 pt-2">
-                        <span className="text-slate-400">Lead Time Médio:</span>
-                        <span className="text-blue-600 dark:text-blue-400 font-black">{formatHours(info.avgLeadTime)}</span>
+                        <span className="text-slate-400">Tempo Médio Descontaminação:</span>
+                        <span className="text-purple-600 dark:text-purple-400 font-black">{formatDays(info.avgDeconTime)}</span>
                       </div>
                     </div>
                   </div>
@@ -922,11 +927,9 @@ export function DecontaminationManagement({
                 <thead>
                   <tr className="bg-slate-100 dark:bg-slate-800/80 text-slate-500 uppercase text-[10px] tracking-wider border-b border-slate-200 dark:border-slate-700">
                     <th className="p-3.5">Modelo</th>
-                    <th className="p-3.5 text-center">Quantidade Total</th>
-                    <th className="p-3.5 text-center">Concluídas</th>
-                    <th className="p-3.5 text-center">Tempo Médio Espera</th>
-                    <th className="p-3.5 text-center">Tempo Médio Descontaminação</th>
-                    <th className="p-3.5 text-center">Lead Time Médio</th>
+                    <th className="p-3.5 text-center">Operações Registradas</th>
+                    <th className="p-3.5 text-center">Tanques Descontaminados</th>
+                    <th className="p-3.5 text-center">Tempo Médio de Descontaminação</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200/60 dark:divide-slate-800">
@@ -934,10 +937,8 @@ export function DecontaminationManagement({
                     <tr key={mi.model} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
                       <td className="p-3.5 text-slate-900 dark:text-white font-black uppercase">{mi.model}</td>
                       <td className="p-3.5 text-center text-slate-700 dark:text-slate-300">{mi.totalReceived}</td>
-                      <td className="p-3.5 text-center text-emerald-600 dark:text-emerald-400">{mi.completedCount}</td>
-                      <td className="p-3.5 text-center text-slate-600 dark:text-slate-400">{formatHours(mi.avgWaitTime)}</td>
-                      <td className="p-3.5 text-center text-slate-600 dark:text-slate-400">{formatHours(mi.avgDeconTime)}</td>
-                      <td className="p-3.5 text-center text-blue-600 dark:text-blue-400 font-black">{formatHours(mi.avgLeadTime)}</td>
+                      <td className="p-3.5 text-center text-emerald-600 dark:text-emerald-400 font-black">{mi.completedCount}</td>
+                      <td className="p-3.5 text-center text-purple-600 dark:text-purple-400 font-black">{formatDays(mi.avgDeconTime)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -949,81 +950,77 @@ export function DecontaminationManagement({
         {/* TAB 3: Indicadores de Contaminação */}
         {activeIndicatorTab === 'contamination' && (
           <div className="space-y-6">
-            <div className="bg-rose-50 dark:bg-rose-950/20 border border-rose-200 dark:border-rose-800/40 p-6 rounded-2xl flex items-center justify-between">
-              <div className="flex items-center gap-4">
-                <div className="w-12 h-12 bg-rose-600 text-white rounded-2xl flex items-center justify-center font-black shadow-lg shadow-rose-500/20">
-                  <AlertTriangle className="w-6 h-6" />
+            {/* Contamination Count Summary */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+              <div className="bg-rose-50 dark:bg-rose-950/20 border border-rose-200 dark:border-rose-800/40 p-6 rounded-2xl flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 bg-rose-600 text-white rounded-2xl flex items-center justify-center font-black shadow-lg shadow-rose-500/20">
+                    <AlertTriangle className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-black uppercase text-rose-900 dark:text-rose-200 tracking-tight">
+                      Com Contaminação (SIM)
+                    </h3>
+                    <p className="text-xs text-rose-700 dark:text-rose-300 font-medium">
+                      Operações com contaminação confirmada
+                    </p>
+                  </div>
                 </div>
-                <div>
-                  <h3 className="text-sm font-black uppercase text-rose-900 dark:text-rose-200 tracking-tight">
-                    Total de Tanques com Contaminação Confirmada
-                  </h3>
-                  <p className="text-xs text-rose-700 dark:text-rose-300 font-medium">
-                    Apenas contagem exata de operações onde Contaminação = SIM
-                  </p>
+                <div className="text-right">
+                  <span className="text-3xl font-black text-rose-600 dark:text-rose-400">
+                    {contaminationIndicators.totalContaminatedCount}
+                  </span>
+                  <span className="block text-[10px] font-black uppercase text-rose-500">tanques</span>
                 </div>
               </div>
-              <div className="text-right">
-                <span className="text-3xl font-black text-rose-600 dark:text-rose-400">
-                  {contaminationIndicators.totalContaminatedCount}
-                </span>
-                <span className="block text-[10px] font-black uppercase text-rose-500">tanques contaminados</span>
+
+              <div className="bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-800/40 p-6 rounded-2xl flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 bg-emerald-600 text-white rounded-2xl flex items-center justify-center font-black shadow-lg shadow-emerald-500/20">
+                    <CheckCircle2 className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-black uppercase text-emerald-900 dark:text-emerald-200 tracking-tight">
+                      Sem Contaminação (NÃO)
+                    </h3>
+                    <p className="text-xs text-emerald-700 dark:text-emerald-300 font-medium">
+                      Operações sem contaminação
+                    </p>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <span className="text-3xl font-black text-emerald-600 dark:text-emerald-400">
+                    {contaminationIndicators.nonContaminatedCount}
+                  </span>
+                  <span className="block text-[10px] font-black uppercase text-emerald-500">tanques</span>
+                </div>
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {/* Ranking Clientes com Contaminação */}
-              <div className="bg-slate-50 dark:bg-slate-800/40 p-6 rounded-2xl border border-slate-200/80 dark:border-slate-800 space-y-4">
-                <h4 className="text-xs font-black uppercase tracking-wider text-slate-900 dark:text-white flex items-center gap-2">
-                  <Building2 className="w-4 h-4 text-rose-600" />
-                  Ranking de Clientes com Maior Número de Contaminações
-                </h4>
-                <div className="space-y-2">
-                  {contaminationIndicators.topContaminatedClients.length === 0 ? (
-                    <p className="text-xs text-slate-400 p-4 text-center">Nenhuma contaminação registrada no período.</p>
-                  ) : (
-                    contaminationIndicators.topContaminatedClients.map((item, idx) => (
-                      <div key={item.client} className="flex items-center justify-between p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-200/60 dark:border-slate-800">
-                        <div className="flex items-center gap-3">
-                          <span className="w-6 h-6 bg-rose-100 dark:bg-rose-950 text-rose-600 dark:text-rose-400 text-xs font-black rounded-lg flex items-center justify-center">
-                            #{idx + 1}
-                          </span>
-                          <span className="text-xs font-black text-slate-900 dark:text-white uppercase">{item.client}</span>
-                        </div>
-                        <span className="text-xs font-black text-rose-600 dark:text-rose-400">
-                          {item.count} tanques
+            {/* Ranking Clientes com Contaminação */}
+            <div className="bg-slate-50 dark:bg-slate-800/40 p-6 rounded-2xl border border-slate-200/80 dark:border-slate-800 space-y-4">
+              <h4 className="text-xs font-black uppercase tracking-wider text-slate-900 dark:text-white flex items-center gap-2">
+                <Building2 className="w-4 h-4 text-rose-600" />
+                Ranking de Clientes com Maior Número de Operações Contaminadas
+              </h4>
+              <div className="space-y-2">
+                {contaminationIndicators.topContaminatedClients.length === 0 ? (
+                  <p className="text-xs text-slate-400 p-4 text-center">Nenhuma contaminação registrada no período.</p>
+                ) : (
+                  contaminationIndicators.topContaminatedClients.map((item, idx) => (
+                    <div key={item.client} className="flex items-center justify-between p-3.5 bg-white dark:bg-slate-900 rounded-xl border border-slate-200/60 dark:border-slate-800">
+                      <div className="flex items-center gap-3">
+                        <span className="w-6 h-6 bg-rose-100 dark:bg-rose-950 text-rose-600 dark:text-rose-400 text-xs font-black rounded-lg flex items-center justify-center">
+                          #{idx + 1}
                         </span>
+                        <span className="text-xs font-black text-slate-900 dark:text-white uppercase">{item.client}</span>
                       </div>
-                    ))
-                  )}
-                </div>
-              </div>
-
-              {/* Ranking Produtos com Contaminação */}
-              <div className="bg-slate-50 dark:bg-slate-800/40 p-6 rounded-2xl border border-slate-200/80 dark:border-slate-800 space-y-4">
-                <h4 className="text-xs font-black uppercase tracking-wider text-slate-900 dark:text-white flex items-center gap-2">
-                  <Package className="w-4 h-4 text-rose-600" />
-                  Ranking de Produtos com Maior Número de Contaminações
-                </h4>
-                <div className="space-y-2">
-                  {contaminationIndicators.topContaminatedProducts.length === 0 ? (
-                    <p className="text-xs text-slate-400 p-4 text-center">Nenhuma contaminação registrada no período.</p>
-                  ) : (
-                    contaminationIndicators.topContaminatedProducts.map((item, idx) => (
-                      <div key={item.product} className="flex items-center justify-between p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-200/60 dark:border-slate-800">
-                        <div className="flex items-center gap-3">
-                          <span className="w-6 h-6 bg-rose-100 dark:bg-rose-950 text-rose-600 dark:text-rose-400 text-xs font-black rounded-lg flex items-center justify-center">
-                            #{idx + 1}
-                          </span>
-                          <span className="text-xs font-black text-slate-900 dark:text-white uppercase">{item.product}</span>
-                        </div>
-                        <span className="text-xs font-black text-rose-600 dark:text-rose-400">
-                          {item.count} tanques
-                        </span>
-                      </div>
-                    ))
-                  )}
-                </div>
+                      <span className="text-xs font-black text-rose-600 dark:text-rose-400">
+                        {item.count} tanques contaminados
+                      </span>
+                    </div>
+                  ))
+                )}
               </div>
             </div>
           </div>
@@ -1267,7 +1264,7 @@ export function DecontaminationManagement({
                     <ArrowUpDown className="w-3 h-3" />
                   </div>
                 </th>
-                <th className="p-3.5 text-center">Lavagem</th>
+                <th className="p-3.5 text-center">Tempo Descont. (dias)</th>
                 <th className="p-3.5 text-center cursor-pointer hover:bg-slate-200/60 dark:hover:bg-slate-700 transition-colors" onClick={() => handleSort('leadTime')}>
                   <div className="flex items-center justify-center gap-1">
                     <span>Lead Time</span>
@@ -1377,7 +1374,7 @@ export function DecontaminationManagement({
 
                       {/* Computed Times */}
                       <td className="p-3.5 text-center text-slate-700 dark:text-slate-300 font-black">{formatHours(waitHours)}</td>
-                      <td className="p-3.5 text-center text-amber-600 dark:text-amber-400 font-black">{formatHours(deconHours)}</td>
+                      <td className="p-3.5 text-center text-purple-600 dark:text-purple-400 font-black">{formatDays(deconHours)}</td>
                       <td className="p-3.5 text-center text-emerald-600 dark:text-emerald-400 font-black">{formatHours(leadHours)}</td>
 
                       {/* Contamination Tag */}

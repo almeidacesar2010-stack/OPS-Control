@@ -67,6 +67,7 @@ import {
   Building2,
   UserPlus,
   ShieldCheck,
+  ShieldAlert,
   BarChart3,
   FileText,
   Edit,
@@ -1613,7 +1614,7 @@ function AppContent() {
     const equipment = equipments.find(e => e.id === id);
     if (!equipment) return;
 
-    if (isAdmin) {
+    if (!isModerator) {
       handleOpenDeleteModal('Equipamento', id, 'equipments', equipment.tag);
       return;
     }
@@ -2292,7 +2293,7 @@ const generatePDF = (order: any) => {
     const orderToDelete = orders.find(o => o.id === id);
     const label = orderToDelete ? `OS #${orderToDelete.equipmentNumber || orderToDelete.id}` : 'Ordem de Serviço';
 
-    if (isAdmin) {
+    if (!isModerator) {
       handleOpenDeleteModal('Ordem de Serviço', id, 'serviceOrders', label);
       return;
     }
@@ -2419,7 +2420,7 @@ const generatePDF = (order: any) => {
       throw err;
     }
 
-    if (isAdmin) {
+    if (!isModerator) {
       handleOpenDeleteModal('Ativo da Frota', id, 'fleetEquipment', tag);
       return;
     }
@@ -2775,6 +2776,11 @@ const generatePDF = (order: any) => {
     const op = decontaminationOperations.find(o => o.id === id);
     const tag = op?.equipmentNumber || 'Tanque';
 
+    if (!isModerator) {
+      handleOpenDeleteModal('Operação de Descontaminação', id, 'decontaminationOperations', tag);
+      return;
+    }
+
     setConfirmModal({
       isOpen: true,
       title: 'Excluir Operação de Descontaminação',
@@ -2814,7 +2820,7 @@ const generatePDF = (order: any) => {
       await addDoc(collection(db, 'deletionRequests'), {
         requestedBy: currentUserName,
         requestedByUid: user.uid,
-        userRole: currentUserRole,
+        userRole: effectiveRole,
         requestedAt: serverTimestamp(),
         itemType,
         itemId,
@@ -2852,6 +2858,10 @@ const generatePDF = (order: any) => {
 
   const handleApproveDeletionRequest = async (req: DeletionRequest) => {
     if (!user) return;
+    if (!isModerator) {
+      setGlobalError("Apenas o Moderador do sistema pode aprovar e executar exclusões.");
+      throw new Error("Apenas o Moderador do sistema pode aprovar e executar exclusões.");
+    }
     try {
       await deleteDoc(doc(db, req.itemCollection, req.itemId));
 
@@ -2889,6 +2899,10 @@ const generatePDF = (order: any) => {
 
   const handleRejectDeletionRequest = async (req: DeletionRequest, reason: string) => {
     if (!user) return;
+    if (!isModerator) {
+      setGlobalError("Apenas o Moderador do sistema pode rejeitar solicitações de exclusão.");
+      throw new Error("Apenas o Moderador do sistema pode rejeitar solicitações de exclusão.");
+    }
     try {
       await updateDoc(doc(db, 'deletionRequests', req.id), {
         status: 'Rejeitada',
@@ -3009,7 +3023,7 @@ const generatePDF = (order: any) => {
 
   const handleDeleteUser = async (userId: string, userName: string) => {
     if (!user) return;
-    if (isAdmin) {
+    if (!isModerator) {
       handleOpenDeleteModal('Usuário', userId, 'users', userName);
       return;
     }
@@ -3037,6 +3051,11 @@ const generatePDF = (order: any) => {
       const err = new Error("Usuário não autenticado para realizar a exclusão.");
       setGlobalError(err.message);
       throw err;
+    }
+
+    if (!isModerator) {
+      handleOpenDeleteModal('Ativos da Frota (Todos)', 'all', 'fleetEquipment', 'Todos os Ativos da Frota');
+      return;
     }
 
     try {
@@ -4077,6 +4096,48 @@ const generatePDF = (order: any) => {
         </header>
 
         <div className="p-8 max-w-[1600px] mx-auto">
+          {/* MODERATOR GLOBAL NOTIFICATION BANNER FOR PENDING DELETION REQUESTS */}
+          {(effectiveRole === 'moderator' || (isSuperAdmin && !activeRolePreview)) && 
+            activeTab !== 'approvals' && 
+            deletionRequests.some(r => r.status === 'Pendente') && (
+            <motion.div
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="mb-6 bg-gradient-to-r from-amber-500/20 via-amber-500/10 to-amber-500/5 dark:bg-amber-950/40 border-2 border-amber-500/60 rounded-3xl p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-xl backdrop-blur-md"
+            >
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 rounded-2xl bg-amber-500 text-slate-950 flex items-center justify-center shrink-0 shadow-lg shadow-amber-500/20">
+                  <ShieldAlert className="w-6 h-6 animate-pulse" />
+                </div>
+                <div>
+                  <div className="text-xs font-black uppercase tracking-wider text-amber-800 dark:text-amber-300 flex items-center gap-2">
+                    <span>Nova solicitação de exclusão</span>
+                    <span className="px-2.5 py-0.5 rounded-full bg-amber-500 text-slate-950 text-[10px] font-black shadow-sm">
+                      {deletionRequests.filter(r => r.status === 'Pendente').length} {deletionRequests.filter(r => r.status === 'Pendente').length === 1 ? 'solicitação pendente' : 'solicitações pendentes'}
+                    </span>
+                  </div>
+                  <p className="text-sm font-extrabold text-slate-900 dark:text-white mt-1">
+                    {(() => {
+                      const pendingList = deletionRequests.filter(r => r.status === 'Pendente');
+                      const latest = pendingList[0];
+                      return `${latest.requestedBy || 'Admin'} solicitou a exclusão do ${latest.itemType || 'item'} "${latest.itemName}".`;
+                    })()}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  setActiveTab('approvals');
+                  window.location.hash = 'approvals';
+                }}
+                className="px-6 py-3 rounded-2xl bg-amber-500 hover:bg-amber-600 text-slate-950 font-black text-xs uppercase tracking-wider transition-all shadow-lg shadow-amber-500/20 active:scale-95 shrink-0 flex items-center gap-2 cursor-pointer"
+              >
+                <ShieldCheck className="w-4 h-4" />
+                ANALISAR SOLICITAÇÃO
+              </button>
+            </motion.div>
+          )}
+
           <AnimatePresence mode="wait">
             <motion.div
               key={activeTab}
@@ -4590,6 +4651,7 @@ const generatePDF = (order: any) => {
                   userRole={effectiveRole}
                   onSaveOperation={handleSaveDecontaminationOperation}
                   onDeleteOperation={handleDeleteDecontaminationOperation}
+                  onRequestDelete={handleOpenDeleteModal}
                 />
               ) : activeTab === 'orders' ? (
                 <div className="space-y-6">
@@ -5571,7 +5633,7 @@ const generatePDF = (order: any) => {
                                 {canDelete && (
                                   <button
                                     onClick={() => {
-                                      if (isAdmin) {
+                                      if (!isModerator) {
                                         handleOpenDeleteModal('Cliente', client.id, 'clients', client.razaoSocial);
                                         return;
                                       }

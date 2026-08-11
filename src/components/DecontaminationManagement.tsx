@@ -83,6 +83,7 @@ interface DecontaminationManagementProps {
   userRole?: UserRole;
   onSaveOperation: (operation: Partial<DecontaminationOperation>) => Promise<void>;
   onDeleteOperation: (id: string) => Promise<void>;
+  onRequestDelete?: (itemType: string, itemId: string, itemCollection: string, itemName: string) => void;
 }
 
 type SortField = 'arrivalDate' | 'equipmentNumber' | 'client' | 'product' | 'status' | 'waitTime' | 'leadTime';
@@ -121,7 +122,8 @@ export function DecontaminationManagement({
   clients,
   userRole = 'user',
   onSaveOperation,
-  onDeleteOperation
+  onDeleteOperation,
+  onRequestDelete
 }: DecontaminationManagementProps) {
   const canDelete = userRole === 'admin' || userRole === 'moderator';
   // Modal states
@@ -1437,7 +1439,15 @@ export function DecontaminationManagement({
                           {canDelete && (
                             <button
                               onClick={() => {
-                                if (window.confirm(`Tem certeza que deseja excluir esta operação do tanque ${op.equipmentNumber}?`)) {
+                                if (userRole === 'admin' && onRequestDelete) {
+                                  onRequestDelete('Operação de Descontaminação', op.id, 'decontaminationOperations', op.equipmentNumber || 'Tanque');
+                                } else if (userRole === 'moderator') {
+                                  if (window.confirm(`Tem certeza que deseja excluir esta operação do tanque ${op.equipmentNumber}?`)) {
+                                    onDeleteOperation(op.id);
+                                  }
+                                } else if (onRequestDelete) {
+                                  onRequestDelete('Operação de Descontaminação', op.id, 'decontaminationOperations', op.equipmentNumber || 'Tanque');
+                                } else {
                                   onDeleteOperation(op.id);
                                 }
                               }}

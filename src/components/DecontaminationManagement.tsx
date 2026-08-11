@@ -87,7 +87,7 @@ interface DecontaminationManagementProps {
   onRequestDelete?: (itemType: string, itemId: string, itemCollection: string, itemName: string) => void;
 }
 
-type SortField = 'arrivalDate' | 'equipmentNumber' | 'client' | 'product' | 'status' | 'waitTime' | 'leadTime';
+type SortField = 'arrivalDate' | 'equipmentNumber' | 'client' | 'product' | 'status' | 'deconTime';
 
 const extract6DigitTag = (tag?: string): number => {
   if (!tag) return 0;
@@ -340,15 +340,9 @@ export function DecontaminationManagement({
           const res = valA.localeCompare(valB);
           return sortDirection === 'asc' ? res : -res;
         }
-      } else if (sortField === 'waitTime') {
-        const valA = getWaitTimeHours(a) || 0;
-        const valB = getWaitTimeHours(b) || 0;
-        if (valA !== valB) {
-          return sortDirection === 'asc' ? valA - valB : valB - valA;
-        }
-      } else if (sortField === 'leadTime') {
-        const valA = getLeadTimeHours(a) || 0;
-        const valB = getLeadTimeHours(b) || 0;
+      } else if (sortField === 'deconTime') {
+        const valA = getDeconTimeHours(a) || 0;
+        const valB = getDeconTimeHours(b) || 0;
         if (valA !== valB) {
           return sortDirection === 'asc' ? valA - valB : valB - valA;
         }
@@ -1258,16 +1252,9 @@ export function DecontaminationManagement({
                 </th>
                 <th className="p-3.5">Início</th>
                 <th className="p-3.5">Finalização</th>
-                <th className="p-3.5 text-center cursor-pointer hover:bg-slate-200/60 dark:hover:bg-slate-700 transition-colors" onClick={() => handleSort('waitTime')}>
+                <th className="p-3.5 text-center cursor-pointer hover:bg-slate-200/60 dark:hover:bg-slate-700 transition-colors" onClick={() => handleSort('deconTime')}>
                   <div className="flex items-center justify-center gap-1">
-                    <span>Espera</span>
-                    <ArrowUpDown className="w-3 h-3" />
-                  </div>
-                </th>
-                <th className="p-3.5 text-center">Tempo Descont. (dias)</th>
-                <th className="p-3.5 text-center cursor-pointer hover:bg-slate-200/60 dark:hover:bg-slate-700 transition-colors" onClick={() => handleSort('leadTime')}>
-                  <div className="flex items-center justify-center gap-1">
-                    <span>Lead Time</span>
+                    <span>Tempo Descont. (dias)</span>
                     <ArrowUpDown className="w-3 h-3" />
                   </div>
                 </th>
@@ -1279,15 +1266,13 @@ export function DecontaminationManagement({
             <tbody className="divide-y divide-slate-200/60 dark:divide-slate-800 whitespace-nowrap">
               {paginatedOperations.length === 0 ? (
                 <tr>
-                  <td colSpan={14} className="p-12 text-center text-slate-400">
+                  <td colSpan={12} className="p-12 text-center text-slate-400">
                     Nenhuma operação de descontaminação encontrada com os filtros selecionados.
                   </td>
                 </tr>
               ) : (
                 paginatedOperations.map(op => {
-                  const waitHours = getWaitTimeHours(op);
                   const deconHours = getDeconTimeHours(op);
-                  const leadHours = getLeadTimeHours(op);
 
                   const isMissingProduct = !op.product || op.product.trim() === '';
                   const isMissingInvoice = !op.invoiceNumber || op.invoiceNumber.trim() === '';
@@ -1372,10 +1357,8 @@ export function DecontaminationManagement({
                       <td className="p-3.5 text-slate-600 dark:text-slate-400">{formatDateDisplay(op.startDate)}</td>
                       <td className="p-3.5 text-slate-600 dark:text-slate-400">{formatDateDisplay(op.endDate)}</td>
 
-                      {/* Computed Times */}
-                      <td className="p-3.5 text-center text-slate-700 dark:text-slate-300 font-black">{formatHours(waitHours)}</td>
+                      {/* Computed Time */}
                       <td className="p-3.5 text-center text-purple-600 dark:text-purple-400 font-black">{formatDays(deconHours)}</td>
-                      <td className="p-3.5 text-center text-emerald-600 dark:text-emerald-400 font-black">{formatHours(leadHours)}</td>
 
                       {/* Contamination Tag */}
                       <td className="p-3.5 text-center">

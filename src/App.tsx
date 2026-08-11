@@ -522,7 +522,7 @@ const DocInspectionTableRow = ({
 function AppContent() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'orders' | 'fleet' | 'decontamination' | 'clients' | 'equipments' | 'approvals' | 'access' | 'settings' | 'audits'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'orders' | 'fleet' | 'decontamination' | 'clients' | 'equipments' | 'approvals' | 'access' | 'settings' | 'audits'>('decontamination');
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
   const [orders, setOrders] = useState<ServiceOrder[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
@@ -534,9 +534,9 @@ function AppContent() {
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [currentUserRole, setCurrentUserRole] = useState<UserRole>('user');
   const [moduleVisibility, setModuleVisibility] = useState<ModuleVisibilityConfig>({
-    dashboard: { moderator: true, admin: true, user: true },
-    orders: { moderator: true, admin: true, user: false },
-    fleet: { moderator: true, admin: true, user: false },
+    dashboard: { moderator: true, admin: false, user: false },
+    orders: { moderator: true, admin: false, user: false },
+    fleet: { moderator: true, admin: false, user: false },
     decontamination: { moderator: true, admin: true, user: true },
     clients: { moderator: true, admin: true, user: false },
     equipments: { moderator: true, admin: true, user: true },
@@ -555,6 +555,61 @@ function AppContent() {
   const isAdmin = effectiveRole === 'admin' || (isSuperAdmin && activeRolePreview === 'admin');
   const canSeeDelete = effectiveRole === 'admin' || effectiveRole === 'moderator' || (isSuperAdmin && !activeRolePreview);
   const canDelete = canSeeDelete;
+
+  // Authorization helper function
+  const isTabAllowed = (tab: string): boolean => {
+    if (tab === 'decontamination') return !!moduleVisibility.decontamination?.[effectiveRole];
+    if (tab === 'dashboard') return !!moduleVisibility.dashboard?.[effectiveRole];
+    if (tab === 'orders') return !!moduleVisibility.orders?.[effectiveRole];
+    if (tab === 'fleet') return !!moduleVisibility.fleet?.[effectiveRole];
+    if (tab === 'clients') return !!moduleVisibility.clients?.[effectiveRole];
+    if (tab === 'equipments') return !!moduleVisibility.equipments?.[effectiveRole];
+    if (tab === 'approvals' || tab === 'access' || tab === 'settings' || tab === 'audits') {
+      return currentUserRole === 'moderator' || (isSuperAdmin && !activeRolePreview);
+    }
+    return false;
+  };
+
+  // Protection & Redirect Guard Effect
+  useEffect(() => {
+    if (!user) return;
+    if (!isTabAllowed(activeTab)) {
+      const fallbackTab = isTabAllowed('decontamination')
+        ? 'decontamination'
+        : (['decontamination', 'equipments', 'clients', 'orders', 'fleet', 'dashboard', 'approvals', 'access', 'settings', 'audits'] as const).find(t => isTabAllowed(t)) || 'decontamination';
+      
+      if (activeTab !== fallbackTab) {
+        setActiveTab(fallbackTab as any);
+        if (window.location.hash) {
+          window.location.hash = fallbackTab;
+        }
+      }
+    }
+  }, [activeTab, effectiveRole, currentUserRole, moduleVisibility, user, activeRolePreview]);
+
+  // URL Hash Navigation Sync with Authorization Guard
+  useEffect(() => {
+    if (!user) return;
+    const syncHashTab = () => {
+      const hash = window.location.hash.replace('#', '');
+      if (hash) {
+        if (isTabAllowed(hash)) {
+          if (activeTab !== hash) {
+            setActiveTab(hash as any);
+          }
+        } else {
+          // Silent block & redirect to allowed decontamination page
+          const fallback = isTabAllowed('decontamination') ? 'decontamination' : 'equipments';
+          setActiveTab(fallback as any);
+          window.location.hash = fallback;
+        }
+      }
+    };
+
+    syncHashTab();
+    window.addEventListener('hashchange', syncHashTab);
+    return () => window.removeEventListener('hashchange', syncHashTab);
+  }, [user, effectiveRole, currentUserRole, moduleVisibility, activeRolePreview]);
   const [deleteModalState, setDeleteModalState] = useState<{
     isOpen: boolean;
     itemType: string;
@@ -3535,7 +3590,11 @@ const generatePDF = (order: any) => {
         <div className="p-8">
           <div 
             className="flex items-center gap-4 mb-12 group cursor-pointer active:scale-95 transition-transform duration-200" 
-            onClick={() => setActiveTab('dashboard')}
+            onClick={() => {
+              const target = isTabAllowed('decontamination') ? 'decontamination' : ['equipments', 'clients', 'dashboard'].find(t => isTabAllowed(t)) || 'decontamination';
+              setActiveTab(target as any);
+              window.location.hash = target;
+            }}
           >
             {logoUrl ? (
               <img src={logoUrl} alt="Logo" className="w-12 h-12 object-contain rounded-2xl shadow-2xl shadow-blue-500/20 transition-transform duration-500 group-hover:scale-110" referrerPolicy="no-referrer" />
@@ -3583,9 +3642,9 @@ const generatePDF = (order: any) => {
               </div>
             )}
 
-            {moduleVisibility.dashboard?.[effectiveRole] && (
+            {isTabAllowed('dashboard') && (
               <button
-                onClick={() => setActiveTab('dashboard')}
+                onClick={() => { setActiveTab('dashboard'); window.location.hash = 'dashboard'; }}
                 className={cn(
                   "sidebar-item w-full group",
                   activeTab === 'dashboard' ? "sidebar-item-active" : "sidebar-item-inactive"
@@ -3599,9 +3658,9 @@ const generatePDF = (order: any) => {
               </button>
             )}
 
-            {moduleVisibility.orders?.[effectiveRole] && (
+            {isTabAllowed('orders') && (
               <button
-                onClick={() => setActiveTab('orders')}
+                onClick={() => { setActiveTab('orders'); window.location.hash = 'orders'; }}
                 className={cn(
                   "sidebar-item w-full group",
                   activeTab === 'orders' ? "sidebar-item-active" : "sidebar-item-inactive"
@@ -3615,9 +3674,9 @@ const generatePDF = (order: any) => {
               </button>
             )}
 
-            {moduleVisibility.fleet?.[effectiveRole] && (
+            {isTabAllowed('fleet') && (
               <button
-                onClick={() => setActiveTab('fleet')}
+                onClick={() => { setActiveTab('fleet'); window.location.hash = 'fleet'; }}
                 className={cn(
                   "sidebar-item w-full group",
                   activeTab === 'fleet' ? "sidebar-item-active" : "sidebar-item-inactive"
@@ -3631,9 +3690,9 @@ const generatePDF = (order: any) => {
               </button>
             )}
 
-            {moduleVisibility.decontamination?.[effectiveRole] && (
+            {isTabAllowed('decontamination') && (
               <button
-                onClick={() => setActiveTab('decontamination')}
+                onClick={() => { setActiveTab('decontamination'); window.location.hash = 'decontamination'; }}
                 className={cn(
                   "sidebar-item w-full group",
                   activeTab === 'decontamination' ? "sidebar-item-active" : "sidebar-item-inactive"
@@ -3647,9 +3706,9 @@ const generatePDF = (order: any) => {
               </button>
             )}
 
-            {moduleVisibility.clients?.[effectiveRole] && (
+            {isTabAllowed('clients') && (
               <button
-                onClick={() => setActiveTab('clients')}
+                onClick={() => { setActiveTab('clients'); window.location.hash = 'clients'; }}
                 className={cn(
                   "sidebar-item w-full group",
                   activeTab === 'clients' ? "sidebar-item-active" : "sidebar-item-inactive"
@@ -3663,9 +3722,9 @@ const generatePDF = (order: any) => {
               </button>
             )}
 
-            {moduleVisibility.equipments?.[effectiveRole] && (
+            {isTabAllowed('equipments') && (
               <button
-                onClick={() => setActiveTab('equipments')}
+                onClick={() => { setActiveTab('equipments'); window.location.hash = 'equipments'; }}
                 className={cn(
                   "sidebar-item w-full group",
                   activeTab === 'equipments' ? "sidebar-item-active" : "sidebar-item-inactive"
@@ -3679,7 +3738,7 @@ const generatePDF = (order: any) => {
               </button>
             )}
 
-            {(currentUserRole === 'moderator' || user?.email === "almeidacesar2010@gmail.com") && (
+            {(currentUserRole === 'moderator' || (isSuperAdmin && !activeRolePreview)) && (
               <>
                 <div className="pt-3 pb-1 border-t border-slate-200/60 dark:border-slate-800/60">
                   <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500 px-3">
@@ -3687,66 +3746,74 @@ const generatePDF = (order: any) => {
                   </span>
                 </div>
 
-                <button
-                  onClick={() => setActiveTab('approvals')}
-                  className={cn(
-                    "sidebar-item w-full group relative",
-                    activeTab === 'approvals' ? "sidebar-item-active" : "sidebar-item-inactive"
-                  )}
-                >
-                  <div className={cn("p-2 rounded-xl transition-all duration-300", activeTab === 'approvals' ? "bg-amber-600 text-white" : "bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 group-hover:bg-amber-100")}>
-                    <AlertTriangle className="w-4 h-4" />
-                  </div>
-                  <span>Aprovações</span>
-                  {deletionRequests.filter(r => r.status === 'Pendente').length > 0 && (
-                    <span className="ml-auto px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-500 text-slate-950">
-                      {deletionRequests.filter(r => r.status === 'Pendente').length}
-                    </span>
-                  )}
-                  {activeTab === 'approvals' && <motion.div layoutId="active-pill" className="absolute right-4 w-1.5 h-1.5 bg-amber-600 rounded-full" />}
-                </button>
+                {isTabAllowed('approvals') && (
+                  <button
+                    onClick={() => { setActiveTab('approvals'); window.location.hash = 'approvals'; }}
+                    className={cn(
+                      "sidebar-item w-full group relative",
+                      activeTab === 'approvals' ? "sidebar-item-active" : "sidebar-item-inactive"
+                    )}
+                  >
+                    <div className={cn("p-2 rounded-xl transition-all duration-300", activeTab === 'approvals' ? "bg-amber-600 text-white" : "bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 group-hover:bg-amber-100")}>
+                      <AlertTriangle className="w-4 h-4" />
+                    </div>
+                    <span>Aprovações</span>
+                    {deletionRequests.filter(r => r.status === 'Pendente').length > 0 && (
+                      <span className="ml-auto px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-500 text-slate-950">
+                        {deletionRequests.filter(r => r.status === 'Pendente').length}
+                      </span>
+                    )}
+                    {activeTab === 'approvals' && <motion.div layoutId="active-pill" className="absolute right-4 w-1.5 h-1.5 bg-amber-600 rounded-full" />}
+                  </button>
+                )}
 
-                <button
-                  onClick={() => setActiveTab('access')}
-                  className={cn(
-                    "sidebar-item w-full group",
-                    activeTab === 'access' ? "sidebar-item-active" : "sidebar-item-inactive"
-                  )}
-                >
-                  <div className={cn("p-2 rounded-xl transition-all duration-300", activeTab === 'access' ? "bg-blue-600 text-white" : "bg-slate-50 dark:bg-slate-800 group-hover:bg-blue-50 dark:group-hover:bg-blue-900/30 group-hover:text-blue-600 dark:group-hover:text-blue-400")}>
-                    <ShieldCheck className="w-4 h-4" />
-                  </div>
-                  Permissões & Perfis
-                  {activeTab === 'access' && <motion.div layoutId="active-pill" className="absolute right-4 w-1.5 h-1.5 bg-blue-600 dark:bg-blue-400 rounded-full" />}
-                </button>
+                {isTabAllowed('access') && (
+                  <button
+                    onClick={() => { setActiveTab('access'); window.location.hash = 'access'; }}
+                    className={cn(
+                      "sidebar-item w-full group",
+                      activeTab === 'access' ? "sidebar-item-active" : "sidebar-item-inactive"
+                    )}
+                  >
+                    <div className={cn("p-2 rounded-xl transition-all duration-300", activeTab === 'access' ? "bg-blue-600 text-white" : "bg-slate-50 dark:bg-slate-800 group-hover:bg-blue-50 dark:group-hover:bg-blue-900/30 group-hover:text-blue-600 dark:group-hover:text-blue-400")}>
+                      <ShieldCheck className="w-4 h-4" />
+                    </div>
+                    Permissões & Perfis
+                    {activeTab === 'access' && <motion.div layoutId="active-pill" className="absolute right-4 w-1.5 h-1.5 bg-blue-600 dark:bg-blue-400 rounded-full" />}
+                  </button>
+                )}
 
-                <button
-                  onClick={() => setActiveTab('settings')}
-                  className={cn(
-                    "sidebar-item w-full group",
-                    activeTab === 'settings' ? "sidebar-item-active" : "sidebar-item-inactive"
-                  )}
-                >
-                  <div className={cn("p-2 rounded-xl transition-all duration-300", activeTab === 'settings' ? "bg-blue-600 text-white" : "bg-slate-50 dark:bg-slate-800 group-hover:bg-blue-50 dark:group-hover:bg-blue-900/30 group-hover:text-blue-600 dark:group-hover:text-blue-400")}>
-                    <Settings className="w-4 h-4" />
-                  </div>
-                  Configurações
-                  {activeTab === 'settings' && <motion.div layoutId="active-pill" className="absolute right-4 w-1.5 h-1.5 bg-blue-600 dark:bg-blue-400 rounded-full" />}
-                </button>
+                {isTabAllowed('settings') && (
+                  <button
+                    onClick={() => { setActiveTab('settings'); window.location.hash = 'settings'; }}
+                    className={cn(
+                      "sidebar-item w-full group",
+                      activeTab === 'settings' ? "sidebar-item-active" : "sidebar-item-inactive"
+                    )}
+                  >
+                    <div className={cn("p-2 rounded-xl transition-all duration-300", activeTab === 'settings' ? "bg-blue-600 text-white" : "bg-slate-50 dark:bg-slate-800 group-hover:bg-blue-50 dark:group-hover:bg-blue-900/30 group-hover:text-blue-600 dark:group-hover:text-blue-400")}>
+                      <Settings className="w-4 h-4" />
+                    </div>
+                    Configurações
+                    {activeTab === 'settings' && <motion.div layoutId="active-pill" className="absolute right-4 w-1.5 h-1.5 bg-blue-600 dark:bg-blue-400 rounded-full" />}
+                  </button>
+                )}
 
-                <button
-                  onClick={() => setActiveTab('audits')}
-                  className={cn(
-                    "sidebar-item w-full group",
-                    activeTab === 'audits' ? "sidebar-item-active" : "sidebar-item-inactive"
-                  )}
-                >
-                  <div className={cn("p-2 rounded-xl transition-all duration-300", activeTab === 'audits' ? "bg-blue-600 text-white" : "bg-slate-50 dark:bg-slate-800 group-hover:bg-blue-50 dark:group-hover:bg-blue-900/30 group-hover:text-blue-600 dark:group-hover:text-blue-400")}>
-                    <BarChart3 className="w-4 h-4" />
-                  </div>
-                  Auditorias
-                  {activeTab === 'audits' && <motion.div layoutId="active-pill" className="absolute right-4 w-1.5 h-1.5 bg-blue-600 dark:bg-blue-400 rounded-full" />}
-                </button>
+                {isTabAllowed('audits') && (
+                  <button
+                    onClick={() => { setActiveTab('audits'); window.location.hash = 'audits'; }}
+                    className={cn(
+                      "sidebar-item w-full group",
+                      activeTab === 'audits' ? "sidebar-item-active" : "sidebar-item-inactive"
+                    )}
+                  >
+                    <div className={cn("p-2 rounded-xl transition-all duration-300", activeTab === 'audits' ? "bg-blue-600 text-white" : "bg-slate-50 dark:bg-slate-800 group-hover:bg-blue-50 dark:group-hover:bg-blue-900/30 group-hover:text-blue-600 dark:group-hover:text-blue-400")}>
+                      <BarChart3 className="w-4 h-4" />
+                    </div>
+                    Auditorias
+                    {activeTab === 'audits' && <motion.div layoutId="active-pill" className="absolute right-4 w-1.5 h-1.5 bg-blue-600 dark:bg-blue-400 rounded-full" />}
+                  </button>
+                )}
               </>
             )}
           </nav>

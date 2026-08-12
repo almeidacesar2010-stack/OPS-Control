@@ -31,7 +31,8 @@ import {
   Layers,
   Printer,
   Maximize2,
-  Minimize2
+  Minimize2,
+  Truck
 } from 'lucide-react';
 import { 
   BarChart, 
@@ -534,9 +535,33 @@ export function DecontaminationManagement({
         )}
       </div>
 
-      {/* DASHBOARD: 5 MAIN PROMINENT KPI CARDS */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-5">
-        {/* Card 1: Tanques Descontaminados (Green) */}
+      {/* DASHBOARD: 6 MAIN PROMINENT KPI CARDS */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+        {/* Card 1: Tanques Recebidos (Sky/Indigo) */}
+        <motion.div 
+          whileHover={{ y: -3 }}
+          className="bg-white dark:bg-slate-900 p-6 rounded-[32px] border-2 border-sky-500/20 dark:border-sky-500/30 shadow-md relative overflow-hidden group"
+        >
+          <div className="flex items-center justify-between mb-4">
+            <span className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+              Tanques Recebidos
+            </span>
+            <div className="w-12 h-12 bg-sky-500/10 text-sky-600 dark:text-sky-400 rounded-2xl flex items-center justify-center border border-sky-500/20">
+              <Truck className="w-6 h-6" />
+            </div>
+          </div>
+
+          <div className="flex items-baseline justify-between gap-2">
+            <span className="text-4xl font-black text-sky-600 dark:text-sky-400 tracking-tight">
+              {kpis.totalReceived}
+            </span>
+          </div>
+          <p className="text-[10px] font-bold text-slate-400 mt-2">
+            Tanques que chegaram à base no período
+          </p>
+        </motion.div>
+
+        {/* Card 2: Tanques Descontaminados (Green) */}
         <motion.div 
           whileHover={{ y: -3 }}
           className="bg-white dark:bg-slate-900 p-7 rounded-[32px] border-2 border-emerald-500/20 dark:border-emerald-500/30 shadow-md relative overflow-hidden group"

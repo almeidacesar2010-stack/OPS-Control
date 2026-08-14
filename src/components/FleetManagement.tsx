@@ -267,6 +267,10 @@ export const FleetManagement: React.FC<FleetManagementProps> = ({
   const [sortField, setSortField] = useState<string>('equipmentNumber');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
 
+  // Pagination State
+  const [fleetCurrentPage, setFleetCurrentPage] = useState(1);
+  const [fleetItemsPerPage, setFleetItemsPerPage] = useState<number>(20);
+
   // Derived Equipment Keys (Type + Number) for composite duplicate checking
   const existingEquipments = useMemo(() => {
     return equipments.map(e => ({
@@ -377,10 +381,6 @@ export const FleetManagement: React.FC<FleetManagementProps> = ({
       return sortDirection === 'asc' ? aVal - bVal : bVal - aVal;
     });
   }, [filteredEquipments, sortField, sortDirection]);
-
-  // Pagination State
-  const [fleetCurrentPage, setFleetCurrentPage] = useState(1);
-  const [fleetItemsPerPage, setFleetItemsPerPage] = useState<number>(20);
 
   // Reset page to 1 when filters or sorting change
   useEffect(() => {

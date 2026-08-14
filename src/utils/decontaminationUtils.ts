@@ -379,10 +379,22 @@ export function calculateDecontaminationKPIs(
   const avgDeconTime = computeAverage(deconTimes);
   const avgLeadTime = computeAverage(leadTimes);
 
-  // Compute daily average of completed decontaminations
+  // Compute daily average of completed decontaminations (ritmo médio em todo o período)
   const sourceAllOps = allOperations && allOperations.length > 0 ? allOperations : operations;
   const elapsedDays = calculatePeriodElapsedDays(period, customStart, customEnd, sourceAllOps);
   const avgDailyDecon = completedOps.length / elapsedDays;
+
+  // Compute Capacidade Operacional de Descontaminação (apenas dias com finalizações)
+  // Total de tanques descontaminados finalizados ÷ Quantidade de dias que tiveram pelo menos uma descontaminação finalizada
+  const completionDatesSet = new Set<string>();
+  completedOps.forEach(op => {
+    if (op.endDate && op.endDate.trim() !== '') {
+      const cleanDate = op.endDate.trim().slice(0, 10);
+      completionDatesSet.add(cleanDate);
+    }
+  });
+  const activeCompletionDaysCount = completionDatesSet.size;
+  const operationalCapacity = activeCompletionDaysCount > 0 ? completedOps.length / activeCompletionDaysCount : 0;
 
   const completionRate = totalReceived > 0 ? (completedOps.length / totalReceived) * 100 : 0;
 
@@ -397,6 +409,7 @@ export function calculateDecontaminationKPIs(
     avgDeconTimeHours: number | null;
     avgLeadTimeHours: number | null;
     avgDailyDecon: number | null;
+    operationalCapacity: number | null;
   } | null = null;
 
   if (prevBounds) {
@@ -404,6 +417,16 @@ export function calculateDecontaminationKPIs(
     const prevCompleted = prevOps.filter(o => o.status === 'completed' && o.endDate && o.endDate.trim() !== '');
     const prevElapsedDays = calculateElapsedDaysForBounds(prevBounds.start, prevBounds.end);
     const prevAvgDailyDecon = prevCompleted.length / prevElapsedDays;
+
+    const prevCompletionDatesSet = new Set<string>();
+    prevCompleted.forEach(op => {
+      if (op.endDate && op.endDate.trim() !== '') {
+        const cleanDate = op.endDate.trim().slice(0, 10);
+        prevCompletionDatesSet.add(cleanDate);
+      }
+    });
+    const prevActiveDays = prevCompletionDatesSet.size;
+    const prevOperationalCapacity = prevActiveDays > 0 ? prevCompleted.length / prevActiveDays : 0;
 
     prevKPIs = {
       totalReceived: prevOps.length,
@@ -413,7 +436,8 @@ export function calculateDecontaminationKPIs(
       avgWaitTimeHours: computeAverage(prevOps.map(getWaitTimeHours)),
       avgDeconTimeHours: computeAverage(prevCompleted.map(getDeconTimeHours)),
       avgLeadTimeHours: computeAverage(prevCompleted.map(getLeadTimeHours)),
-      avgDailyDecon: prevAvgDailyDecon
+      avgDailyDecon: prevAvgDailyDecon,
+      operationalCapacity: prevOperationalCapacity
     };
   }
 
@@ -426,6 +450,8 @@ export function calculateDecontaminationKPIs(
     avgDeconTimeHours: avgDeconTime,
     avgLeadTimeHours: avgLeadTime,
     avgDailyDecon,
+    operationalCapacity,
+    activeCompletionDaysCount,
     completionRatePercent: completionRate,
     comparisons: {
       received: prevKPIs ? calculatePercentageChange(totalReceived, prevKPIs.totalReceived) : null,
@@ -435,7 +461,8 @@ export function calculateDecontaminationKPIs(
       avgWait: prevKPIs && avgWaitTime !== null && prevKPIs.avgWaitTimeHours !== null ? calculatePercentageChange(avgWaitTime, prevKPIs.avgWaitTimeHours) : null,
       avgDecon: prevKPIs && avgDeconTime !== null && prevKPIs.avgDeconTimeHours !== null ? calculatePercentageChange(avgDeconTime, prevKPIs.avgDeconTimeHours) : null,
       avgLead: prevKPIs && avgLeadTime !== null && prevKPIs.avgLeadTimeHours !== null ? calculatePercentageChange(avgLeadTime, prevKPIs.avgLeadTimeHours) : null,
-      avgDailyDecon: prevKPIs && prevKPIs.avgDailyDecon !== null && prevKPIs.avgDailyDecon > 0 ? calculatePercentageChange(avgDailyDecon, prevKPIs.avgDailyDecon) : null
+      avgDailyDecon: prevKPIs && prevKPIs.avgDailyDecon !== null && prevKPIs.avgDailyDecon > 0 ? calculatePercentageChange(avgDailyDecon, prevKPIs.avgDailyDecon) : null,
+      operationalCapacity: prevKPIs && prevKPIs.operationalCapacity !== null && prevKPIs.operationalCapacity > 0 ? calculatePercentageChange(operationalCapacity, prevKPIs.operationalCapacity) : null
     }
   };
 }
@@ -503,26 +530,31 @@ export function calculateModelIndicators(operations: DecontaminationOperation[])
 }
 
 /**
- * Indicators grouped by Product
+ * Indicators grouped by Product (Normalized to UPPERCASE for exact aggregation)
  */
 export function calculateProductIndicators(operations: DecontaminationOperation[]) {
   const prodMap = new Map<string, DecontaminationOperation[]>();
 
   operations.forEach(op => {
-    const prodName = op.product?.trim() || 'Não Informado';
+    const rawProd = op.product?.trim();
+    const prodName = rawProd ? rawProd.toUpperCase() : 'NÃO INFORMADO';
     if (!prodMap.has(prodName)) prodMap.set(prodName, []);
     prodMap.get(prodName)!.push(op);
   });
 
   const results = Array.from(prodMap.entries()).map(([product, ops]) => {
     const completedOps = ops.filter(o => o.status === 'completed');
+    const waitTimes = ops.map(getWaitTimeHours);
     const deconTimes = completedOps.map(getDeconTimeHours);
+    const leadTimes = completedOps.map(getLeadTimeHours);
 
     return {
       product,
       totalReceived: ops.length,
       completedCount: completedOps.length,
-      avgDeconTime: computeAverage(deconTimes)
+      avgWaitTime: computeAverage(waitTimes),
+      avgDeconTime: computeAverage(deconTimes),
+      avgLeadTime: computeAverage(leadTimes)
     };
   });
 

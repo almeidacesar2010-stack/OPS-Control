@@ -38,12 +38,12 @@ export function DecontaminationModal({
   useEffect(() => {
     setErrorMessage(null);
     if (editingOperation) {
-      setEquipmentNumber(editingOperation.equipmentNumber || '');
-      setModel(editingOperation.model || '');
+      setEquipmentNumber(editingOperation.equipmentNumber ? editingOperation.equipmentNumber.toUpperCase() : '');
+      setModel(editingOperation.model ? editingOperation.model.toUpperCase() : '');
       setIsOegFleet(Boolean(editingOperation.isOegFleet));
-      setClient(editingOperation.client || '');
-      setProduct(editingOperation.product || '');
-      setInvoiceNumber(editingOperation.invoiceNumber || '');
+      setClient(editingOperation.client ? editingOperation.client.toUpperCase() : '');
+      setProduct(editingOperation.product ? editingOperation.product.toUpperCase() : '');
+      setInvoiceNumber(editingOperation.invoiceNumber ? editingOperation.invoiceNumber.toUpperCase() : '');
       setArrivalDate(editingOperation.arrivalDate ? editingOperation.arrivalDate.slice(0, 10) : '');
       setStartDate(editingOperation.startDate ? editingOperation.startDate.slice(0, 10) : '');
       setEndDate(editingOperation.endDate ? editingOperation.endDate.slice(0, 10) : '');
@@ -90,9 +90,9 @@ export function DecontaminationModal({
         equipmentNumber: equipmentNumber.trim().toUpperCase(),
         model: model.trim().toUpperCase(),
         isOegFleet,
-        client: client.trim(),
-        product: product.trim(),
-        invoiceNumber: invoiceNumber.trim(),
+        client: client.trim().toUpperCase(),
+        product: product.trim().toUpperCase(),
+        invoiceNumber: invoiceNumber.trim().toUpperCase(),
         arrivalDate: arrivalDate.trim(),
         startDate: startDate.trim(),
         endDate: endDate.trim(),
@@ -240,9 +240,21 @@ export function DecontaminationModal({
               </label>
               <input
                 type="text"
-                placeholder="Ex: Óleo Sintético, Solvente (opcional)..."
+                placeholder="EX: ÓLEO SINTÉTICO, SOLVENTE (OPCIONAL)..."
                 value={product}
-                onChange={e => setProduct(e.target.value)}
+                onChange={e => setProduct(e.target.value.toUpperCase())}
+                onPaste={e => {
+                  e.preventDefault();
+                  const pastedText = e.clipboardData.getData('text');
+                  if (pastedText) {
+                    const uppercaseText = pastedText.toUpperCase();
+                    const target = e.target as HTMLInputElement;
+                    const start = target.selectionStart || 0;
+                    const end = target.selectionEnd || 0;
+                    const nextVal = (product.slice(0, start) + uppercaseText + product.slice(end)).toUpperCase();
+                    setProduct(nextVal);
+                  }
+                }}
                 className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 uppercase transition-all"
               />
             </div>
@@ -253,9 +265,21 @@ export function DecontaminationModal({
               </label>
               <input
                 type="text"
-                placeholder="Ex: NF-12345 (opcional)"
+                placeholder="EX: NF-12345 (OPCIONAL)"
                 value={invoiceNumber}
-                onChange={e => setInvoiceNumber(e.target.value)}
+                onChange={e => setInvoiceNumber(e.target.value.toUpperCase())}
+                onPaste={e => {
+                  e.preventDefault();
+                  const pastedText = e.clipboardData.getData('text');
+                  if (pastedText) {
+                    const uppercaseText = pastedText.toUpperCase();
+                    const target = e.target as HTMLInputElement;
+                    const start = target.selectionStart || 0;
+                    const end = target.selectionEnd || 0;
+                    const nextVal = (invoiceNumber.slice(0, start) + uppercaseText + invoiceNumber.slice(end)).toUpperCase();
+                    setInvoiceNumber(nextVal);
+                  }
+                }}
                 className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-2xl font-bold text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 uppercase transition-all"
               />
             </div>

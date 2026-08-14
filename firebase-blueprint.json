@@ -254,6 +254,20 @@
         }
       },
       "required": ["equipmentNumber", "model", "client", "arrivalDate", "hasContamination", "status"]
+    },
+    "decontaminationCertificate": {
+      "title": "Decontamination Certificate",
+      "description": "Official certificate of tank decontamination and cleaning.",
+      "type": "object",
+      "properties": {
+        "reportNumber": { "type": "string" },
+        "client": { "type": "string" },
+        "status": { "type": "string" },
+        "approvalStatus": { "type": "string" },
+        "technicalOpinion": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["reportNumber", "client", "status"]
     }
   },
   "firestore": {
@@ -276,6 +290,10 @@
     "/decontaminationOperations/{decontaminationId}": {
       "schema": "decontaminationOperation",
       "description": "Collection of decontamination operations."
+    },
+    "/decontaminationCertificates/{certId}": {
+      "schema": "decontaminationCertificate",
+      "description": "Collection of decontamination certificates."
     }
   }
 }

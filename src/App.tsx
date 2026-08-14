@@ -550,8 +550,8 @@ function AppContent() {
     userEmail: string;
   } | null>(null);
   const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
-  const effectiveRole: UserRole = activeRolePreview || currentUserRole;
   const isSuperAdmin = user?.email === "almeidacesar2010@gmail.com";
+  const effectiveRole: UserRole = activeRolePreview || (isSuperAdmin ? (currentUserRole === 'admin' ? 'admin' : 'moderator') : currentUserRole);
   const isModerator = effectiveRole === 'moderator' || (isSuperAdmin && !activeRolePreview);
   const isAdmin = effectiveRole === 'admin' || (isSuperAdmin && activeRolePreview === 'admin');
   const canSeeDelete = effectiveRole === 'admin' || effectiveRole === 'moderator' || (isSuperAdmin && !activeRolePreview);
@@ -877,7 +877,19 @@ function AppContent() {
     });
 
     const unsubDecontamination = onSnapshot(collection(db, 'decontaminationOperations'), (snapshot) => {
-      setDecontaminationOperations(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as DecontaminationOperation[]);
+      const ops = snapshot.docs.map(doc => {
+        const raw = doc.data() as DecontaminationOperation;
+        return {
+          id: doc.id,
+          ...raw,
+          product: raw.product ? String(raw.product).trim().toUpperCase() : '',
+          equipmentNumber: raw.equipmentNumber ? String(raw.equipmentNumber).trim().toUpperCase() : '',
+          model: raw.model ? String(raw.model).trim().toUpperCase() : '',
+          client: raw.client ? String(raw.client).trim().toUpperCase() : '',
+          invoiceNumber: raw.invoiceNumber ? String(raw.invoiceNumber).trim().toUpperCase() : ''
+        };
+      }) as DecontaminationOperation[];
+      setDecontaminationOperations(ops);
     }, (error) => {
       console.error("Decontamination operations listener error:", error);
       handleFirestoreError(error, OperationType.GET, 'decontaminationOperations');
@@ -2762,6 +2774,23 @@ const generatePDF = (order: any) => {
           cleanData[key] = '';
         }
       });
+
+      // Strict uppercase standardization for all core operational text fields
+      if (typeof cleanData.product === 'string') {
+        cleanData.product = cleanData.product.trim().toUpperCase();
+      }
+      if (typeof cleanData.equipmentNumber === 'string') {
+        cleanData.equipmentNumber = cleanData.equipmentNumber.trim().toUpperCase();
+      }
+      if (typeof cleanData.model === 'string') {
+        cleanData.model = cleanData.model.trim().toUpperCase();
+      }
+      if (typeof cleanData.client === 'string') {
+        cleanData.client = cleanData.client.trim().toUpperCase();
+      }
+      if (typeof cleanData.invoiceNumber === 'string') {
+        cleanData.invoiceNumber = cleanData.invoiceNumber.trim().toUpperCase();
+      }
 
       if (cleanData.id) {
         const id = cleanData.id;
@@ -4690,6 +4719,9 @@ const generatePDF = (order: any) => {
                   fleetEquipments={fleetEquipment}
                   clients={clients}
                   userRole={effectiveRole}
+                  currentUserName={currentUserName}
+                  currentUserId={user?.uid || ''}
+                  logoUrl={logoUrl || undefined}
                   onSaveOperation={handleSaveDecontaminationOperation}
                   onDeleteOperation={handleDeleteDecontaminationOperation}
                   onRequestDelete={handleOpenDeleteModal}
@@ -6990,6 +7022,16 @@ const generatePDF = (order: any) => {
           onLogout={handleLogout}
         />
       )}
+
+      {/* Delete Request Modal */}
+      <DeleteRequestModal
+        isOpen={deleteModalState.isOpen}
+        onClose={() => setDeleteModalState(prev => ({ ...prev, isOpen: false }))}
+        onSubmit={handleSubmitDeleteRequest}
+        itemType={deleteModalState.itemType}
+        itemName={deleteModalState.itemName}
+        userRole={effectiveRole}
+      />
     </div>
   );
 }

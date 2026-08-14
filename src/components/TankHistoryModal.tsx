@@ -75,16 +75,9 @@ export function TankHistoryModal({
   };
 
   return (
-    <AnimatePresence>
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-slate-950/75 backdrop-blur-md overflow-y-auto">
-        <motion.div
-          initial={{ opacity: 0, scale: 0.95, y: 10 }}
-          animate={{ opacity: 1, scale: 1, y: 0 }}
-          exit={{ opacity: 0, scale: 0.95, y: 10 }}
-          transition={{ duration: 0.2 }}
-          className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-[32px] w-full max-w-5xl shadow-2xl overflow-hidden my-auto max-h-[92vh] flex flex-col print:max-h-none print:shadow-none print:border-none print:my-0"
-        >
-          {/* Header - Technical Sheet Banner */}
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-slate-950/75 backdrop-blur-md overflow-y-auto">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-[32px] w-full max-w-5xl shadow-2xl overflow-hidden my-auto max-h-[92vh] flex flex-col print:max-h-none print:shadow-none print:border-none print:my-0 animate-in fade-in zoom-in-95 duration-200">
+        {/* Header - Technical Sheet Banner */}
           <div className="p-6 md:p-8 bg-slate-900 text-white flex flex-col sm:flex-row sm:items-center justify-between gap-6 relative shrink-0 border-b border-slate-800">
             <div className="flex items-center gap-5">
               <div className="w-16 h-16 bg-gradient-to-br from-blue-600 to-indigo-600 border border-blue-400/30 text-white rounded-2xl flex items-center justify-center shadow-lg shadow-blue-500/20 shrink-0">
@@ -147,7 +140,7 @@ export function TankHistoryModal({
             <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-xs">
               <p className="text-[10px] font-black uppercase tracking-wider text-slate-400 mb-1">Último Produto</p>
               <p className="text-xs font-bold text-slate-900 dark:text-white uppercase truncate">
-                {latestOp?.product || '—'}
+                {latestOp?.product ? latestOp.product.toUpperCase() : '—'}
               </p>
             </div>
 
@@ -252,7 +245,7 @@ export function TankHistoryModal({
                               <Package className="w-3.5 h-3.5 text-purple-500" />
                               Produto / Conteúdo
                             </p>
-                            <p className="text-slate-900 dark:text-white uppercase mt-1 text-sm font-black">{op.product || '—'}</p>
+                            <p className="text-slate-900 dark:text-white uppercase mt-1 text-sm font-black">{op.product ? op.product.toUpperCase() : '—'}</p>
                           </div>
 
                           <div className="bg-white dark:bg-slate-900 p-3.5 rounded-xl border border-slate-200/60 dark:border-slate-700/60">
@@ -309,9 +302,8 @@ export function TankHistoryModal({
               </div>
             )}
           </div>
-        </motion.div>
+        </div>
       </div>
-    </AnimatePresence>
   );
 }
 

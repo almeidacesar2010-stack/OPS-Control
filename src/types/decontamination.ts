@@ -11,10 +11,88 @@ export const TANK_CLIENTS = [
   'EQUINOR BACALHAU',
   'EQUINOR RAIA',
   'PRIO',
-  'HELIX'
+  'HELIX',
+  'BRAVA ENERGY'
 ] as const;
 
 export type DecontaminationStatus = 'waiting' | 'in_progress' | 'completed';
+
+export interface TankCertificateItem {
+  description: string;
+  equipmentNumber: string;
+  product: string;
+  decontaminationDate: string;
+}
+
+export type InspectionStatus = 'OK' | 'Não OK' | 'N/A';
+
+export interface VisualChecklistState {
+  pintura: InspectionStatus;
+  corrosao: InspectionStatus;
+  danosDeformacoes: InspectionStatus;
+  soldas: InspectionStatus;
+  conexoes: InspectionStatus;
+  valvulas: InspectionStatus;
+  olhal: InspectionStatus;
+  plaqueta: InspectionStatus;
+  bolsaEmpilhadeira: InspectionStatus;
+  liftingSet?: InspectionStatus;
+}
+
+export type CertificateApprovalStatus = 'pending_approval' | 'approved';
+
+export interface DecontaminationCertificate {
+  id: string;
+  reportNumber: string; // Padrão: OEG.XXX.AAAA (ex: OEG.001.2026)
+  sequenceNumber?: number; // XXX
+  year?: number; // AAAA
+
+  // Dados do Emissor (Automático e Imutável)
+  issuerId?: string;
+  issuerName: string; // Nome do usuário logado emissor
+  issueDate: string; // YYYY-MM-DD
+  issueTime?: string; // HH:mm
+  issuedAt?: string; // ISO timestamp completo da emissão
+
+  // Dados do Aprovador e Fluxo de Aprovação
+  approvalStatus: CertificateApprovalStatus; // 'pending_approval' | 'approved'
+  approvedById?: string;
+  approvedByName?: string; // Nome do usuário logado que aprovou
+  approvedDate?: string; // YYYY-MM-DD
+  approvedTime?: string; // HH:mm
+  approvedAt?: string; // ISO timestamp completo da aprovação
+
+  // Compatibilidade com campos legados
+  responsibleName?: string;
+  approvedBy?: string;
+
+  // Dados Operacionais
+  client: string;
+  inspectionLocation: string;
+  tanks: TankCertificateItem[];
+  tankCount?: number; // Quantidade de tanques
+  checklist: VisualChecklistState;
+  generalNotes: string;
+  status: 'CONFORME' | 'NÃO CONFORME';
+  pdfDataUri?: string; // PDF gerado vinculado ao registro
+  pdfFileName?: string; // Nome oficial padronizado do arquivo
+  createdAt?: string | any;
+  updatedAt?: string | any;
+}
+
+export const OBJECTIVE_TEXT = "Registrar serviço de limpeza e descontaminação industrial e garantir conformidade de inspeção do equipamento.";
+
+export const CHECKLIST_ITEMS: { key: keyof VisualChecklistState; label: string; allowNA?: boolean }[] = [
+  { key: 'pintura', label: '1. Pintura' },
+  { key: 'corrosao', label: '2. Corrosão' },
+  { key: 'danosDeformacoes', label: '3. Danos - Deformações' },
+  { key: 'soldas', label: '4. Soldas' },
+  { key: 'conexoes', label: '5. Conexões' },
+  { key: 'valvulas', label: '6. Válvulas' },
+  { key: 'olhal', label: '7. Olhal' },
+  { key: 'plaqueta', label: '8. Plaqueta' },
+  { key: 'bolsaEmpilhadeira', label: '9. Bolsa Empilhadeira' }
+];
 
 export interface DecontaminationOperation {
   id: string;

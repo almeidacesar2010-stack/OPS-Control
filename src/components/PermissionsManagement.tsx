@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   ShieldCheck, 
   ShieldAlert, 
@@ -111,6 +111,11 @@ export function PermissionsManagement({
   const [isSavingVisibility, setIsSavingVisibility] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
+
+  // Sync state if prop changes
+  useEffect(() => {
+    setLocalConfig(moduleVisibility);
+  }, [moduleVisibility]);
 
   // User edit state
   const [editingUser, setEditingUser] = useState<AppUser | null>(null);
@@ -455,11 +460,6 @@ export function PermissionsManagement({
       setIsSubmittingUser(false);
     }
   };
-
-  // Sync state if prop changes
-  React.useEffect(() => {
-    setLocalConfig(moduleVisibility);
-  }, [moduleVisibility]);
 
   const handleToggleModule = (moduleKey: keyof ModuleVisibilityConfig, role: 'moderator' | 'admin' | 'user') => {
     if (role === 'moderator') return;

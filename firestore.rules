@@ -55,6 +55,12 @@ service cloud.firestore {
       allow delete: if isAuthenticated() && isModerator();
     }
 
+    match /decontaminationCertificates/{certId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated();
+      allow delete: if isAuthenticated();
+    }
+
     match /serviceOrders/{osId} {
       allow read: if isAuthenticated();
       allow create, update: if isAuthenticated();

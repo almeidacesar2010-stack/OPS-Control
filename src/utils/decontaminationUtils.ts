@@ -254,6 +254,103 @@ export function formatDailyAverage(val: number | null | undefined): string {
 }
 
 /**
+ * Calculates Easter date for a given year using Meeus/Jones/Butcher algorithm
+ */
+export function getEasterDate(year: number): Date {
+  const a = year % 19;
+  const b = Math.floor(year / 100);
+  const c = year % 100;
+  const d = Math.floor(b / 4);
+  const e = b % 4;
+  const f = Math.floor((b + 8) / 25);
+  const g = Math.floor((b - f + 1) / 3);
+  const h = (19 * a + b - d - g + 15) % 30;
+  const i = Math.floor(c / 4);
+  const k = c % 4;
+  const l = (32 + 2 * e + 2 * i - h - k) % 7;
+  const m = Math.floor((a + 11 * h + 22 * l) / 451);
+  const month = Math.floor((h + l - 7 * m + 114) / 31); // 3 = March, 4 = April
+  const day = ((h + l - 7 * m + 114) % 31) + 1;
+  return new Date(year, month - 1, day);
+}
+
+/**
+ * Returns Brazilian national holidays for a given year in 'YYYY-MM-DD' format
+ */
+export function getBrazilianHolidays(year: number): Set<string> {
+  const holidays = new Set<string>();
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const addHoliday = (m: number, d: number) => {
+    holidays.add(`${year}-${pad(m)}-${pad(d)}`);
+  };
+
+  // Fixed Brazilian National Holidays
+  addHoliday(1, 1);   // Confraternização Universal (Ano Novo)
+  addHoliday(4, 21);  // Tiradentes
+  addHoliday(5, 1);   // Dia Mundial do Trabalho
+  addHoliday(9, 7);   // Independência do Brasil
+  addHoliday(10, 12); // Nossa Senhora Aparecida
+  addHoliday(11, 2);  // Finados
+  addHoliday(11, 15); // Proclamação da República
+  addHoliday(11, 20); // Dia Nacional de Zumbi e da Consciência Negra
+  addHoliday(12, 25); // Natal
+
+  // Movable holidays based on Easter
+  const easter = getEasterDate(year);
+
+  // Carnaval (Tuesday, 47 days before Easter)
+  const carnaval = new Date(easter.getTime() - 47 * 24 * 60 * 60 * 1000);
+  holidays.add(`${carnaval.getFullYear()}-${pad(carnaval.getMonth() + 1)}-${pad(carnaval.getDate())}`);
+
+  // Sexta-feira Santa / Paixão de Cristo (2 days before Easter)
+  const sextaSanta = new Date(easter.getTime() - 2 * 24 * 60 * 60 * 1000);
+  holidays.add(`${sextaSanta.getFullYear()}-${pad(sextaSanta.getMonth() + 1)}-${pad(sextaSanta.getDate())}`);
+
+  // Corpus Christi (60 days after Easter)
+  const corpusChristi = new Date(easter.getTime() + 60 * 24 * 60 * 60 * 1000);
+  holidays.add(`${corpusChristi.getFullYear()}-${pad(corpusChristi.getMonth() + 1)}-${pad(corpusChristi.getDate())}`);
+
+  return holidays;
+}
+
+/**
+ * Checks if a specific date is a business day (Monday-Friday, not a weekend, not a national holiday)
+ */
+export function isBusinessDay(date: Date): boolean {
+  const dayOfWeek = date.getDay(); // 0 = Sunday, 6 = Saturday
+  if (dayOfWeek === 0 || dayOfWeek === 6) {
+    return false;
+  }
+  const year = date.getFullYear();
+  const holidays = getBrazilianHolidays(year);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const dateKey = `${year}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+  return !holidays.has(dateKey);
+}
+
+/**
+ * Counts business days between start date and end date (inclusive)
+ */
+export function countBusinessDays(startDate: Date, endDate: Date): number {
+  const start = startOfDay(startDate);
+  const end = startOfDay(endDate);
+
+  if (start.getTime() > end.getTime()) {
+    return 0;
+  }
+
+  let count = 0;
+  const current = new Date(start);
+  while (current.getTime() <= end.getTime()) {
+    if (isBusinessDay(current)) {
+      count++;
+    }
+    current.setDate(current.getDate() + 1);
+  }
+  return count;
+}
+
+/**
  * Calculates days elapsed in a given filter period
  */
 export function calculatePeriodElapsedDays(
@@ -318,17 +415,9 @@ export function calculatePeriodElapsedDays(
     return 1;
   }
 
-  if (now.getTime() <= periodEnd.getTime()) {
-    // Ongoing period: count days from periodStart up to today inclusive
-    const diffMs = now.getTime() - periodStart.getTime();
-    const days = Math.floor(diffMs / (1000 * 60 * 60 * 24)) + 1;
-    return Math.max(1, days);
-  } else {
-    // Past/Completed period: total duration of period in days
-    const diffMs = periodEnd.getTime() - periodStart.getTime();
-    const days = Math.round(diffMs / (1000 * 60 * 60 * 24));
-    return Math.max(1, days);
-  }
+  const targetEnd = now.getTime() <= periodEnd.getTime() ? now : periodEnd;
+  const businessDays = countBusinessDays(periodStart, targetEnd);
+  return Math.max(1, businessDays);
 }
 
 /**
@@ -343,17 +432,9 @@ export function calculateElapsedDaysForBounds(start: Date, end: Date): number {
     return 1;
   }
 
-  if (now.getTime() <= endDay.getTime()) {
-    // Ongoing interval
-    const diffMs = now.getTime() - startDay.getTime();
-    const days = Math.floor(diffMs / (1000 * 60 * 60 * 24)) + 1;
-    return Math.max(1, days);
-  } else {
-    // Past interval
-    const diffMs = endDay.getTime() - startDay.getTime();
-    const days = Math.round(diffMs / (1000 * 60 * 60 * 24));
-    return Math.max(1, days);
-  }
+  const targetEnd = now.getTime() <= endDay.getTime() ? now : endDay;
+  const businessDays = countBusinessDays(startDay, targetEnd);
+  return Math.max(1, businessDays);
 }
 
 /**

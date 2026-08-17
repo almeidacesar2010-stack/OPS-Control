@@ -861,8 +861,8 @@ export function DecontaminationManagement({
               </span>
               <div className="relative group/tip shrink-0">
                 <Info className="w-3.5 h-3.5 text-slate-400 hover:text-teal-600 dark:hover:text-teal-400 cursor-help transition-colors" />
-                <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 hidden group-hover/tip:block w-52 p-2.5 bg-slate-950 text-white text-[11px] font-medium rounded-xl shadow-xl border border-slate-800 z-50 pointer-events-none leading-relaxed text-center">
-                  Mostra o ritmo médio de descontaminações ao longo de todo o período selecionado.
+                <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 hidden group-hover/tip:block w-56 p-2.5 bg-slate-950 text-white text-[11px] font-medium rounded-xl shadow-xl border border-slate-800 z-50 pointer-events-none leading-relaxed text-center">
+                  Mostra o ritmo médio de descontaminações por dia útil ao longo de todo o período selecionado.
                   <div className="absolute left-1/2 -translate-x-1/2 top-full w-0 h-0 border-x-4 border-x-transparent border-t-4 border-t-slate-950"></div>
                 </div>
               </div>
@@ -874,11 +874,11 @@ export function DecontaminationManagement({
 
           <div className="flex items-baseline justify-between gap-2">
             <span className="text-3xl font-black text-teal-600 dark:text-teal-400 tracking-tight">
-              {formatDailyAverage(kpis.avgDailyDecon)} <span className="text-xs font-extrabold text-slate-400">tanques/dia</span>
+              {formatDailyAverage(kpis.avgDailyDecon)} <span className="text-xs font-extrabold text-slate-400">tanques/dia útil</span>
             </span>
           </div>
           <p className="text-[10px] font-bold text-slate-400 mt-2">
-            Tanques finalizados por dia no período
+            Tanques finalizados por dia útil no período
           </p>
         </motion.div>
       </div>

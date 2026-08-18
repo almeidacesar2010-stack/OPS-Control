@@ -611,38 +611,6 @@ export function calculateModelIndicators(operations: DecontaminationOperation[])
 }
 
 /**
- * Indicators grouped by Product (Normalized to UPPERCASE for exact aggregation)
- */
-export function calculateProductIndicators(operations: DecontaminationOperation[]) {
-  const prodMap = new Map<string, DecontaminationOperation[]>();
-
-  operations.forEach(op => {
-    const rawProd = op.product?.trim();
-    const prodName = rawProd ? rawProd.toUpperCase() : 'NÃO INFORMADO';
-    if (!prodMap.has(prodName)) prodMap.set(prodName, []);
-    prodMap.get(prodName)!.push(op);
-  });
-
-  const results = Array.from(prodMap.entries()).map(([product, ops]) => {
-    const completedOps = ops.filter(o => o.status === 'completed');
-    const waitTimes = ops.map(getWaitTimeHours);
-    const deconTimes = completedOps.map(getDeconTimeHours);
-    const leadTimes = completedOps.map(getLeadTimeHours);
-
-    return {
-      product,
-      totalReceived: ops.length,
-      completedCount: completedOps.length,
-      avgWaitTime: computeAverage(waitTimes),
-      avgDeconTime: computeAverage(deconTimes),
-      avgLeadTime: computeAverage(leadTimes)
-    };
-  });
-
-  return results.sort((a, b) => b.totalReceived - a.totalReceived);
-}
-
-/**
  * Specific Contamination Indicators (Strictly counting ops where hasContamination === true)
  */
 export function calculateContaminationIndicators(operations: DecontaminationOperation[]) {

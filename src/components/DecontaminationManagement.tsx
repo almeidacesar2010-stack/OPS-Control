@@ -13,7 +13,6 @@ import {
   Edit3, 
   Trash2, 
   Building2, 
-  Package, 
   BarChart3, 
   PieChart as PieChartIcon, 
   History, 
@@ -75,7 +74,6 @@ import {
   calculateDecontaminationKPIs, 
   calculateClientIndicators, 
   calculateModelIndicators, 
-  calculateProductIndicators,
   calculateContaminationIndicators,
   generateEvolutionChartData,
   EvolutionChartMode,
@@ -269,13 +267,10 @@ export function DecontaminationManagement({
   };
 
   // Active view tab for indicators & rankings section
-  const [activeIndicatorTab, setActiveIndicatorTab] = useState<'clients' | 'models' | 'products' | 'contamination'>('clients');
+  const [activeIndicatorTab, setActiveIndicatorTab] = useState<'clients' | 'models' | 'contamination'>('clients');
 
   // Client sorting option
   const [clientSortOption, setClientSortOption] = useState<'decon_desc' | 'decon_asc' | 'tempo_desc' | 'tempo_asc'>('decon_desc');
-
-  // Product sorting option
-  const [productSortOption, setProductSortOption] = useState<'decon_desc' | 'decon_asc' | 'tempo_desc' | 'tempo_asc'>('decon_desc');
 
   // Chart mode
   const [chartMode, setChartMode] = useState<EvolutionChartMode>('monthly');
@@ -366,33 +361,6 @@ export function DecontaminationManagement({
   const modelIndicators = useMemo(() => {
     return calculateModelIndicators(dateFilteredOperations);
   }, [dateFilteredOperations]);
-
-  // Compute Product Indicators (Normalized to UPPERCASE)
-  const productIndicators = useMemo(() => {
-    return calculateProductIndicators(dateFilteredOperations);
-  }, [dateFilteredOperations]);
-
-  // Sorted Product Indicators based on selected sorting option
-  const sortedProductIndicators = useMemo(() => {
-    const list = [...productIndicators];
-    if (productSortOption === 'decon_desc') {
-      return list.sort((a, b) => b.completedCount - a.completedCount || b.totalReceived - a.totalReceived);
-    }
-    if (productSortOption === 'decon_asc') {
-      return list.sort((a, b) => a.completedCount - b.completedCount || a.totalReceived - b.totalReceived);
-    }
-    if (productSortOption === 'tempo_desc') {
-      return list.sort((a, b) => (b.avgDeconTime ?? 0) - (a.avgDeconTime ?? 0));
-    }
-    if (productSortOption === 'tempo_asc') {
-      return list.sort((a, b) => {
-        const valA = a.avgDeconTime === null ? 999999 : a.avgDeconTime;
-        const valB = b.avgDeconTime === null ? 999999 : b.avgDeconTime;
-        return valA - valB;
-      });
-    }
-    return list;
-  }, [productIndicators, productSortOption]);
 
   // Compute Contamination Indicators
   const contaminationIndicators = useMemo(() => {
@@ -995,18 +963,6 @@ export function DecontaminationManagement({
             </button>
 
             <button
-              onClick={() => setActiveIndicatorTab('products')}
-              className={`px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center gap-2 ${
-                activeIndicatorTab === 'products'
-                  ? 'bg-purple-600 text-white shadow-md'
-                  : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
-              }`}
-            >
-              <Package className="w-4 h-4" />
-              <span>Indicadores por Produto</span>
-            </button>
-
-            <button
               onClick={() => setActiveIndicatorTab('contamination')}
               className={`px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center gap-2 ${
                 activeIndicatorTab === 'contamination'
@@ -1169,79 +1125,7 @@ export function DecontaminationManagement({
           </div>
         )}
 
-        {/* TAB: Indicadores por Produto */}
-        {activeIndicatorTab === 'products' && (
-          <div className="space-y-6">
-            {/* Sorting Toolbar */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-50 dark:bg-slate-800/40 p-4 rounded-2xl border border-slate-200/80 dark:border-slate-800">
-              <span className="text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300 flex items-center gap-2">
-                <ArrowUpDown className="w-4 h-4 text-purple-600" />
-                Ordenar Tabela de Produtos por:
-              </span>
-              <div className="flex flex-wrap gap-2">
-                {[
-                  { id: 'decon_desc', label: 'Maior Qtde. Descontaminações' },
-                  { id: 'decon_asc', label: 'Menor Qtde. Descontaminações' },
-                  { id: 'tempo_desc', label: 'Maior Tempo Médio' },
-                  { id: 'tempo_asc', label: 'Menor Tempo Médio' }
-                ].map(opt => (
-                  <button
-                    key={opt.id}
-                    onClick={() => setProductSortOption(opt.id as any)}
-                    className={`px-3 py-1.5 rounded-xl text-[11px] font-black uppercase tracking-wider transition-all ${
-                      productSortOption === opt.id
-                        ? 'bg-purple-600 text-white shadow-sm'
-                        : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:border-purple-500'
-                    }`}
-                  >
-                    {opt.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Complete Products Table */}
-            <div className="overflow-x-auto pt-2">
-              <table className="w-full text-left text-xs font-bold">
-                <thead>
-                  <tr className="bg-slate-100 dark:bg-slate-800/80 text-slate-500 uppercase text-[10px] tracking-wider border-b border-slate-200 dark:border-slate-700">
-                    <th className="p-3.5">Produto / Conteúdo Anterior</th>
-                    <th className="p-3.5 text-center">Operações Registradas</th>
-                    <th className="p-3.5 text-center">Tanques Descontaminados</th>
-                    <th className="p-3.5 text-center">Tempo Médio Descontaminação</th>
-                    <th className="p-3.5 text-center">Tempo Médio Espera</th>
-                    <th className="p-3.5 text-center">Lead Time Médio</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-200/60 dark:divide-slate-800">
-                  {sortedProductIndicators.length === 0 ? (
-                    <tr>
-                      <td colSpan={6} className="p-6 text-center text-slate-400">
-                        Nenhum produto registrado no período selecionado.
-                      </td>
-                    </tr>
-                  ) : (
-                    sortedProductIndicators.map(pi => (
-                      <tr key={pi.product} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
-                        <td className="p-3.5 text-slate-900 dark:text-white font-black uppercase flex items-center gap-2">
-                          <Package className="w-3.5 h-3.5 text-purple-500" />
-                          <span>{pi.product}</span>
-                        </td>
-                        <td className="p-3.5 text-center text-slate-700 dark:text-slate-300">{pi.totalReceived}</td>
-                        <td className="p-3.5 text-center text-emerald-600 dark:text-emerald-400 font-black">{pi.completedCount}</td>
-                        <td className="p-3.5 text-center text-purple-600 dark:text-purple-400 font-black">{formatDays(pi.avgDeconTime)}</td>
-                        <td className="p-3.5 text-center text-amber-600 dark:text-amber-400 font-black">{formatDays(pi.avgWaitTime)}</td>
-                        <td className="p-3.5 text-center text-blue-600 dark:text-blue-400 font-black">{formatDays(pi.avgLeadTime)}</td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-
-        {/* TAB 3: Indicadores de Contaminação */}
+        {/* TAB: Indicadores de Contaminação */}
         {activeIndicatorTab === 'contamination' && (
           <div className="space-y-6">
             {/* Contamination Count Summary */}

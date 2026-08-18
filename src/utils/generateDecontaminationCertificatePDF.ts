@@ -381,7 +381,7 @@ export function generateDecontaminationCertificatePDF(
   doc.setTextColor(51, 65, 85);
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(7.5);
-  doc.text(OBJECTIVE_TEXT, margin + 4, currentY + 5.2);
+  doc.text(cert.objective || OBJECTIVE_TEXT, margin + 4, currentY + 5.2);
 
   currentY += 8 + 4;
 

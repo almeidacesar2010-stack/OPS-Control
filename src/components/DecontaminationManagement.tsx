@@ -148,6 +148,7 @@ export function DecontaminationManagement({
   
   // Standalone Certificate Modal & History States
   const [isCertModalOpen, setIsCertModalOpen] = useState(false);
+  const [editingCert, setEditingCert] = useState<DecontaminationCertificate | null>(null);
   const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
   const [certificates, setCertificates] = useState<DecontaminationCertificate[]>([]);
 
@@ -593,7 +594,10 @@ export function DecontaminationManagement({
 
         <div className="flex items-center gap-3 relative z-10 shrink-0 flex-wrap">
           <button
-            onClick={() => setIsCertModalOpen(true)}
+            onClick={() => {
+              setEditingCert(null);
+              setIsCertModalOpen(true);
+            }}
             className="px-5 py-4 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs uppercase tracking-widest rounded-2xl shadow-xl shadow-emerald-500/25 active:scale-95 transition-all flex items-center gap-2.5"
             title="Criar novo certificado de descontaminação e limpeza"
           >
@@ -647,7 +651,6 @@ export function DecontaminationManagement({
           <div className="flex flex-wrap items-center gap-1.5 bg-slate-100 dark:bg-slate-800/80 p-1.5 rounded-2xl border border-slate-200/50 dark:border-slate-700/50">
             {[
               { id: 'all', label: 'Todos' },
-              { id: 'today', label: 'Hoje' },
               { id: 'week', label: 'Semana' },
               { id: 'month', label: 'Mês' },
               { id: 'quarter', label: 'Trimestre' },
@@ -1695,10 +1698,14 @@ export function DecontaminationManagement({
         operations={operations}
       />
 
-      {/* Decontamination Certificate Modal (Standalone) */}
+      {/* Decontamination Certificate Modal (Standalone / Edit Mode) */}
       <DecontaminationCertificateModal
         isOpen={isCertModalOpen}
-        onClose={() => setIsCertModalOpen(false)}
+        onClose={() => {
+          setIsCertModalOpen(false);
+          setEditingCert(null);
+        }}
+        editingCertificate={editingCert}
         allOperations={operations}
         existingCertificates={certificates}
         clients={clients}
@@ -1722,6 +1729,11 @@ export function DecontaminationManagement({
         onDeleteCertificate={handleDeleteCertificate}
         onRequestDelete={onRequestDelete}
         onApproveCertificate={handleApproveCertificate}
+        onEditCertificate={(cert) => {
+          setEditingCert(cert);
+          setIsHistoryModalOpen(false);
+          setIsCertModalOpen(true);
+        }}
       />
     </div>
   );

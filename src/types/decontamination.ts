@@ -41,6 +41,14 @@ export interface VisualChecklistState {
 
 export type CertificateApprovalStatus = 'pending_approval' | 'approved';
 
+export interface CertificateEditLog {
+  editedAt: string; // ISO
+  editedByName: string;
+  editedById?: string;
+  previousApprovalStatus?: CertificateApprovalStatus;
+  changesSummary?: string;
+}
+
 export interface DecontaminationCertificate {
   id: string;
   reportNumber: string; // Padrão: OEG.XXX.AAAA (ex: OEG.001.2026)
@@ -66,9 +74,19 @@ export interface DecontaminationCertificate {
   responsibleName?: string;
   approvedBy?: string;
 
+  // Histórico e Auditoria de Edição
+  lastEditedByName?: string;
+  lastEditedById?: string;
+  lastEditedAt?: string; // ISO
+  lastEditedDate?: string; // YYYY-MM-DD
+  lastEditedTime?: string; // HH:mm
+  editCount?: number;
+  editHistory?: CertificateEditLog[];
+
   // Dados Operacionais
   client: string;
   inspectionLocation: string;
+  objective?: string; // Objetivo descritivo editável
   tanks: TankCertificateItem[];
   tankCount?: number; // Quantidade de tanques
   checklist: VisualChecklistState;

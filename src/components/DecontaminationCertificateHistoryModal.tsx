@@ -21,7 +21,8 @@ import {
   Printer,
   Sparkles,
   MapPin,
-  ClipboardList
+  ClipboardList,
+  Edit3
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { DecontaminationCertificate, CHECKLIST_ITEMS } from '../types/decontamination';
@@ -44,6 +45,7 @@ interface DecontaminationCertificateHistoryModalProps {
   onDeleteCertificate?: (id: string) => Promise<void>;
   onRequestDelete?: (itemType: string, itemId: string, itemCollection: string, itemName: string) => void;
   onApproveCertificate?: (certId: string, approverName: string, approverId: string) => Promise<void>;
+  onEditCertificate?: (cert: DecontaminationCertificate) => void;
 }
 
 export function DecontaminationCertificateHistoryModal({
@@ -57,7 +59,8 @@ export function DecontaminationCertificateHistoryModal({
   logoUrl,
   onDeleteCertificate,
   onRequestDelete,
-  onApproveCertificate
+  onApproveCertificate,
+  onEditCertificate
 }: DecontaminationCertificateHistoryModalProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'approved' | 'pending'>('all');
@@ -500,6 +503,19 @@ export function DecontaminationCertificateHistoryModal({
                                 <span className="hidden xl:inline">Dados</span>
                               </button>
 
+                              {/* Action: Editar Certificado */}
+                              {onEditCertificate && (
+                                <button
+                                  type="button"
+                                  onClick={() => onEditCertificate(cert)}
+                                  className="px-2.5 py-1.5 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/40 dark:hover:bg-amber-900/60 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800/60 rounded-xl text-[10px] font-black uppercase flex items-center gap-1 transition-all active:scale-95 cursor-pointer"
+                                  title="Editar dados deste certificado (reabre formulário preenchido)"
+                                >
+                                  <Edit3 className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                                  <span>Editar</span>
+                                </button>
+                              )}
+
                               {/* Action: Visualizar PDF */}
                               <button
                                 type="button"
@@ -798,11 +814,34 @@ export function DecontaminationCertificateHistoryModal({
                   </p>
                 </div>
               )}
+
+              {/* Histórico e Auditoria de Edições */}
+              {(detailsCert.lastEditedByName || (detailsCert.editHistory && detailsCert.editHistory.length > 0)) && (
+                <div className="p-4 bg-amber-500/10 border border-amber-500/30 rounded-2xl space-y-2">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <span className="text-[10px] font-black uppercase text-amber-700 dark:text-amber-300 flex items-center gap-1.5">
+                      <Edit3 className="w-3.5 h-3.5" />
+                      Auditoria de Edição do Certificado
+                    </span>
+                    <span className="text-[10px] font-black text-amber-600 dark:text-amber-400 bg-amber-100 dark:bg-amber-950/80 px-2 py-0.5 rounded-lg border border-amber-300 dark:border-amber-800">
+                      {detailsCert.editCount ? `${detailsCert.editCount} edição(ões)` : 'Editado'}
+                    </span>
+                  </div>
+                  <div className="text-xs text-slate-700 dark:text-slate-300 space-y-1">
+                    <p>
+                      <strong>Última alteração por:</strong> {detailsCert.lastEditedByName || 'Inspetor OEG'}
+                    </p>
+                    <p>
+                      <strong>Data / Hora da alteração:</strong> {formatCertificateDate(detailsCert.lastEditedDate || detailsCert.lastEditedAt)} {detailsCert.lastEditedTime ? `às ${detailsCert.lastEditedTime}` : ''}
+                    </p>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Footer Actions */}
             <div className="p-6 bg-slate-50 dark:bg-slate-950 border-t border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-3 shrink-0">
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 {detailsCert.approvalStatus !== 'approved' && !detailsCert.approvedByName && canApprove && onApproveCertificate && (
                   <button
                     type="button"
@@ -812,6 +851,22 @@ export function DecontaminationCertificateHistoryModal({
                   >
                     <Check className="w-4 h-4" />
                     <span>{approvingId === detailsCert.id ? 'Aprovando...' : 'Aprovar Certificado'}</span>
+                  </button>
+                )}
+
+                {onEditCertificate && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const certToEdit = detailsCert;
+                      setDetailsCert(null);
+                      onEditCertificate(certToEdit);
+                    }}
+                    className="px-4 py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-black uppercase flex items-center gap-2 transition-all shadow-xs cursor-pointer"
+                    title="Editar campos e atualizar este certificado"
+                  >
+                    <Edit3 className="w-4 h-4" />
+                    <span>Editar Certificado</span>
                   </button>
                 )}
 

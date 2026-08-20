@@ -730,28 +730,31 @@ export function DecontaminationManagement({
         )}
       </div>
 
-      {/* DASHBOARD: 6 MAIN PROMINENT KPI CARDS */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+      {/* DASHBOARD: 6 MAIN KPI CARDS - RITMO MÉDIO AS PRIMARY OPERATIONAL KPI */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4 items-stretch">
         {/* Card 1: Tanques Recebidos (Sky/Indigo) */}
         <motion.div 
           whileHover={{ y: -3 }}
-          className="bg-white dark:bg-slate-900 p-6 rounded-[32px] border-2 border-sky-500/20 dark:border-sky-500/30 shadow-md relative overflow-hidden group"
+          transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+          className="bg-white dark:bg-slate-900 p-4.5 sm:p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-sm relative overflow-hidden group flex flex-col justify-between h-full min-h-[160px]"
         >
-          <div className="flex items-center justify-between mb-4">
-            <span className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
-              Tanques Recebidos
-            </span>
-            <div className="w-12 h-12 bg-sky-500/10 text-sky-600 dark:text-sky-400 rounded-2xl flex items-center justify-center border border-sky-500/20">
-              <Truck className="w-6 h-6" />
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400 truncate pr-1">
+                Tanques Recebidos
+              </span>
+              <div className="w-9 h-9 bg-sky-500/10 text-sky-600 dark:text-sky-400 rounded-xl flex items-center justify-center border border-sky-500/20 shrink-0">
+                <Truck className="w-4.5 h-4.5" />
+              </div>
+            </div>
+
+            <div className="my-1">
+              <span className="text-3xl font-black text-sky-600 dark:text-sky-400 tracking-tight leading-none">
+                {kpis.totalReceived}
+              </span>
             </div>
           </div>
-
-          <div className="flex items-baseline justify-between gap-2">
-            <span className="text-4xl font-black text-sky-600 dark:text-sky-400 tracking-tight">
-              {kpis.totalReceived}
-            </span>
-          </div>
-          <p className="text-[10px] font-bold text-slate-400 mt-2">
+          <p className="text-[11px] font-semibold text-slate-400 dark:text-slate-500 mt-3 leading-snug">
             Tanques que chegaram à base no período
           </p>
         </motion.div>
@@ -759,23 +762,26 @@ export function DecontaminationManagement({
         {/* Card 2: Tanques Descontaminados (Green) */}
         <motion.div 
           whileHover={{ y: -3 }}
-          className="bg-white dark:bg-slate-900 p-6 rounded-[32px] border-2 border-emerald-500/20 dark:border-emerald-500/30 shadow-md relative overflow-hidden group"
+          transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+          className="bg-white dark:bg-slate-900 p-4.5 sm:p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-sm relative overflow-hidden group flex flex-col justify-between h-full min-h-[160px]"
         >
-          <div className="flex items-center justify-between mb-4">
-            <span className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
-              Tanques Descontaminados
-            </span>
-            <div className="w-12 h-12 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 rounded-2xl flex items-center justify-center border border-emerald-500/20">
-              <CheckCircle2 className="w-6 h-6" />
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400 truncate pr-1">
+                Descontaminados
+              </span>
+              <div className="w-9 h-9 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 rounded-xl flex items-center justify-center border border-emerald-500/20 shrink-0">
+                <CheckCircle2 className="w-4.5 h-4.5" />
+              </div>
+            </div>
+
+            <div className="my-1">
+              <span className="text-3xl font-black text-emerald-600 dark:text-emerald-400 tracking-tight leading-none">
+                {kpis.completedCount}
+              </span>
             </div>
           </div>
-
-          <div className="flex items-baseline justify-between gap-2">
-            <span className="text-4xl font-black text-emerald-600 dark:text-emerald-400 tracking-tight">
-              {kpis.completedCount}
-            </span>
-          </div>
-          <p className="text-[10px] font-bold text-slate-400 mt-2">
+          <p className="text-[11px] font-semibold text-slate-400 dark:text-slate-500 mt-3 leading-snug">
             Operações finalizadas no período
           </p>
         </motion.div>
@@ -783,23 +789,26 @@ export function DecontaminationManagement({
         {/* Card 3: Aguardando Descontaminação (Amber) */}
         <motion.div 
           whileHover={{ y: -3 }}
-          className="bg-white dark:bg-slate-900 p-6 rounded-[32px] border-2 border-amber-500/20 dark:border-amber-500/30 shadow-md relative overflow-hidden group"
+          transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+          className="bg-white dark:bg-slate-900 p-4.5 sm:p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-sm relative overflow-hidden group flex flex-col justify-between h-full min-h-[160px]"
         >
-          <div className="flex items-center justify-between mb-4">
-            <span className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
-              Aguardando Descontaminação
-            </span>
-            <div className="w-12 h-12 bg-amber-500/10 text-amber-600 dark:text-amber-400 rounded-2xl flex items-center justify-center border border-amber-500/20">
-              <Clock className="w-6 h-6" />
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400 truncate pr-1">
+                Aguardando
+              </span>
+              <div className="w-9 h-9 bg-amber-500/10 text-amber-600 dark:text-amber-400 rounded-xl flex items-center justify-center border border-amber-500/20 shrink-0">
+                <Clock className="w-4.5 h-4.5" />
+              </div>
+            </div>
+
+            <div className="my-1">
+              <span className="text-3xl font-black text-amber-600 dark:text-amber-400 tracking-tight leading-none">
+                {kpis.waitingCount}
+              </span>
             </div>
           </div>
-
-          <div className="flex items-baseline justify-between gap-2">
-            <span className="text-4xl font-black text-amber-600 dark:text-amber-400 tracking-tight">
-              {kpis.waitingCount}
-            </span>
-          </div>
-          <p className="text-[10px] font-bold text-slate-400 mt-2">
+          <p className="text-[11px] font-semibold text-slate-400 dark:text-slate-500 mt-3 leading-snug">
             Tanques na fila aguardando início
           </p>
         </motion.div>
@@ -807,80 +816,92 @@ export function DecontaminationManagement({
         {/* Card 4: Em Descontaminação (Blue) */}
         <motion.div 
           whileHover={{ y: -3 }}
-          className="bg-white dark:bg-slate-900 p-6 rounded-[32px] border-2 border-blue-500/20 dark:border-blue-500/30 shadow-md relative overflow-hidden group"
+          transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+          className="bg-white dark:bg-slate-900 p-4.5 sm:p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-sm relative overflow-hidden group flex flex-col justify-between h-full min-h-[160px]"
         >
-          <div className="flex items-center justify-between mb-4">
-            <span className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
-              Em Descontaminação
-            </span>
-            <div className="w-12 h-12 bg-blue-500/10 text-blue-600 dark:text-blue-400 rounded-2xl flex items-center justify-center border border-blue-500/20">
-              <RefreshCw className="w-6 h-6 animate-spin-slow" />
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400 truncate pr-1">
+                Em Descontaminação
+              </span>
+              <div className="w-9 h-9 bg-blue-500/10 text-blue-600 dark:text-blue-400 rounded-xl flex items-center justify-center border border-blue-500/20 shrink-0">
+                <RefreshCw className="w-4.5 h-4.5 animate-spin-slow" />
+              </div>
+            </div>
+
+            <div className="my-1">
+              <span className="text-3xl font-black text-blue-600 dark:text-blue-400 tracking-tight leading-none">
+                {kpis.inProgressCount}
+              </span>
             </div>
           </div>
-
-          <div className="flex items-baseline justify-between gap-2">
-            <span className="text-4xl font-black text-blue-600 dark:text-blue-400 tracking-tight">
-              {kpis.inProgressCount}
-            </span>
-          </div>
-          <p className="text-[10px] font-bold text-slate-400 mt-2">
+          <p className="text-[11px] font-semibold text-slate-400 dark:text-slate-500 mt-3 leading-snug">
             Processo de lavagem em andamento
           </p>
         </motion.div>
 
-        {/* Card 5: Tempo Médio de Descontaminação (Purple / Indigo) */}
+        {/* Card 5: Prazo Médio de Conclusão (Purple / Indigo) */}
         <motion.div 
           whileHover={{ y: -3 }}
-          className="bg-white dark:bg-slate-900 p-6 rounded-[32px] border-2 border-purple-500/20 dark:border-purple-500/30 shadow-md relative overflow-hidden group"
+          transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+          className="bg-white dark:bg-slate-900 p-4.5 sm:p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-sm relative overflow-hidden group flex flex-col justify-between h-full min-h-[160px]"
         >
-          <div className="flex items-center justify-between mb-4">
-            <span className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
-              Tempo Médio de Descontaminação
-            </span>
-            <div className="w-12 h-12 bg-purple-500/10 text-purple-600 dark:text-purple-400 rounded-2xl flex items-center justify-center border border-purple-500/20">
-              <Sparkles className="w-6 h-6" />
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400 truncate pr-1">
+                Prazo Médio
+              </span>
+              <div className="w-9 h-9 bg-purple-500/10 text-purple-600 dark:text-purple-400 rounded-xl flex items-center justify-center border border-purple-500/20 shrink-0">
+                <Sparkles className="w-4.5 h-4.5" />
+              </div>
+            </div>
+
+            <div className="my-1">
+              <span className="text-3xl font-black text-purple-600 dark:text-purple-400 tracking-tight leading-none">
+                {formatDays(kpis.avgDeconTimeHours)}
+              </span>
             </div>
           </div>
-
-          <div className="flex items-baseline justify-between gap-2">
-            <span className="text-3xl font-black text-purple-600 dark:text-purple-400 tracking-tight">
-              {formatDays(kpis.avgDeconTimeHours)}
-            </span>
-          </div>
-          <p className="text-[10px] font-bold text-slate-400 mt-2">
+          <p className="text-[11px] font-semibold text-slate-400 dark:text-slate-500 mt-3 leading-snug">
             Início → Finalização (em dias)
           </p>
         </motion.div>
 
-        {/* Card 6: Ritmo Médio (Teal / Cyan) */}
+        {/* Card 6: Ritmo Médio (Teal / Cyan - PRINCIPAL KPI OPERACIONAL DESTAQUE MÁXIMO) */}
         <motion.div 
           whileHover={{ y: -3 }}
-          className="bg-white dark:bg-slate-900 p-6 rounded-[32px] border-2 border-teal-500/20 dark:border-teal-500/30 shadow-md relative overflow-hidden group"
+          transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+          className="bg-gradient-to-br from-teal-500/15 via-white to-teal-500/10 dark:from-teal-950/60 dark:via-slate-900 dark:to-teal-900/40 p-4.5 sm:p-5 rounded-2xl border-2 border-teal-500/80 dark:border-teal-400 ring-2 ring-teal-500/20 dark:ring-teal-400/25 shadow-md shadow-teal-500/10 relative overflow-hidden group flex flex-col justify-between h-full min-h-[160px]"
         >
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-1.5 min-w-0">
-              <span className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400 whitespace-nowrap">
-                Ritmo Médio
-              </span>
-              <div className="relative group/tip shrink-0">
-                <Info className="w-3.5 h-3.5 text-slate-400 hover:text-teal-600 dark:hover:text-teal-400 cursor-help transition-colors" />
-                <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 hidden group-hover/tip:block w-56 p-2.5 bg-slate-950 text-white text-[11px] font-medium rounded-xl shadow-xl border border-slate-800 z-50 pointer-events-none leading-relaxed text-center">
-                  Mostra o ritmo médio de descontaminações por dia útil ao longo de todo o período selecionado.
-                  <div className="absolute left-1/2 -translate-x-1/2 top-full w-0 h-0 border-x-4 border-x-transparent border-t-4 border-t-slate-950"></div>
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-1.5 min-w-0">
+                <span className="text-[11px] font-black uppercase tracking-wider text-teal-800 dark:text-teal-200 whitespace-nowrap">
+                  Ritmo Médio
+                </span>
+                <div className="relative group/tip shrink-0">
+                  <Info className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400 hover:text-teal-700 cursor-help transition-colors" />
+                  <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 hidden group-hover/tip:block w-56 p-2.5 bg-slate-950 text-white text-[11px] font-medium rounded-xl shadow-xl border border-slate-800 z-50 pointer-events-none leading-relaxed text-center">
+                    Mostra o ritmo médio de descontaminações por dia útil ao longo de todo o período selecionado.
+                    <div className="absolute left-1/2 -translate-x-1/2 top-full w-0 h-0 border-x-4 border-x-transparent border-t-4 border-t-slate-950"></div>
+                  </div>
                 </div>
               </div>
+              <div className="w-10 h-10 bg-teal-500/20 text-teal-700 dark:text-teal-200 rounded-xl flex items-center justify-center border border-teal-500/40 shadow-xs shrink-0">
+                <TrendingUp className="w-5 h-5 stroke-[2.5]" />
+              </div>
             </div>
-            <div className="w-12 h-12 bg-teal-500/10 text-teal-600 dark:text-teal-400 rounded-2xl flex items-center justify-center border border-teal-500/20">
-              <TrendingUp className="w-6 h-6" />
-            </div>
-          </div>
 
-          <div className="flex items-baseline justify-between gap-2">
-            <span className="text-3xl font-black text-teal-600 dark:text-teal-400 tracking-tight">
-              {formatDailyAverage(kpis.avgDailyDecon)} <span className="text-xs font-extrabold text-slate-400">tanques/dia útil</span>
-            </span>
+            <div className="flex flex-col">
+              <span className="text-4xl lg:text-[40px] font-black text-teal-600 dark:text-teal-400 tracking-tight leading-none">
+                {formatDailyAverage(kpis.avgDailyDecon)}
+              </span>
+              <span className="text-[10px] font-extrabold uppercase tracking-wider text-teal-700 dark:text-teal-300 mt-1">
+                tanques/dia útil
+              </span>
+            </div>
           </div>
-          <p className="text-[10px] font-bold text-slate-400 mt-2">
+          <p className="text-[11px] font-semibold text-teal-700/90 dark:text-teal-300/90 mt-3 leading-snug">
             Tanques finalizados por dia útil no período
           </p>
         </motion.div>

@@ -84,6 +84,8 @@ export interface AppUser {
   name: string;
   role: UserRole;
   status: 'active' | 'inactive';
+  jobTitle?: string; // Cargo do usuário (ex: Inspetor de Qualidade, Engenheiro Mecânico)
+  signatureUrl?: string; // Assinatura Digital (PNG com fundo transparente / base64)
   passwordHash?: string;
   mustChangePassword?: boolean;
   isFirstLoginCompleted?: boolean;

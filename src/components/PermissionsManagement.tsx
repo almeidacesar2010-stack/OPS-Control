@@ -32,20 +32,25 @@ import {
   Send,
   Sparkles,
   Eye,
-  EyeOff
+  EyeOff,
+  Briefcase,
+  FileSignature,
+  Upload,
+  Image as ImageIcon
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { collection, addDoc, updateDoc, deleteDoc, doc, serverTimestamp } from 'firebase/firestore';
+import { collection, addDoc, updateDoc, deleteDoc, doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../firebase';
 import { AppUser, UserRole, ModuleVisibilityConfig } from '../types';
 import { hashPassword, getUsernameInternalEmail } from '../utils/authUtils';
+import { optimizeSignatureImage } from '../utils/userSignatureHelper';
 
 interface PermissionsManagementProps {
   appUsers: AppUser[];
   moduleVisibility: ModuleVisibilityConfig;
   onUpdateModuleVisibility: (newConfig: ModuleVisibilityConfig) => Promise<void>;
   onUpdateUserRole: (userId: string, newRole: UserRole) => Promise<void>;
-  onUpdateUserFullProfile?: (userId: string, data: { name: string; username: string; email: string; role: UserRole }) => Promise<void>;
+  onUpdateUserFullProfile?: (userId: string, data: { name: string; username: string; email: string; role: UserRole; jobTitle?: string; signatureUrl?: string }) => Promise<void>;
   onDeleteUser?: (userId: string, userName: string) => Promise<void>;
   onRequestDelete?: (itemType: string, itemId: string, itemCollection: string, itemName: string) => void;
   activeRolePreview: UserRole | null;
@@ -123,7 +128,9 @@ export function PermissionsManagement({
     name: '',
     username: '',
     email: '',
-    role: 'user' as UserRole
+    role: 'user' as UserRole,
+    jobTitle: '',
+    signatureUrl: ''
   });
   const [isSavingEdit, setIsSavingEdit] = useState(false);
 
@@ -166,6 +173,8 @@ export function PermissionsManagement({
     username: '',
     email: '',
     role: 'user' as UserRole,
+    jobTitle: '',
+    signatureUrl: '',
     initialPassword: '',
     showPassword: true
   });
@@ -194,7 +203,9 @@ export function PermissionsManagement({
       name: usr.name || '',
       username: usr.username || (usr.email ? usr.email.split('@')[0] : ''),
       email: usr.email || '',
-      role: usr.role || 'user'
+      role: usr.role || 'user',
+      jobTitle: usr.jobTitle || '',
+      signatureUrl: usr.signatureUrl || ''
     });
   };
 
@@ -224,23 +235,36 @@ export function PermissionsManagement({
       }
 
       const emailVal = editForm.email.trim().toLowerCase() || `${cleanUsername}@opscontrol.com`;
+      const cleanSig = (editForm.signatureUrl || '').trim();
+      const cleanJob = editForm.jobTitle.trim();
+
+      const userUpdatePayload = {
+        name: editForm.name.trim(),
+        username: cleanUsername,
+        email: emailVal,
+        role: editForm.role,
+        jobTitle: cleanJob,
+        cargo: cleanJob,
+        signatureUrl: cleanSig,
+        signature: cleanSig,
+        digitalSignature: cleanSig,
+        signatureBase64: cleanSig,
+        userSignature: cleanSig,
+        updatedAt: serverTimestamp()
+      };
 
       if (onUpdateUserFullProfile) {
         await onUpdateUserFullProfile(editingUser.id, {
           name: editForm.name.trim(),
           username: cleanUsername,
           email: emailVal,
-          role: editForm.role
-        });
-      } else {
-        await updateDoc(doc(db, 'users', editingUser.id), {
-          name: editForm.name.trim(),
-          username: cleanUsername,
-          email: emailVal,
           role: editForm.role,
-          updatedAt: serverTimestamp()
+          jobTitle: cleanJob,
+          signatureUrl: cleanSig
         });
       }
+      
+      await setDoc(doc(db, 'users', editingUser.id), userUpdatePayload, { merge: true });
 
       await addDoc(collection(db, 'auditLogs'), {
         userId: currentUserId,
@@ -249,7 +273,7 @@ export function PermissionsManagement({
         action: 'UPDATE',
         entity: 'USER',
         entityId: editingUser.id,
-        details: `Atualizou o perfil do usuário "${editForm.name}" para perfil "${editForm.role.toUpperCase()}".`,
+        details: `Atualizou o perfil do usuário "${editForm.name}" (Cargo: ${editForm.jobTitle || 'N/A'}, Perfil: ${editForm.role.toUpperCase()}).`,
         timestamp: serverTimestamp()
       });
 
@@ -409,12 +433,21 @@ export function PermissionsManagement({
     try {
       const generatedEmail = getUsernameInternalEmail(cleanUsername);
       const passwordHash = await hashPassword(definedPassword);
+      const cleanSig = (accessForm.signatureUrl || '').trim();
+      const cleanJob = accessForm.jobTitle.trim();
 
       const newUserRef = await addDoc(collection(db, 'users'), {
         name: nameVal,
         username: cleanUsername,
         email: generatedEmail,
         role: accessForm.role,
+        jobTitle: cleanJob,
+        cargo: cleanJob,
+        signatureUrl: cleanSig,
+        signature: cleanSig,
+        digitalSignature: cleanSig,
+        signatureBase64: cleanSig,
+        userSignature: cleanSig,
         status: 'active',
         passwordHash,
         mustChangePassword: false,
@@ -430,7 +463,7 @@ export function PermissionsManagement({
         action: 'CREATE',
         entity: 'USER',
         entityId: newUserRef.id,
-        details: `Cadastrou o novo usuário "@${cleanUsername}" (${nameVal} - ${accessForm.role.toUpperCase()}) com senha definida pelo moderador.`,
+        details: `Cadastrou o novo usuário "@${cleanUsername}" (${nameVal} - ${accessForm.jobTitle ? `Cargo: ${accessForm.jobTitle} - ` : ''}${accessForm.role.toUpperCase()}) com senha definida pelo moderador.`,
         timestamp: serverTimestamp()
       });
 
@@ -449,6 +482,8 @@ export function PermissionsManagement({
         username: '',
         email: '',
         role: 'user',
+        jobTitle: '',
+        signatureUrl: '',
         initialPassword: '',
         showPassword: true
       });
@@ -677,6 +712,28 @@ export function PermissionsManagement({
 
                     {/* Metadata Box */}
                     <div className="bg-white dark:bg-slate-900 p-3.5 rounded-2xl border border-slate-200/70 dark:border-slate-700/70 space-y-2 text-xs">
+                      {usr.jobTitle && (
+                        <div className="flex items-center justify-between text-[11px]">
+                          <span className="text-slate-400 font-bold">Cargo:</span>
+                          <span className="font-bold text-slate-800 dark:text-slate-200 truncate max-w-[160px]">
+                            {usr.jobTitle}
+                          </span>
+                        </div>
+                      )}
+
+                      <div className="flex items-center justify-between text-[11px]">
+                        <span className="text-slate-400 font-bold">Assinatura Digital:</span>
+                        {usr.signatureUrl ? (
+                          <span className="text-emerald-600 dark:text-emerald-400 font-black flex items-center gap-1">
+                            <CheckCircle2 className="w-3.5 h-3.5" /> Vinculada (PNG)
+                          </span>
+                        ) : (
+                          <span className="text-slate-400 font-medium italic">
+                            Não cadastrada
+                          </span>
+                        )}
+                      </div>
+
                       <div className="flex items-center justify-between text-[11px]">
                         <span className="text-slate-400 font-bold">1º Acesso Concluído:</span>
                         {isFirstLoginCompleted ? (
@@ -806,50 +863,136 @@ export function PermissionsManagement({
           )}
 
           <form onSubmit={handleCreateUserSubmit} className="space-y-4">
-            <div className="space-y-1.5">
-              <label className="text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
-                <UserIcon className="w-3.5 h-3.5 text-blue-500" />
-                Nome Completo *
-              </label>
-              <input
-                type="text"
-                required
-                value={accessForm.name}
-                onChange={(e) => setAccessForm(prev => ({ ...prev, name: e.target.value }))}
-                placeholder="Ex: Carlos Eduardo Silva"
-                className="w-full px-4 py-3 rounded-2xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <label className="text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                  <UserIcon className="w-3.5 h-3.5 text-blue-500" />
+                  Nome Completo *
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={accessForm.name}
+                  onChange={(e) => setAccessForm(prev => ({ ...prev, name: e.target.value }))}
+                  placeholder="Ex: Carlos Eduardo Silva"
+                  className="w-full px-4 py-3 rounded-2xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                  <Briefcase className="w-3.5 h-3.5 text-indigo-500" />
+                  Cargo / Função
+                </label>
+                <input
+                  type="text"
+                  value={accessForm.jobTitle}
+                  onChange={(e) => setAccessForm(prev => ({ ...prev, jobTitle: e.target.value }))}
+                  placeholder="Ex: Inspetor Técnico / Supervisor"
+                  className="w-full px-4 py-3 rounded-2xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
             </div>
 
-            <div className="space-y-1.5">
-              <label className="text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
-                <UserCheck className="w-3.5 h-3.5 text-purple-500" />
-                Nome de Usuário (Username / Login) *
-              </label>
-              <input
-                type="text"
-                required
-                value={accessForm.username}
-                onChange={(e) => setAccessForm(prev => ({ ...prev, username: e.target.value }))}
-                placeholder="Ex: carlos.silva"
-                className="w-full px-4 py-3 rounded-2xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <label className="text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                  <UserCheck className="w-3.5 h-3.5 text-purple-500" />
+                  Nome de Usuário (Username / Login) *
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={accessForm.username}
+                  onChange={(e) => setAccessForm(prev => ({ ...prev, username: e.target.value }))}
+                  placeholder="Ex: carlos.silva"
+                  className="w-full px-4 py-3 rounded-2xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                  <ShieldCheck className="w-3.5 h-3.5 text-indigo-500" />
+                  Perfil de Acesso
+                </label>
+                <select
+                  value={accessForm.role}
+                  onChange={(e) => setAccessForm(prev => ({ ...prev, role: e.target.value as UserRole }))}
+                  className="w-full px-4 py-3 rounded-2xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="moderator">MODERADOR (Acesso Total e Gestão)</option>
+                  <option value="admin">ADMIN (Acesso Operacional e Leitura)</option>
+                  <option value="user">USUÁRIO (Acesso Restrito)</option>
+                </select>
+              </div>
             </div>
 
-            <div className="space-y-1.5">
-              <label className="text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
-                <ShieldCheck className="w-3.5 h-3.5 text-indigo-500" />
-                Perfil de Acesso
+            {/* Assinatura Digital Upload (PNG com fundo transparente) */}
+            <div className="space-y-1.5 p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/80">
+              <label className="text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300 flex items-center justify-between">
+                <span className="flex items-center gap-1.5">
+                  <FileSignature className="w-3.5 h-3.5 text-emerald-500" />
+                  Assinatura Digital (Imagem PNG com fundo transparente)
+                </span>
+                <span className="text-[10px] text-slate-400 font-normal">Opcional</span>
               </label>
-              <select
-                value={accessForm.role}
-                onChange={(e) => setAccessForm(prev => ({ ...prev, role: e.target.value as UserRole }))}
-                className="w-full px-4 py-3 rounded-2xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                <option value="moderator">MODERADOR (Acesso Total e Gestão)</option>
-                <option value="admin">ADMIN (Acesso Operacional e Leitura)</option>
-                <option value="user">USUÁRIO (Acesso Restrito)</option>
-              </select>
+
+              {accessForm.signatureUrl ? (
+                <div className="flex items-center justify-between gap-4 p-3 bg-white dark:bg-slate-900 rounded-xl border border-emerald-500/30">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-slate-100 dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 max-w-[140px] max-h-[60px] flex items-center justify-center overflow-hidden">
+                      <img
+                        src={accessForm.signatureUrl}
+                        alt="Assinatura Digital"
+                        className="max-h-12 max-w-full object-contain"
+                      />
+                    </div>
+                    <div>
+                      <span className="text-xs font-black text-emerald-600 dark:text-emerald-400 block">
+                        Assinatura Digital Carregada
+                      </span>
+                      <span className="text-[10px] text-slate-400">
+                        PNG pronta para carimbo em certificados aprovados
+                      </span>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setAccessForm(prev => ({ ...prev, signatureUrl: '' }))}
+                    className="px-2.5 py-1.5 text-xs text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg border border-rose-200 dark:border-rose-800 font-bold transition-all cursor-pointer"
+                  >
+                    Remover
+                  </button>
+                </div>
+              ) : (
+                <div>
+                  <label className="flex flex-col items-center justify-center p-4 border-2 border-dashed border-slate-300 dark:border-slate-700 hover:border-blue-500 rounded-2xl cursor-pointer bg-white/60 dark:bg-slate-900/60 hover:bg-blue-50/20 transition-all">
+                    <Upload className="w-6 h-6 text-slate-400 mb-1" />
+                    <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                      Clique para selecionar a imagem da assinatura
+                    </span>
+                    <span className="text-[10px] text-slate-400 mt-0.5">
+                      Recomendado: Formato PNG com fundo transparente (Máx. 2MB)
+                    </span>
+                    <input
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp"
+                      className="hidden"
+                      onChange={async (e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          try {
+                            const optimized = await optimizeSignatureImage(file);
+                            setAccessForm(prev => ({ ...prev, signatureUrl: optimized }));
+                          } catch (err: any) {
+                            setAccessError(err?.message || 'Erro ao processar imagem da assinatura.');
+                          }
+                        }
+                      }}
+                    />
+                  </label>
+                </div>
+              )}
             </div>
 
             {/* DEFINIR SENHA INICIAL */}
@@ -1119,48 +1262,134 @@ export function PermissionsManagement({
               </div>
 
               <form onSubmit={handleSaveEditUserSubmit} className="space-y-4">
-                <div className="space-y-1.5">
-                  <label className="text-xs font-black uppercase text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
-                    <UserIcon className="w-3.5 h-3.5 text-blue-500" />
-                    Nome Completo
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={editForm.name}
-                    onChange={(e) => setEditForm(prev => ({ ...prev, name: e.target.value }))}
-                    className="w-full px-4 py-3 rounded-2xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-black uppercase text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                      <UserIcon className="w-3.5 h-3.5 text-blue-500" />
+                      Nome Completo
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={editForm.name}
+                      onChange={(e) => setEditForm(prev => ({ ...prev, name: e.target.value }))}
+                      className="w-full px-4 py-3 rounded-2xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-black uppercase text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                      <Briefcase className="w-3.5 h-3.5 text-indigo-500" />
+                      Cargo / Função
+                    </label>
+                    <input
+                      type="text"
+                      value={editForm.jobTitle}
+                      onChange={(e) => setEditForm(prev => ({ ...prev, jobTitle: e.target.value }))}
+                      placeholder="Ex: Inspetor Técnico"
+                      className="w-full px-4 py-3 rounded-2xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
                 </div>
 
-                <div className="space-y-1.5">
-                  <label className="text-xs font-black uppercase text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
-                    <UserCheck className="w-3.5 h-3.5 text-purple-500" />
-                    Nome de Usuário (Username)
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={editForm.username}
-                    onChange={(e) => setEditForm(prev => ({ ...prev, username: e.target.value }))}
-                    className="w-full px-4 py-3 rounded-2xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-black uppercase text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                      <UserCheck className="w-3.5 h-3.5 text-purple-500" />
+                      Nome de Usuário (Username)
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={editForm.username}
+                      onChange={(e) => setEditForm(prev => ({ ...prev, username: e.target.value }))}
+                      className="w-full px-4 py-3 rounded-2xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-black uppercase text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                      <ShieldCheck className="w-3.5 h-3.5 text-indigo-500" />
+                      Perfil de Acesso
+                    </label>
+                    <select
+                      value={editForm.role}
+                      onChange={(e) => setEditForm(prev => ({ ...prev, role: e.target.value as UserRole }))}
+                      className="w-full px-4 py-3 rounded-2xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="moderator">MODERADOR (Acesso Total)</option>
+                      <option value="admin">ADMIN (Acesso Operacional)</option>
+                      <option value="user">USUÁRIO (Acesso Restrito)</option>
+                    </select>
+                  </div>
                 </div>
 
-                <div className="space-y-1.5">
-                  <label className="text-xs font-black uppercase text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
-                    <ShieldCheck className="w-3.5 h-3.5 text-indigo-500" />
-                    Perfil de Acesso
+                {/* Assinatura Digital Upload (PNG com fundo transparente) */}
+                <div className="space-y-1.5 p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/80">
+                  <label className="text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300 flex items-center justify-between">
+                    <span className="flex items-center gap-1.5">
+                      <FileSignature className="w-3.5 h-3.5 text-emerald-500" />
+                      Assinatura Digital (PNG transparente)
+                    </span>
+                    <span className="text-[10px] text-slate-400 font-normal">Opcional</span>
                   </label>
-                  <select
-                    value={editForm.role}
-                    onChange={(e) => setEditForm(prev => ({ ...prev, role: e.target.value as UserRole }))}
-                    className="w-full px-4 py-3 rounded-2xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="moderator">MODERADOR (Acesso Total)</option>
-                    <option value="admin">ADMIN (Acesso Operacional)</option>
-                    <option value="user">USUÁRIO (Acesso Restrito)</option>
-                  </select>
+
+                  {editForm.signatureUrl ? (
+                    <div className="flex items-center justify-between gap-4 p-3 bg-white dark:bg-slate-900 rounded-xl border border-emerald-500/30">
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 bg-slate-100 dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 max-w-[140px] max-h-[60px] flex items-center justify-center overflow-hidden">
+                          <img
+                            src={editForm.signatureUrl}
+                            alt="Assinatura Digital"
+                            className="max-h-12 max-w-full object-contain"
+                          />
+                        </div>
+                        <div>
+                          <span className="text-xs font-black text-emerald-600 dark:text-emerald-400 block">
+                            Assinatura Vinculada
+                          </span>
+                          <span className="text-[10px] text-slate-400">
+                            Usada em certificados aprovados por este usuário
+                          </span>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setEditForm(prev => ({ ...prev, signatureUrl: '' }))}
+                        className="px-2.5 py-1.5 text-xs text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg border border-rose-200 dark:border-rose-800 font-bold transition-all cursor-pointer"
+                      >
+                        Remover
+                      </button>
+                    </div>
+                  ) : (
+                    <div>
+                      <label className="flex flex-col items-center justify-center p-4 border-2 border-dashed border-slate-300 dark:border-slate-700 hover:border-blue-500 rounded-2xl cursor-pointer bg-white/60 dark:bg-slate-900/60 hover:bg-blue-50/20 transition-all">
+                        <Upload className="w-6 h-6 text-slate-400 mb-1" />
+                        <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                          Clique para atualizar a imagem da assinatura
+                        </span>
+                        <span className="text-[10px] text-slate-400 mt-0.5">
+                          Recomendado: Formato PNG com fundo transparente (Máx. 2MB)
+                        </span>
+                        <input
+                          type="file"
+                          accept="image/png,image/jpeg,image/webp"
+                          className="hidden"
+                          onChange={async (e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              try {
+                                const optimized = await optimizeSignatureImage(file);
+                                setEditForm(prev => ({ ...prev, signatureUrl: optimized }));
+                              } catch (err: any) {
+                                setSaveError(err?.message || 'Erro ao processar imagem da assinatura.');
+                              }
+                            }
+                          }}
+                        />
+                      </label>
+                    </div>
+                  )}
                 </div>
 
                 <div className="p-3 rounded-2xl bg-slate-100 dark:bg-slate-800/80 text-[11px] text-slate-500 dark:text-slate-400">

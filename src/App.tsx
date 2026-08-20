@@ -97,7 +97,8 @@ import {
   Eye,
   Printer,
   Droplet,
-  KeyRound
+  KeyRound,
+  FileSignature
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from './lib/utils';
@@ -112,6 +113,7 @@ import { PermissionsManagement } from './components/PermissionsManagement';
 import { FirstLoginModal } from './components/FirstLoginModal';
 import { ChangePasswordModal } from './components/ChangePasswordModal';
 import { hashPassword, findUserByUsernameOrEmail, getUsernameInternalEmail } from './utils/authUtils';
+import { optimizeSignatureImage, saveUserProfileData } from './utils/userSignatureHelper';
 import { DeleteRequestModal } from './components/DeleteRequestModal';
 import { DeletionRequest, ModuleVisibilityConfig, UserRole, AppUser } from './types';
 
@@ -627,7 +629,12 @@ function AppContent() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalType, setModalType] = useState<'os' | 'client' | 'access' | 'equipment'>('os');
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [profileForm, setProfileForm] = useState({ name: '', username: '' });
+  const [profileForm, setProfileForm] = useState({ 
+    name: '', 
+    username: '',
+    jobTitle: '',
+    signatureUrl: ''
+  });
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
   const [editingUsername, setEditingUsername] = useState('');
   const [isSeeding, setIsSeeding] = useState(false);
@@ -662,8 +669,10 @@ function AppContent() {
     password: ''
   });
 
-  const currentUserInfo = appUsers.find(u => u.id === user?.uid);
-  const currentUserName = currentUserInfo?.name || user?.displayName || user?.email || '';
+  const currentUserInfo = appUsers.find(u => u.id === user?.uid || (u as any).uid === user?.uid || (user?.email && u.email?.toLowerCase() === user.email.toLowerCase()));
+  const currentUserName = profileForm.name || currentUserInfo?.name || user?.displayName || user?.email?.split('@')[0] || '';
+  const currentUserSignatureUrl = profileForm.signatureUrl || currentUserInfo?.signatureUrl || (currentUserInfo as any)?.signature || (currentUserInfo as any)?.digitalSignature || (currentUserInfo as any)?.signatureBase64 || undefined;
+  const currentUserJobTitle = profileForm.jobTitle || currentUserInfo?.jobTitle || (currentUserInfo as any)?.cargo || undefined;
 
   // Form States
   const [formData, setFormData] = useState({
@@ -979,7 +988,9 @@ function AppContent() {
         setCurrentUserRole(role);
         setProfileForm({
           name: data.name || '',
-          username: data.username || user.email?.split('@')[0] || ''
+          username: data.username || user.email?.split('@')[0] || '',
+          jobTitle: data.jobTitle || data.cargo || '',
+          signatureUrl: data.signatureUrl || data.signature || data.digitalSignature || data.signatureBase64 || ''
         });
       } else {
         // If document doesn't exist under user.uid, try to heal by looking up by email
@@ -1026,18 +1037,13 @@ function AppContent() {
       }
     });
 
-    // Admin-only Users Listener
-    let unsubUsers = () => {};
-    const isModerator = currentUserRole === 'moderator' || user.email === "almeidacesar2010@gmail.com";
-    if (isModerator) {
-      console.log("Setting up admin-only users listener...");
-      unsubUsers = onSnapshot(collection(db, 'users'), (snapshot) => {
-        console.log(`Received ${snapshot.docs.length} users from Firestore`);
-        setAppUsers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as AppUser[]);
-      }, (error) => {
-        console.error("Users listener error:", error);
-      });
-    }
+    // Users Listener for all users (to keep signatures, job titles, and names up to date)
+    const unsubUsers = onSnapshot(collection(db, 'users'), (snapshot) => {
+      console.log(`Received ${snapshot.docs.length} users from Firestore`);
+      setAppUsers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as AppUser[]);
+    }, (error) => {
+      console.error("Users listener error:", error);
+    });
 
     return () => {
       unsubUser();
@@ -3053,18 +3059,27 @@ const generatePDF = (order: any) => {
 
   const handleUpdateUserFullProfile = async (
     userId: string,
-    data: { name: string; username: string; email: string; role: UserRole; password?: string }
+    data: { name: string; username: string; email: string; role: UserRole; password?: string; jobTitle?: string; signatureUrl?: string }
   ) => {
     if (!user) return;
     try {
       let cleanUsername = data.username.trim();
       if (cleanUsername.startsWith('@')) cleanUsername = cleanUsername.slice(1);
+      const cleanSig = (data.signatureUrl || '').trim();
+      const cleanJob = (data.jobTitle || '').trim();
 
       const updateData: any = {
         name: data.name.trim(),
         username: cleanUsername,
         email: data.email.trim(),
         role: data.role,
+        jobTitle: cleanJob,
+        cargo: cleanJob,
+        signatureUrl: cleanSig,
+        signature: cleanSig,
+        digitalSignature: cleanSig,
+        signatureBase64: cleanSig,
+        userSignature: cleanSig,
         updatedAt: serverTimestamp()
       };
 
@@ -3073,7 +3088,18 @@ const generatePDF = (order: any) => {
         updateData.plainPassword = data.password.trim();
       }
 
-      await updateDoc(doc(db, 'users', userId), updateData);
+      await setDoc(doc(db, 'users', userId), updateData, { merge: true });
+
+      setAppUsers(prev => prev.map(u => u.id === userId ? {
+        ...u,
+        name: data.name.trim(),
+        username: cleanUsername,
+        email: data.email.trim(),
+        role: data.role,
+        jobTitle: cleanJob,
+        cargo: cleanJob,
+        signatureUrl: cleanSig
+      } : u));
 
       await addAuditLog(
         'UPDATE',
@@ -4721,6 +4747,8 @@ const generatePDF = (order: any) => {
                   userRole={effectiveRole}
                   currentUserName={currentUserName}
                   currentUserId={user?.uid || ''}
+                  currentUserSignatureUrl={currentUserSignatureUrl}
+                  currentUserJobTitle={currentUserJobTitle}
                   logoUrl={logoUrl || undefined}
                   onSaveOperation={handleSaveDecontaminationOperation}
                   onDeleteOperation={handleDeleteDecontaminationOperation}
@@ -5514,30 +5542,110 @@ const generatePDF = (order: any) => {
                                 />
                               </div>
                             </div>
+                            <div className="space-y-2">
+                              <label className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Cargo / Função</label>
+                              <input
+                                type="text"
+                                value={profileForm.jobTitle}
+                                onChange={(e) => setProfileForm({ ...profileForm, jobTitle: e.target.value })}
+                                className="w-full px-6 py-4 bg-slate-50 dark:bg-slate-800 border-2 border-transparent focus:border-blue-500 dark:focus:border-blue-500 rounded-2xl text-sm font-bold transition-all outline-none"
+                                placeholder="Ex: Aprovador / Gestor Operacional"
+                              />
+                            </div>
+                            <div className="space-y-2">
+                              <label className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">
+                                Assinatura Digital (Certificados de Descontaminação)
+                              </label>
+                              {profileForm.signatureUrl ? (
+                                <div className="flex items-center justify-between gap-4 p-4 bg-slate-50 dark:bg-slate-800 rounded-2xl border border-emerald-500/30">
+                                  <div className="flex items-center gap-3">
+                                    <div className="p-2 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700 max-w-[160px] max-h-[60px] flex items-center justify-center overflow-hidden">
+                                      <img
+                                        src={profileForm.signatureUrl}
+                                        alt="Assinatura Vinculada"
+                                        className="max-h-12 max-w-full object-contain"
+                                      />
+                                    </div>
+                                    <div>
+                                      <span className="text-xs font-black text-emerald-600 dark:text-emerald-400 block">
+                                        Assinatura Vinculada
+                                      </span>
+                                      <span className="text-[10px] text-slate-400">
+                                        Será impressa automaticamente no PDF ao aprovar
+                                      </span>
+                                    </div>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => setProfileForm(prev => ({ ...prev, signatureUrl: '' }))}
+                                    className="px-3 py-1.5 text-xs text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-xl border border-rose-200 dark:border-rose-800 font-bold transition-all cursor-pointer"
+                                  >
+                                    Remover
+                                  </button>
+                                </div>
+                              ) : (
+                                <label className="flex flex-col items-center justify-center p-5 border-2 border-dashed border-slate-300 dark:border-slate-700 hover:border-blue-500 rounded-2xl cursor-pointer bg-slate-50/50 dark:bg-slate-800/50 hover:bg-blue-50/20 transition-all">
+                                  <FileSignature className="w-6 h-6 text-slate-400 mb-1" />
+                                  <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                                    Clique para vincular imagem da sua assinatura
+                                  </span>
+                                  <span className="text-[10px] text-slate-400 mt-0.5">
+                                    Formato PNG transparente ou JPEG (Máx. 2MB)
+                                  </span>
+                                  <input
+                                    type="file"
+                                    accept="image/png,image/jpeg,image/webp"
+                                    className="hidden"
+                                    onChange={async (e) => {
+                                      const file = e.target.files?.[0];
+                                      if (file) {
+                                        try {
+                                          const optimized = await optimizeSignatureImage(file);
+                                          setProfileForm(prev => ({ ...prev, signatureUrl: optimized }));
+                                        } catch (err: any) {
+                                          setGlobalError(err?.message || 'Erro ao processar imagem da assinatura.');
+                                        }
+                                      }
+                                    }}
+                                  />
+                                </label>
+                              )}
+                            </div>
                             <button
                               onClick={async () => {
                                 if (!user) return;
                                 setIsSubmitting(true);
                                 try {
-                                  let cleanUsername = profileForm.username.trim();
-                                  if (cleanUsername.startsWith('@')) cleanUsername = cleanUsername.slice(1);
-                                  
-                                  await updateDoc(doc(db, 'users', user.uid), {
-                                    name: profileForm.name,
-                                    username: cleanUsername
-                                  });
+                                  await saveUserProfileData(user.uid, user.email, profileForm);
+
+                                  // Immediate in-memory state sync
+                                  const cleanUsername = profileForm.username.trim().replace(/^@/, '');
+                                  setAppUsers(prev => prev.map(u => {
+                                    if (u.id === user.uid || (user.email && u.email?.toLowerCase() === user.email.toLowerCase())) {
+                                      return {
+                                        ...u,
+                                        name: profileForm.name.trim(),
+                                        username: cleanUsername,
+                                        jobTitle: profileForm.jobTitle.trim(),
+                                        cargo: profileForm.jobTitle.trim(),
+                                        signatureUrl: profileForm.signatureUrl.trim()
+                                      };
+                                    }
+                                    return u;
+                                  }));
+
                                   await addAuditLog('UPDATE', 'USER', user.uid, `Atualizou próprio perfil: ${profileForm.name}`);
-                                  setSuccessMessage('Perfil atualizado com sucesso!');
-                                  setTimeout(() => setSuccessMessage(null), 3000);
-                                } catch (error) {
+                                  setSuccessMessage('Perfil e assinatura salvos com sucesso!');
+                                  setTimeout(() => setSuccessMessage(null), 3500);
+                                } catch (error: any) {
                                   console.error('Error updating profile:', error);
-                                  setGlobalError('Erro ao atualizar perfil');
+                                  setGlobalError(`Erro ao atualizar perfil: ${error?.message || 'Tente novamente'}`);
                                 } finally {
                                   setIsSubmitting(false);
                                 }
                               }}
                               disabled={isSubmitting}
-                              className="w-full py-4 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl font-black text-sm uppercase tracking-widest transition-all shadow-lg shadow-blue-200 dark:shadow-none active:scale-95 disabled:opacity-50"
+                              className="w-full py-4 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl font-black text-sm uppercase tracking-widest transition-all shadow-lg shadow-blue-200 dark:shadow-none active:scale-95 disabled:opacity-50 cursor-pointer"
                             >
                               {isSubmitting ? 'Salvando...' : 'Salvar Perfil'}
                             </button>

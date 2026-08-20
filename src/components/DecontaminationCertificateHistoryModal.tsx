@@ -25,13 +25,17 @@ import {
   Edit3
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { doc, getDoc } from 'firebase/firestore';
+import { db } from '../firebase';
 import { DecontaminationCertificate, CHECKLIST_ITEMS } from '../types/decontamination';
 import { 
   generateDecontaminationCertificatePDF, 
   getCertificatePdfFileName, 
   formatCertificateDate,
-  getLogoBase64
+  getLogoBase64, 
+  getSignatureBase64 
 } from '../utils/generateDecontaminationCertificatePDF';
+import { fetchUserProfileSignature } from '../utils/userSignatureHelper';
 
 interface DecontaminationCertificateHistoryModalProps {
   isOpen: boolean;
@@ -41,10 +45,20 @@ interface DecontaminationCertificateHistoryModalProps {
   userRole?: string;
   currentUserName?: string;
   currentUserId?: string;
+  currentUserSignatureUrl?: string;
+  currentUserJobTitle?: string;
   logoUrl?: string;
   onDeleteCertificate?: (id: string) => Promise<void>;
   onRequestDelete?: (itemType: string, itemId: string, itemCollection: string, itemName: string) => void;
-  onApproveCertificate?: (certId: string, approverName: string, approverId: string) => Promise<void>;
+  onApproveCertificate?: (certId: string, approverName: string, approverId: string) => Promise<{
+    approvedBySignatureUrl?: string;
+    approvedByJobTitle?: string;
+    approvedDate: string;
+    approvedTime: string;
+    approvedAt: string;
+    approvedByName: string;
+    approvedById: string;
+  } | void>;
   onEditCertificate?: (cert: DecontaminationCertificate) => void;
 }
 
@@ -56,6 +70,8 @@ export function DecontaminationCertificateHistoryModal({
   userRole = 'user',
   currentUserName = 'Inspetor Técnico OEG',
   currentUserId = '',
+  currentUserSignatureUrl,
+  currentUserJobTitle,
   logoUrl,
   onDeleteCertificate,
   onRequestDelete,
@@ -122,9 +138,43 @@ export function DecontaminationCertificateHistoryModal({
   const handleDownloadPDF = async (cert: DecontaminationCertificate) => {
     try {
       const logoBase64 = await getLogoBase64(logoUrl);
-      const doc = generateDecontaminationCertificatePDF(cert, logoBase64);
+      let signatureToUse = cert.approvedBySignatureUrl || (cert.approvedById === currentUserId ? currentUserSignatureUrl : undefined);
+
+      if (!signatureToUse && cert.approvedById) {
+        try {
+          const profile = await fetchUserProfileSignature(cert.approvedById, undefined, cert.approvedByName || cert.approvedBy);
+          if (profile.signatureUrl) signatureToUse = profile.signatureUrl;
+        } catch (e) {
+          console.warn('Could not fetch approver signature:', e);
+        }
+      }
+
+      if (!signatureToUse && cert.issuerSignatureUrl) {
+        signatureToUse = cert.issuerSignatureUrl;
+      }
+
+      if (!signatureToUse && cert.issuerId) {
+        try {
+          const profile = await fetchUserProfileSignature(cert.issuerId, undefined, cert.issuerName);
+          if (profile.signatureUrl) signatureToUse = profile.signatureUrl;
+        } catch (e) {
+          console.warn('Could not fetch issuer signature:', e);
+        }
+      }
+
+      if (!signatureToUse && currentUserSignatureUrl) {
+        signatureToUse = currentUserSignatureUrl;
+      }
+
+      const sigBase64 = await getSignatureBase64(signatureToUse);
+      const certToRender = {
+        ...cert,
+        approvedBySignatureUrl: sigBase64 || signatureToUse || cert.approvedBySignatureUrl,
+        issuerSignatureUrl: sigBase64 || signatureToUse || cert.issuerSignatureUrl
+      };
+      const docPdf = generateDecontaminationCertificatePDF(certToRender, logoBase64, sigBase64);
       const fileName = getCertificatePdfFileName(cert);
-      doc.save(fileName);
+      docPdf.save(fileName);
     } catch (err: any) {
       console.error("Erro ao gerar PDF para download:", err);
       setFeedbackNotification({
@@ -140,14 +190,44 @@ export function DecontaminationCertificateHistoryModal({
     setPreviewCert(cert);
     setIsLoadingPreview(true);
     try {
-      if (cert.pdfDataUri) {
-        setPreviewPdfUri(cert.pdfDataUri);
-      } else {
-        const logoBase64 = await getLogoBase64(logoUrl);
-        const doc = generateDecontaminationCertificatePDF(cert, logoBase64);
-        const dataUri = doc.output('datauristring');
-        setPreviewPdfUri(dataUri);
+      const logoBase64 = await getLogoBase64(logoUrl);
+      let signatureToUse = cert.approvedBySignatureUrl || (cert.approvedById === currentUserId ? currentUserSignatureUrl : undefined);
+
+      if (!signatureToUse && cert.approvedById) {
+        try {
+          const profile = await fetchUserProfileSignature(cert.approvedById, undefined, cert.approvedByName || cert.approvedBy);
+          if (profile.signatureUrl) signatureToUse = profile.signatureUrl;
+        } catch (e) {
+          console.warn('Could not fetch approver signature for preview:', e);
+        }
       }
+
+      if (!signatureToUse && cert.issuerSignatureUrl) {
+        signatureToUse = cert.issuerSignatureUrl;
+      }
+
+      if (!signatureToUse && cert.issuerId) {
+        try {
+          const profile = await fetchUserProfileSignature(cert.issuerId, undefined, cert.issuerName);
+          if (profile.signatureUrl) signatureToUse = profile.signatureUrl;
+        } catch (e) {
+          console.warn('Could not fetch issuer signature for preview:', e);
+        }
+      }
+
+      if (!signatureToUse && currentUserSignatureUrl) {
+        signatureToUse = currentUserSignatureUrl;
+      }
+
+      const sigBase64 = await getSignatureBase64(signatureToUse);
+      const certToRender = {
+        ...cert,
+        approvedBySignatureUrl: sigBase64 || signatureToUse || cert.approvedBySignatureUrl,
+        issuerSignatureUrl: sigBase64 || signatureToUse || cert.issuerSignatureUrl
+      };
+      const docPdf = generateDecontaminationCertificatePDF(certToRender, logoBase64, sigBase64);
+      const dataUri = docPdf.output('datauristring');
+      setPreviewPdfUri(dataUri);
     } catch (err: any) {
       console.error("Erro ao preparar visualização do PDF:", err);
       setFeedbackNotification({
@@ -180,16 +260,33 @@ export function DecontaminationCertificateHistoryModal({
     setIsApproving(true);
     setApprovingId(confirmApproveCert.id);
     try {
-      await onApproveCertificate(confirmApproveCert.id, currentUserName, currentUserId);
+      const rawRes = await onApproveCertificate(confirmApproveCert.id, currentUserName, currentUserId);
+      const approvalResult = rawRes && typeof rawRes === 'object' ? rawRes : null;
       const now = new Date();
+
+      let resolvedSig = approvalResult?.approvedBySignatureUrl || currentUserSignatureUrl;
+      let resolvedJob = approvalResult?.approvedByJobTitle || currentUserJobTitle;
+      if (!resolvedSig || !resolvedJob) {
+        try {
+          const profile = await fetchUserProfileSignature(currentUserId, undefined, currentUserName);
+          if (!resolvedSig && profile.signatureUrl) resolvedSig = profile.signatureUrl;
+          if (!resolvedJob && profile.jobTitle) resolvedJob = profile.jobTitle;
+        } catch (e) {
+          console.warn('Profile signature resolution on approval error:', e);
+        }
+      }
+
       const approvedCert: DecontaminationCertificate = {
         ...confirmApproveCert,
         approvalStatus: 'approved',
-        approvedByName: currentUserName,
-        approvedById: currentUserId,
-        approvedDate: now.toISOString().slice(0, 10),
-        approvedTime: now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
-        approvedBy: currentUserName
+        approvedByName: approvalResult?.approvedByName || currentUserName,
+        approvedById: approvalResult?.approvedById || currentUserId,
+        approvedDate: approvalResult?.approvedDate || now.toISOString().slice(0, 10),
+        approvedTime: approvalResult?.approvedTime || now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+        approvedAt: approvalResult?.approvedAt || now.toISOString(),
+        approvedBy: approvalResult?.approvedByName || currentUserName,
+        approvedByJobTitle: resolvedJob || confirmApproveCert.approvedByJobTitle,
+        approvedBySignatureUrl: resolvedSig || confirmApproveCert.approvedBySignatureUrl
       };
 
       if (detailsCert && detailsCert.id === confirmApproveCert.id) {

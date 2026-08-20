@@ -153,8 +153,25 @@ export async function getLogoBase64(url?: string | null): Promise<string | null>
   const targetUrl = url || '/oeg-logo.svg';
   if (!targetUrl) return null;
 
-  if (targetUrl.startsWith('data:image/')) {
-    return targetUrl;
+  const trimmed = targetUrl.trim();
+  if (trimmed.startsWith('data:image/')) {
+    return trimmed;
+  }
+
+  // If http or relative, try fetch blob first
+  try {
+    const res = await fetch(trimmed);
+    if (res.ok) {
+      const blob = await res.blob();
+      return await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      });
+    }
+  } catch (fetchErr) {
+    // Fallback to Image element
   }
 
   return new Promise((resolve) => {
@@ -180,16 +197,111 @@ export async function getLogoBase64(url?: string | null): Promise<string | null>
         }
       };
       img.onerror = () => resolve(null);
-      img.src = targetUrl;
+      img.src = trimmed;
     } catch {
       resolve(null);
     }
   });
 }
 
+/**
+ * Converts digital signature image (URL, data URI, or raw base64) to clean base64 data URL for jsPDF
+ */
+export async function getSignatureBase64(url?: string | null): Promise<string | null> {
+  if (!url || typeof url !== 'string') return null;
+  let trimmed = url.trim();
+  if (!trimmed) return null;
+
+  // 1. If it's already a full data URI, return immediately
+  if (trimmed.startsWith('data:image/')) {
+    return trimmed;
+  }
+
+  // 2. If it's raw base64 without prefix
+  if (!trimmed.startsWith('http') && !trimmed.startsWith('blob:') && !trimmed.startsWith('data:')) {
+    if (trimmed.length > 50) {
+      return `data:image/png;base64,${trimmed}`;
+    }
+  }
+
+  // 3. If it's an HTTP or blob URL, try fetch blob -> FileReader first
+  if (trimmed.startsWith('http') || trimmed.startsWith('blob:')) {
+    try {
+      const res = await fetch(trimmed, { mode: 'cors' });
+      if (res.ok) {
+        const blob = await res.blob();
+        const dataUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result as string);
+          reader.onerror = reject;
+          reader.readAsDataURL(blob);
+        });
+        if (dataUrl && dataUrl.startsWith('data:image/')) {
+          return dataUrl;
+        }
+      }
+    } catch (e) {
+      // Fetch failed, try Image canvas fallback
+    }
+  }
+
+  // 4. Fallback using Image + Canvas
+  return new Promise((resolve) => {
+    try {
+      const img = new Image();
+      img.crossOrigin = 'Anonymous';
+      const timeout = setTimeout(() => {
+        resolve(trimmed.startsWith('data:') ? trimmed : null);
+      }, 3000);
+
+      img.onload = () => {
+        clearTimeout(timeout);
+        try {
+          const canvas = document.createElement('canvas');
+          const maxW = 400;
+          const maxH = 150;
+          let w = img.naturalWidth || 320;
+          let h = img.naturalHeight || 100;
+
+          if (w > maxW || h > maxH) {
+            const ratio = Math.min(maxW / w, maxH / h);
+            w = Math.round(w * ratio);
+            h = Math.round(h * ratio);
+          }
+
+          canvas.width = Math.max(w, 1);
+          canvas.height = Math.max(h, 1);
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            ctx.imageSmoothingEnabled = true;
+            ctx.imageSmoothingQuality = 'high';
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            resolve(canvas.toDataURL('image/png'));
+          } else {
+            resolve(trimmed.startsWith('data:') ? trimmed : null);
+          }
+        } catch (e) {
+          console.warn('Canvas conversion failed for signature:', e);
+          resolve(trimmed.startsWith('data:') ? trimmed : null);
+        }
+      };
+
+      img.onerror = () => {
+        clearTimeout(timeout);
+        resolve(trimmed.startsWith('data:') ? trimmed : null);
+      };
+
+      img.src = trimmed;
+    } catch {
+      resolve(trimmed.startsWith('data:') ? trimmed : null);
+    }
+  });
+}
+
 export function generateDecontaminationCertificatePDF(
   cert: DecontaminationCertificate,
-  logoBase64?: string | null
+  logoBase64?: string | null,
+  signatureBase64?: string | null
 ): jsPDF {
   const doc = new jsPDF({
     orientation: 'p',
@@ -248,15 +360,16 @@ export function generateDecontaminationCertificatePDF(
     doc.text("oeg", logoX + logoWidth / 2, logoY + 11, { align: 'center' });
   }
 
-  // Document Title (Right-aligned)
+  // Document Title (Centered with both lines in white font)
   doc.setTextColor(255, 255, 255);
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(11);
-  doc.text("CERTIFICADO DE DESCONTAMINAÇÃO", pageWidth - margin - 6, currentY + 9, { align: 'right' });
+  doc.setFontSize(11.5);
+  doc.text("CERTIFICADO DE DESCONTAMINAÇÃO", pageWidth / 2, currentY + 8.5, { align: 'center' });
 
-  doc.setFontSize(9);
-  doc.setTextColor(147, 197, 253); // Light blue
-  doc.text("E LIMPEZA DE TANQUES", pageWidth - margin - 6, currentY + 15.5, { align: 'right' });
+  doc.setTextColor(255, 255, 255);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9.5);
+  doc.text("E LIMPEZA DE TANQUES", pageWidth / 2, currentY + 15.5, { align: 'center' });
 
   currentY += headerHeight + 5;
 
@@ -269,16 +382,17 @@ export function generateDecontaminationCertificatePDF(
   doc.roundedRect(margin, currentY, pageWidth - margin * 2, metaBoxHeight, 1.5, 1.5, 'FD');
 
   const issuerDisplayName = cert.issuerName || cert.responsibleName || 'Inspetor Técnico';
-  const issueDateTimeStr = cert.issueTime 
-    ? `${formatCertificateDate(cert.issueDate)} às ${cert.issueTime}`
-    : formatCertificateDate(cert.issueDate);
+  const issueDateStr = formatCertificateDate(cert.issueDate || cert.issuedAt);
 
   const isApproved = cert.approvalStatus === 'approved';
   const approverDisplayName = isApproved 
-    ? (cert.approvedByName || cert.approvedBy || 'Inspetor Técnico')
+    ? (cert.approvedByName || cert.approvedBy || 'Aprovador')
     : 'Aguardando Aprovação';
-  const approvalDateTimeStr = isApproved
-    ? (cert.approvedTime ? `${formatCertificateDate(cert.approvedDate || cert.issueDate)} às ${cert.approvedTime}` : formatCertificateDate(cert.approvedDate || cert.issueDate))
+  const approverJobTitle = isApproved
+    ? (cert.approvedByJobTitle || 'Aprovador')
+    : '';
+  const approvalDateStr = isApproved
+    ? formatCertificateDate(cert.approvedDate || cert.issueDate || cert.issuedAt)
     : 'Pendente';
 
   // Left Column
@@ -299,7 +413,7 @@ export function generateDecontaminationCertificatePDF(
   doc.text("DATA DE EMISSÃO:", col1X, currentY + 11.5);
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(51, 65, 85);
-  doc.text(issueDateTimeStr, col1X + 32, currentY + 11.5);
+  doc.text(issueDateStr, col1X + 32, currentY + 11.5);
 
   // Row 3 Left
   doc.setFont('helvetica', 'bold');
@@ -356,7 +470,7 @@ export function generateDecontaminationCertificatePDF(
   doc.text("DATA APROVAÇÃO:", col2X, currentY + 23.5);
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(51, 65, 85);
-  doc.text(approvalDateTimeStr, col2X + 32, currentY + 23.5);
+  doc.text(approvalDateStr, col2X + 32, currentY + 23.5);
 
   currentY += metaBoxHeight + 5;
 
@@ -559,7 +673,7 @@ export function generateDecontaminationCertificatePDF(
 
   currentY += sectionHeaderHeight;
 
-  const conclusionBoxHeight = 22;
+  const conclusionBoxHeight = 24;
   doc.setDrawColor(203, 213, 225);
   doc.setFillColor(255, 255, 255);
   doc.rect(margin, currentY, pageWidth - margin * 2, conclusionBoxHeight, 'FD');
@@ -567,64 +681,184 @@ export function generateDecontaminationCertificatePDF(
   if (isApproved) {
     // Green Conforme/Aprovado Badge
     doc.setFillColor(16, 185, 129); // Emerald 500
-    doc.roundedRect(margin + 5, currentY + 4.5, 34, 13, 1.5, 1.5, 'F');
+    doc.roundedRect(margin + 4, currentY + 4, 30, 16, 1.5, 1.5, 'F');
     doc.setTextColor(255, 255, 255);
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(8.5);
-    doc.text("APROVADO", margin + 22, currentY + 12.5, { align: 'center' });
+    doc.text("APROVADO", margin + 19, currentY + 13.5, { align: 'center' });
 
     // Parecer Final & Audit info
-    doc.setFontSize(8);
+    doc.setFontSize(7.5);
     doc.setTextColor(15, 23, 42);
     doc.setFont('helvetica', 'bold');
-    doc.text("PARECER: EQUIPAMENTO(S) APROVADO(S) E DESCONTAMINADO(S)", margin + 43, currentY + 8.5);
+    doc.text("PARECER: EQUIPAMENTO(S) APROVADO(S) E DESCONTAMINADO(S)", margin + 37, currentY + 6.5);
 
-    doc.setFontSize(7);
+    doc.setFontSize(6.5);
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(71, 85, 105);
-    doc.text(`Emissor: ${issuerDisplayName} (${issueDateTimeStr})`, margin + 43, currentY + 13.5);
-    doc.text(`Aprovador: ${approverDisplayName} (${approvalDateTimeStr})`, margin + 43, currentY + 18);
+    doc.text(`Emissor: ${issuerDisplayName} (${issueDateStr})`, margin + 37, currentY + 11);
+    doc.text(`Aprovador: ${approverDisplayName}${approverJobTitle ? ` - ${approverJobTitle}` : ''}`, margin + 37, currentY + 15);
+    doc.text(`Aprovação Digital: ${approvalDateStr}`, margin + 37, currentY + 19);
   } else {
     // Amber Aguardando Aprovação Badge
     doc.setFillColor(217, 119, 6); // Amber 600
-    doc.roundedRect(margin + 5, currentY + 4.5, 34, 13, 1.5, 1.5, 'F');
+    doc.roundedRect(margin + 4, currentY + 4, 30, 16, 1.5, 1.5, 'F');
     doc.setTextColor(255, 255, 255);
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(7.5);
-    doc.text("AGUARDANDO", margin + 22, currentY + 10, { align: 'center' });
-    doc.text("APROVAÇÃO", margin + 22, currentY + 14.5, { align: 'center' });
+    doc.text("AGUARDANDO", margin + 19, currentY + 10.5, { align: 'center' });
+    doc.text("APROVAÇÃO", margin + 19, currentY + 15, { align: 'center' });
 
     // Parecer Final & Emissor info
-    doc.setFontSize(8);
+    doc.setFontSize(7.5);
     doc.setTextColor(15, 23, 42);
     doc.setFont('helvetica', 'bold');
-    doc.text("PARECER: SOLICITAÇÃO DE APROVAÇÃO TÉCNICA EMITIDA", margin + 43, currentY + 8.5);
+    doc.text("PARECER: SOLICITAÇÃO DE APROVAÇÃO TÉCNICA EMITIDA", margin + 37, currentY + 7);
 
-    doc.setFontSize(7);
+    doc.setFontSize(6.5);
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(71, 85, 105);
-    doc.text(`Emissor: ${issuerDisplayName} (${issueDateTimeStr})`, margin + 43, currentY + 13.5);
+    doc.text(`Emissor: ${issuerDisplayName} (${issueDateStr})`, margin + 37, currentY + 12.5);
     doc.setTextColor(217, 119, 6);
     doc.setFont('helvetica', 'bold');
-    doc.text(`Status: Aguardando assinatura de aprovação do responsável técnico.`, margin + 43, currentY + 18);
+    doc.text(`Status: Aguardando aprovação e assinatura digital do aprovador.`, margin + 37, currentY + 17.5);
   }
 
-  // Signature Line
-  const sigWidth = 46;
-  const sigX = pageWidth - margin - sigWidth - 6;
-  doc.setDrawColor(100, 116, 139);
-  doc.setLineWidth(0.3);
-  doc.line(sigX, currentY + 13.5, sigX + sigWidth, currentY + 13.5);
+  // Signature Block
+  const sigBoxWidth = 54;
+  const sigBoxX = pageWidth - margin - sigBoxWidth - 4;
 
-  doc.setFontSize(7);
-  doc.setTextColor(100, 116, 139);
-  doc.setFont('helvetica', 'normal');
-  doc.text(
-    isApproved ? `Assinatura: ${approverDisplayName}` : "Aguardando Assinatura", 
-    sigX + sigWidth / 2, 
-    currentY + 17.5, 
-    { align: 'center' }
-  );
+  const rawSig = signatureBase64 || cert.approvedBySignatureUrl || cert.issuerSignatureUrl;
+  let finalSigData: string | null = null;
+  if (rawSig && typeof rawSig === 'string' && rawSig.trim()) {
+    const trimmed = rawSig.trim();
+    if (!trimmed.startsWith('data:') && !trimmed.startsWith('http')) {
+      finalSigData = `data:image/png;base64,${trimmed}`;
+    } else {
+      finalSigData = trimmed;
+    }
+  }
+
+  if (isApproved) {
+    // If digital signature image is provided, render it centered above the line
+    if (finalSigData) {
+      try {
+        const sigImgW = 38;
+        const sigImgH = 10.5;
+        const sigImgX = sigBoxX + (sigBoxWidth - sigImgW) / 2;
+        const sigImgY = currentY + 1.8;
+
+        let imgFormat = 'PNG';
+        if (finalSigData.startsWith('data:image/jpeg') || finalSigData.startsWith('data:image/jpg')) {
+          imgFormat = 'JPEG';
+        } else if (finalSigData.startsWith('data:image/webp')) {
+          imgFormat = 'WEBP';
+        }
+
+        doc.addImage(finalSigData, imgFormat, sigImgX, sigImgY, sigImgW, sigImgH);
+      } catch (sigErr) {
+        console.warn("Could not embed signature image in PDF:", sigErr);
+        try {
+          const sigImgW = 38;
+          const sigImgH = 10.5;
+          const sigImgX = sigBoxX + (sigBoxWidth - sigImgW) / 2;
+          const sigImgY = currentY + 1.8;
+          (doc as any).addImage(finalSigData, sigImgX, sigImgY, sigImgW, sigImgH);
+        } catch (fallbackErr) {
+          console.warn("Secondary signature embedding failed:", fallbackErr);
+        }
+      }
+    }
+
+    // Signature Line
+    doc.setDrawColor(71, 85, 105);
+    doc.setLineWidth(0.3);
+    doc.line(sigBoxX, currentY + 13, sigBoxX + sigBoxWidth, currentY + 13);
+
+    // Signer Full Name
+    doc.setFontSize(6.8);
+    doc.setTextColor(15, 23, 42);
+    doc.setFont('helvetica', 'bold');
+    doc.text(approverDisplayName, sigBoxX + sigBoxWidth / 2, currentY + 16.5, { align: 'center' });
+
+    // Signer Cargo / Job Title
+    doc.setFontSize(5.8);
+    doc.setTextColor(71, 85, 105);
+    doc.setFont('helvetica', 'normal');
+    doc.text(approverJobTitle || 'Aprovador', sigBoxX + sigBoxWidth / 2, currentY + 19.5, { align: 'center' });
+
+    // Digital Signature Timestamp Tag
+    doc.setFontSize(5.2);
+    doc.setTextColor(16, 185, 129); // Emerald
+    doc.setFont('helvetica', 'bold');
+    doc.text(`✓ ASSINADO DIGITALMENTE`, sigBoxX + sigBoxWidth / 2, currentY + 22.5, { align: 'center' });
+  } else if (finalSigData) {
+    // Certificate emitted with linked issuer signature, awaiting homologation
+    try {
+      const sigImgW = 38;
+      const sigImgH = 10.5;
+      const sigImgX = sigBoxX + (sigBoxWidth - sigImgW) / 2;
+      const sigImgY = currentY + 1.8;
+
+      let imgFormat: 'PNG' | 'JPEG' | 'WEBP' = 'PNG';
+      if (finalSigData.startsWith('data:image/jpeg') || finalSigData.startsWith('data:image/jpg')) {
+        imgFormat = 'JPEG';
+      } else if (finalSigData.startsWith('data:image/webp')) {
+        imgFormat = 'WEBP';
+      }
+
+      doc.addImage(finalSigData, imgFormat, sigImgX, sigImgY, sigImgW, sigImgH);
+    } catch (sigErr) {
+      console.warn("Could not embed issuer signature image in PDF:", sigErr);
+      try {
+        const sigImgW = 38;
+        const sigImgH = 10.5;
+        const sigImgX = sigBoxX + (sigBoxWidth - sigImgW) / 2;
+        const sigImgY = currentY + 1.8;
+        (doc as any).addImage(finalSigData, sigImgX, sigImgY, sigImgW, sigImgH);
+      } catch (fallbackErr) {
+        console.warn("Secondary issuer signature embedding failed:", fallbackErr);
+      }
+    }
+
+    // Signature Line
+    doc.setDrawColor(71, 85, 105);
+    doc.setLineWidth(0.3);
+    doc.line(sigBoxX, currentY + 13, sigBoxX + sigBoxWidth, currentY + 13);
+
+    // Emissor Full Name
+    doc.setFontSize(6.8);
+    doc.setTextColor(15, 23, 42);
+    doc.setFont('helvetica', 'bold');
+    doc.text(issuerDisplayName, sigBoxX + sigBoxWidth / 2, currentY + 16.5, { align: 'center' });
+
+    // Emissor Cargo / Job Title
+    doc.setFontSize(5.8);
+    doc.setTextColor(71, 85, 105);
+    doc.setFont('helvetica', 'normal');
+    doc.text(cert.issuerJobTitle || 'Inspetor Técnico OEG', sigBoxX + sigBoxWidth / 2, currentY + 19.5, { align: 'center' });
+
+    // Status Tag
+    doc.setFontSize(5.2);
+    doc.setTextColor(217, 119, 6); // Amber
+    doc.setFont('helvetica', 'bold');
+    doc.text(`EMISSÃO TÉCNICA ASSINADA`, sigBoxX + sigBoxWidth / 2, currentY + 22.5, { align: 'center' });
+  } else {
+    // Pending approval state without signature
+    doc.setDrawColor(203, 213, 225);
+    doc.setLineWidth(0.3);
+    doc.line(sigBoxX, currentY + 13, sigBoxX + sigBoxWidth, currentY + 13);
+
+    doc.setFontSize(6.5);
+    doc.setTextColor(148, 163, 184);
+    doc.setFont('helvetica', 'normal');
+    doc.text("Aguardando Assinatura Digital", sigBoxX + sigBoxWidth / 2, currentY + 17.5, { align: 'center' });
+
+    doc.setFontSize(5.2);
+    doc.setTextColor(217, 119, 6);
+    doc.setFont('helvetica', 'bold');
+    doc.text("PENDENTE DE APROVAÇÃO", sigBoxX + sigBoxWidth / 2, currentY + 21, { align: 'center' });
+  }
 
   return doc;
 }

@@ -51,7 +51,7 @@ import {
 import { format, parseISO } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { motion, AnimatePresence } from 'motion/react';
-import { collection, addDoc, setDoc, deleteDoc, doc, onSnapshot, query, orderBy } from 'firebase/firestore';
+import { collection, addDoc, setDoc, deleteDoc, doc, getDoc, getDocs, where, onSnapshot, query, orderBy } from 'firebase/firestore';
 import { db } from '../firebase';
 
 import { FleetEquipment } from '../types/fleet';
@@ -84,6 +84,7 @@ import { DecontaminationModal } from './DecontaminationModal';
 import { TankHistoryModal } from './TankHistoryModal';
 import { DecontaminationCertificateModal } from './DecontaminationCertificateModal';
 import { DecontaminationCertificateHistoryModal } from './DecontaminationCertificateHistoryModal';
+import { fetchUserProfileSignature } from '../utils/userSignatureHelper';
 
 interface DecontaminationManagementProps {
   operations: DecontaminationOperation[];
@@ -92,6 +93,8 @@ interface DecontaminationManagementProps {
   userRole?: UserRole;
   currentUserName?: string;
   currentUserId?: string;
+  currentUserSignatureUrl?: string;
+  currentUserJobTitle?: string;
   logoUrl?: string;
   onSaveOperation: (operation: Partial<DecontaminationOperation>) => Promise<void>;
   onDeleteOperation: (id: string) => Promise<void>;
@@ -135,6 +138,8 @@ export function DecontaminationManagement({
   userRole = 'user',
   currentUserName = 'Inspetor Técnico OEG',
   currentUserId = '',
+  currentUserSignatureUrl,
+  currentUserJobTitle,
   logoUrl,
   onSaveOperation,
   onDeleteOperation,
@@ -244,7 +249,21 @@ export function DecontaminationManagement({
       const approvedTime = format(now, 'HH:mm');
       const approvedAt = now.toISOString();
 
-      const updateData = {
+      let approvedByJobTitle: string | undefined = currentUserJobTitle || undefined;
+      let approvedBySignatureUrl: string | undefined = currentUserSignatureUrl || undefined;
+
+      // Robustly retrieve approver's profile signature and job title from Firestore
+      if (!approvedBySignatureUrl || !approvedByJobTitle) {
+        try {
+          const profileInfo = await fetchUserProfileSignature(approverId, undefined, approverName);
+          if (!approvedBySignatureUrl && profileInfo.signatureUrl) approvedBySignatureUrl = profileInfo.signatureUrl;
+          if (!approvedByJobTitle && profileInfo.jobTitle) approvedByJobTitle = profileInfo.jobTitle;
+        } catch (err) {
+          console.warn('Could not fetch approver user details from profile:', err);
+        }
+      }
+
+      const updateData: any = {
         approvalStatus: 'approved' as const,
         approvedByName: approverName,
         approvedById: approverId,
@@ -255,12 +274,25 @@ export function DecontaminationManagement({
         updatedAt: approvedAt
       };
 
+      if (approvedByJobTitle) updateData.approvedByJobTitle = approvedByJobTitle;
+      if (approvedBySignatureUrl) updateData.approvedBySignatureUrl = approvedBySignatureUrl;
+
       await setDoc(doc(db, 'decontaminationCertificates', certId), updateData, { merge: true });
 
       setCertificates(prev => prev.map(c => c.id === certId ? {
         ...c,
         ...updateData
       } : c));
+
+      return {
+        approvedByJobTitle,
+        approvedBySignatureUrl,
+        approvedDate,
+        approvedTime,
+        approvedAt,
+        approvedByName: approverName,
+        approvedById: approverId
+      };
     } catch (e) {
       console.error('Error approving certificate:', e);
       throw e;
@@ -1711,6 +1743,8 @@ export function DecontaminationManagement({
         clients={clients}
         currentUserName={currentUserName}
         currentUserId={currentUserId}
+        currentUserSignatureUrl={currentUserSignatureUrl}
+        currentUserJobTitle={currentUserJobTitle}
         userRole={userRole}
         logoUrl={logoUrl}
         onSaveCertificate={handleSaveCertificate}
@@ -1725,6 +1759,8 @@ export function DecontaminationManagement({
         userRole={userRole}
         currentUserName={currentUserName}
         currentUserId={currentUserId}
+        currentUserSignatureUrl={currentUserSignatureUrl}
+        currentUserJobTitle={currentUserJobTitle}
         logoUrl={logoUrl}
         onDeleteCertificate={handleDeleteCertificate}
         onRequestDelete={onRequestDelete}

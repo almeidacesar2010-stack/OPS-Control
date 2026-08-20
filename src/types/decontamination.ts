@@ -58,6 +58,8 @@ export interface DecontaminationCertificate {
   // Dados do Emissor (Automático e Imutável)
   issuerId?: string;
   issuerName: string; // Nome do usuário logado emissor
+  issuerJobTitle?: string; // Cargo do emissor
+  issuerSignatureUrl?: string; // Imagem da assinatura vinculada do emissor
   issueDate: string; // YYYY-MM-DD
   issueTime?: string; // HH:mm
   issuedAt?: string; // ISO timestamp completo da emissão
@@ -66,6 +68,8 @@ export interface DecontaminationCertificate {
   approvalStatus: CertificateApprovalStatus; // 'pending_approval' | 'approved'
   approvedById?: string;
   approvedByName?: string; // Nome do usuário logado que aprovou
+  approvedByJobTitle?: string; // Cargo do aprovador
+  approvedBySignatureUrl?: string; // Imagem da assinatura digital PNG com fundo transparente
   approvedDate?: string; // YYYY-MM-DD
   approvedTime?: string; // HH:mm
   approvedAt?: string; // ISO timestamp completo da aprovação

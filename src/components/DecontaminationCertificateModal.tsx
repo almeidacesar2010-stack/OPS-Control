@@ -22,10 +22,14 @@ import {
   Edit3,
   RotateCcw,
   History,
-  AlertTriangle
+  AlertTriangle,
+  FileSignature,
+  Upload
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { format } from 'date-fns';
+import { doc, getDoc, updateDoc } from 'firebase/firestore';
+import { db } from '../firebase';
 import { 
   DecontaminationOperation, 
   DecontaminationCertificate, 
@@ -41,8 +45,10 @@ import {
   getNextReportNumber, 
   getCertificatePdfFileName,
   formatCertificateDate,
-  getLogoBase64
+  getLogoBase64,
+  getSignatureBase64
 } from '../utils/generateDecontaminationCertificatePDF';
+import { fetchUserProfileSignature } from '../utils/userSignatureHelper';
 
 const DEFAULT_GENERAL_NOTES = 
   "Inspeção Visual realizada nas partes internas e externas do tanque, acessórios de funcionamento e plaquetas de identificação.\n\n" +
@@ -59,6 +65,8 @@ interface DecontaminationCertificateModalProps {
   clients?: { id: string; razaoSocial: string }[];
   currentUserName: string;
   currentUserId?: string;
+  currentUserSignatureUrl?: string;
+  currentUserJobTitle?: string;
   userRole?: string;
   logoUrl?: string;
   onSaveCertificate: (cert: DecontaminationCertificate) => Promise<void>;
@@ -74,6 +82,8 @@ export function DecontaminationCertificateModal({
   clients = [],
   currentUserName,
   currentUserId,
+  currentUserSignatureUrl,
+  currentUserJobTitle,
   userRole = 'user',
   logoUrl,
   onSaveCertificate
@@ -83,6 +93,29 @@ export function DecontaminationCertificateModal({
   const nowTime = format(new Date(), 'HH:mm');
 
   const isEditing = Boolean(editingCertificate);
+
+  const canDirectApprove = userRole === 'moderator' || userRole === 'admin' || userRole === 'superadmin' || userRole === 'gestor';
+
+  // Resolved user signature state with automatic Firestore fallback from user profile
+  const [resolvedSignatureUrl, setResolvedSignatureUrl] = useState<string | undefined>(currentUserSignatureUrl);
+  const [resolvedJobTitle, setResolvedJobTitle] = useState<string | undefined>(currentUserJobTitle);
+
+  useEffect(() => {
+    if (currentUserSignatureUrl) {
+      setResolvedSignatureUrl(currentUserSignatureUrl);
+    }
+    if (currentUserJobTitle) {
+      setResolvedJobTitle(currentUserJobTitle);
+    }
+
+    // Automatically resolve from user profile
+    fetchUserProfileSignature(currentUserId, undefined, currentUserName)
+      .then(profile => {
+        if (profile.signatureUrl) setResolvedSignatureUrl(profile.signatureUrl);
+        if (profile.jobTitle) setResolvedJobTitle(profile.jobTitle);
+      })
+      .catch(err => console.warn('Could not load user signature in modal:', err));
+  }, [currentUserSignatureUrl, currentUserJobTitle, currentUserId, currentUserName, isOpen]);
 
   // Sequential automatic numbering: OEG.XXX.AAAA
   const [reportNumberData, setReportNumberData] = useState(() => 
@@ -342,6 +375,20 @@ export function DecontaminationCertificateModal({
 
       const isDirectApproved = mode === 'direct_approval';
 
+      // 1. Resolve signature & job title from user profile with robust multi-strategy lookup
+      let sigToUse = resolvedSignatureUrl || currentUserSignatureUrl;
+      let jobTitleToUse = resolvedJobTitle || currentUserJobTitle;
+
+      if (!sigToUse || !jobTitleToUse) {
+        try {
+          const profileInfo = await fetchUserProfileSignature(currentUserId, undefined, currentUserName);
+          if (!sigToUse && profileInfo.signatureUrl) sigToUse = profileInfo.signatureUrl;
+          if (!jobTitleToUse && profileInfo.jobTitle) jobTitleToUse = profileInfo.jobTitle;
+        } catch (err) {
+          console.warn('Direct user signature lookup in modal failed:', err);
+        }
+      }
+
       // Build Certificate object with full audit metadata
       const certObject: DecontaminationCertificate = {
         id: isEditing && editingCertificate ? editingCertificate.id : `cert_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
@@ -352,6 +399,8 @@ export function DecontaminationCertificateModal({
         // Emissor (Mantém emissor original se for edição)
         issuerId: isEditing && editingCertificate ? (editingCertificate.issuerId || currentUserId || '') : (currentUserId || ''),
         issuerName: isEditing && editingCertificate ? (editingCertificate.issuerName || editingCertificate.responsibleName || currentUserName) : (currentUserName || 'Inspetor Técnico OEG'),
+        issuerJobTitle: isEditing && editingCertificate ? (editingCertificate.issuerJobTitle || jobTitleToUse) : (jobTitleToUse || 'Inspetor Técnico OEG'),
+        issuerSignatureUrl: isEditing && editingCertificate ? (editingCertificate.issuerSignatureUrl || sigToUse) : sigToUse,
         issueDate: isEditing && editingCertificate ? editingCertificate.issueDate : currentIsoDate,
         issueTime: isEditing && editingCertificate ? (editingCertificate.issueTime || currentIsoTime) : currentIsoTime,
         issuedAt: isEditing && editingCertificate ? (editingCertificate.issuedAt || editingCertificate.createdAt || nowTimestamp) : nowTimestamp,
@@ -364,6 +413,8 @@ export function DecontaminationCertificateModal({
         approvedDate: isDirectApproved ? currentIsoDate : undefined,
         approvedTime: isDirectApproved ? currentIsoTime : undefined,
         approvedAt: isDirectApproved ? nowTimestamp : undefined,
+        approvedByJobTitle: isDirectApproved ? (jobTitleToUse || 'Aprovador') : undefined,
+        approvedBySignatureUrl: isDirectApproved ? (sigToUse || undefined) : undefined,
 
         // Compatibilidade
         responsibleName: isEditing && editingCertificate ? (editingCertificate.responsibleName || editingCertificate.issuerName || currentUserName) : (currentUserName || 'Inspetor Técnico OEG'),
@@ -410,9 +461,20 @@ export function DecontaminationCertificateModal({
       if (isDirectApproved) {
         // Load site company logo for official PDF header
         const logoBase64 = await getLogoBase64(logoUrl);
+        const sigBase64 = await getSignatureBase64(sigToUse);
 
-        // Generate formatted PDF using official layout with site logo
-        const doc = generateDecontaminationCertificatePDF(certObject, logoBase64);
+        const certToRender: DecontaminationCertificate = {
+          ...certObject,
+          approvedBySignatureUrl: sigBase64 || sigToUse || certObject.approvedBySignatureUrl,
+          issuerSignatureUrl: sigBase64 || sigToUse || certObject.issuerSignatureUrl
+        };
+
+        // Generate formatted PDF using official layout with site logo & signature
+        const doc = generateDecontaminationCertificatePDF(
+          certToRender,
+          logoBase64,
+          sigBase64
+        );
 
         // Save PDF dataURI directly in document for instantaneous preview and audit binding
         const pdfDataUri = doc.output('datauristring');
@@ -466,8 +528,6 @@ export function DecontaminationCertificateModal({
       setIsGenerating(false);
     }
   };
-
-  const canDirectApprove = userRole === 'admin' || userRole === 'moderator';
 
   if (!isOpen) return null;
 
@@ -605,6 +665,53 @@ export function DecontaminationCertificateModal({
                     <span className="text-[10px] text-slate-500 font-normal">
                       (Criado originalmente por: {editingCertificate.issuerName})
                     </span>
+                  )}
+                </div>
+              </div>
+
+              {/* Digital Signature Status Indicator */}
+              <div className="sm:col-span-3">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-3.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl gap-3">
+                  <div className="flex items-center gap-3">
+                    <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
+                      resolvedSignatureUrl || currentUserSignatureUrl
+                        ? 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 border border-emerald-300 dark:border-emerald-800'
+                        : 'bg-amber-100 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 border border-amber-300 dark:border-amber-800'
+                    }`}>
+                      <FileSignature className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-xs font-black uppercase tracking-wider text-slate-800 dark:text-slate-200">
+                          Assinatura Digital do Perfil
+                        </span>
+                        {resolvedSignatureUrl || currentUserSignatureUrl ? (
+                          <span className="px-2 py-0.5 text-[9px] font-black uppercase tracking-wider rounded bg-emerald-100 dark:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 flex items-center gap-1">
+                            <Check className="w-2.5 h-2.5" /> Vinculada Automaticamente
+                          </span>
+                        ) : (
+                          <span className="px-2 py-0.5 text-[9px] font-black uppercase tracking-wider rounded bg-amber-100 dark:bg-amber-900/60 text-amber-700 dark:text-amber-300">
+                            Pendente em Configurações
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                        {resolvedSignatureUrl || currentUserSignatureUrl
+                          ? `A assinatura do seu perfil e o cargo (${resolvedJobTitle || currentUserJobTitle || 'Aprovador'}) serão inseridos automaticamente no PDF ao aprovar.`
+                          : 'A assinatura vinculada no seu perfil ("Configurações > Seu Perfil") é aplicada automaticamente na aprovação.'}
+                      </p>
+                    </div>
+                  </div>
+
+                  {(resolvedSignatureUrl || currentUserSignatureUrl) && (
+                    <div className="flex items-center px-3 py-1.5 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 self-end sm:self-center">
+                      <img 
+                        src={resolvedSignatureUrl || currentUserSignatureUrl} 
+                        alt="Assinatura Digital" 
+                        className="h-7 max-w-[110px] object-contain"
+                        referrerPolicy="no-referrer"
+                      />
+                    </div>
                   )}
                 </div>
               </div>

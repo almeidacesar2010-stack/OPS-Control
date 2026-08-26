@@ -99,16 +99,21 @@ export function getNextReportNumber(
 
 /**
  * Generates exact PDF filename following official company procedure:
- * Format: [NUMERO_RELATORIO] - Limpeza e Descontaminação - [TANQUES] - [MODELOS] - [DATA].pdf
+ * Format: [NUMERO_RELATORIO] - Limpeza e Descontaminação - [TANQUES] - [CAPACIDADE] - [CLIENTE] - [DATA].pdf
  *
- * Rules:
- * 1. Ordenar os números dos tanques em ordem crescente/alfa-numérica (menor número/tag primeiro).
- * 2. Separar os tanques por vírgula (ex: "351311, OEGU920805").
- * 3. Remover o texto "TANQUE DE", exibindo apenas a capacidade/modelo (ex: "1500L").
- * 4. Ordenar também os modelos em ordem crescente e sem duplicidades (ex: "1500L + 5200L").
- * 5. Utilizar o formato de data DD.MM.AAAA (ex: "14.08.2026").
+ * Exemplo:
+ * OEG.008.2026 - Limpeza e Descontaminação - HMHU920449, HMHU920566, HMHU920593 - 5000L - [CLIENTE] - 26.08.2026.pdf
+ * OEG.009.2026 - Limpeza e Descontaminação - ABC123, ABC456 - 1500L - PETROBRAS - 27.08.2026.pdf
+ *
+ * ORDEM OBRIGATÓRIA:
+ * 1. [Nº DO CERTIFICADO] (ex: OEG.008.2026)
+ * 2. [TIPO] (Limpeza e Descontaminação)
+ * 3. [EQUIPAMENTOS] (ex: HMHU920449, HMHU920566, HMHU920593)
+ * 4. [CAPACIDADE] (ex: 5000L)
+ * 5. [CLIENTE] (ex: PETROBRAS - exatamente o cadastrado no sistema, sem abreviar)
+ * 6. [DATA] (ex: 26.08.2026)
  */
-export function getCertificatePdfFileName(cert: DecontaminationCertificate): string {
+export function getCertificatePdfFileName(cert: DecontaminationCertificate, clientOverride?: string): string {
   const reportNum = (cert.reportNumber || 'OEG.001.2026').trim().toUpperCase().replace(/[/\\?%*:|"<>]/g, '-');
   const dateFormatted = formatDateForFileName(cert.issueDate || cert.issuedAt);
   const tanks = cert.tanks || [];
@@ -143,7 +148,12 @@ export function getCertificatePdfFileName(cert: DecontaminationCertificate): str
     modelStr = uniqueModels.join(' + ');
   }
 
-  return `${reportNum} - Limpeza e Descontaminação - ${tanksStr} - ${modelStr} - ${dateFormatted}.pdf`;
+  // Exact client name registered in the system (without abbreviation)
+  const rawClient = (clientOverride || cert.client || '').trim();
+  const clientClean = rawClient ? rawClient.replace(/[/\\?%*:|"<>]/g, '-').trim() : 'CLIENTE';
+
+  // MANDATORY ORDER: [Nº] - Limpeza e Descontaminação - [EQUIPAMENTOS] - [CAPACIDADE] - [CLIENTE] - [DATA].pdf
+  return `${reportNum} - Limpeza e Descontaminação - ${tanksStr} - ${modelStr} - ${clientClean} - ${dateFormatted}.pdf`;
 }
 
 /**

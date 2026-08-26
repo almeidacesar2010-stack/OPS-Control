@@ -268,12 +268,39 @@
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["reportNumber", "client", "status"]
+    },
+    "checklist": {
+      "title": "Operational Checklist",
+      "description": "Represents an independent technical operational checklist for equipment.",
+      "type": "object",
+      "properties": {
+        "checklistType": { "type": "string" },
+        "equipmentFamily": { "type": "string" },
+        "equipmentModel": { "type": "string" },
+        "equipmentTag": { "type": "string" },
+        "clientId": { "type": "string" },
+        "clientName": { "type": "string" },
+        "inspectionDate": { "type": "string", "format": "date-time" },
+        "inspectionLocation": { "type": "string" },
+        "inspectorName": { "type": "string" },
+        "status": { "type": "string", "enum": ["Rascunho", "Em preenchimento", "Concluído", "Reprovado / Com NC"] },
+        "modelType": { "type": "string" },
+        "conforme": { "type": "boolean" },
+        "ncCount": { "type": "number" },
+        "userId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["checklistType", "equipmentFamily", "equipmentTag", "clientName", "inspectionDate", "inspectorName", "status", "userId"]
     }
   },
   "firestore": {
     "/serviceOrders/{osId}": {
       "schema": "serviceOrder",
       "description": "Collection of service orders."
+    },
+    "/checklists/{checklistId}": {
+      "schema": "checklist",
+      "description": "Collection of independent operational checklists."
     },
     "/clients/{clientId}": {
       "schema": "client",

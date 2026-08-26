@@ -1,4 +1,5 @@
 import { Timestamp } from 'firebase/firestore';
+import { OperationalChecklistData, ChecklistModelType } from './checklists';
 
 export type UserRole = 'moderator' | 'admin' | 'user';
 
@@ -7,6 +8,7 @@ export type ModuleKey =
   | 'orders' 
   | 'fleet' 
   | 'decontamination' 
+  | 'checklists'
   | 'clients' 
   | 'equipments' 
   | 'approvals' 
@@ -25,6 +27,7 @@ export type ModuleVisibilityConfig = {
   orders: RoleVisibility;
   fleet: RoleVisibility;
   decontamination: RoleVisibility;
+  checklists: RoleVisibility;
   clients: RoleVisibility;
   equipments: RoleVisibility;
 };
@@ -76,6 +79,17 @@ export interface Client {
   userId: string;
   createdAt: Timestamp;
 }
+
+export interface Equipment {
+  id?: string;
+  tag: string;
+  family: string;
+  subFamily?: string | null;
+  userId?: string;
+  createdAt?: any;
+}
+
+export * from './fleet';
 
 export interface AppUser {
   id: string;
@@ -138,4 +152,6 @@ export interface ServiceOrder {
   rodLockCheck?: InspectionCheck;
   hingeCheck?: InspectionCheck;
   reworkCheck?: InspectionCheck;
+  checklistModel?: ChecklistModelType;
+  checklistData?: OperationalChecklistData;
 }

@@ -67,6 +67,12 @@ service cloud.firestore {
       allow delete: if isAuthenticated() && isModerator();
     }
 
+    match /checklists/{checklistId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated();
+      allow delete: if isAuthenticated() && isModerator();
+    }
+
     match /equipments/{equipmentId} {
       allow read: if isAuthenticated();
       allow create, update: if isAuthenticated();

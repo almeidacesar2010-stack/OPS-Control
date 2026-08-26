@@ -98,7 +98,9 @@ import {
   Printer,
   Droplet,
   KeyRound,
-  FileSignature
+  FileSignature,
+  ClipboardCheck,
+  FileSpreadsheet
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from './lib/utils';
@@ -116,6 +118,12 @@ import { hashPassword, findUserByUsernameOrEmail, getUsernameInternalEmail } fro
 import { optimizeSignatureImage, saveUserProfileData } from './utils/userSignatureHelper';
 import { DeleteRequestModal } from './components/DeleteRequestModal';
 import { DeletionRequest, ModuleVisibilityConfig, UserRole, AppUser } from './types';
+import { ChecklistRenderer } from './components/ChecklistRenderer';
+import { ChecklistsModule } from './components/ChecklistsModule';
+import { ChecklistModal } from './components/ChecklistModal';
+import { generateOperationalChecklistPDF } from './utils/generateChecklistPDF';
+import { CHECKLIST_TEMPLATES, detectChecklistModel, createDefaultChecklistData } from './utils/checklistTemplates';
+import { OperationalChecklistData, ChecklistModelType } from './types/checklists';
 
 // Types
 interface Client {
@@ -170,6 +178,8 @@ interface ServiceOrder {
   rodLockCheck?: InspectionCheck;
   hingeCheck?: InspectionCheck;
   reworkCheck?: InspectionCheck;
+  checklistModel?: ChecklistModelType;
+  checklistData?: OperationalChecklistData;
 }
 
 interface AuditLog {
@@ -525,7 +535,7 @@ const DocInspectionTableRow = ({
 function AppContent() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'orders' | 'fleet' | 'decontamination' | 'clients' | 'equipments' | 'approvals' | 'access' | 'settings' | 'audits'>('decontamination');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'orders' | 'fleet' | 'decontamination' | 'checklists' | 'clients' | 'equipments' | 'approvals' | 'access' | 'settings' | 'audits'>('checklists');
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
   const [orders, setOrders] = useState<ServiceOrder[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
@@ -533,6 +543,9 @@ function AppContent() {
   const [fleetEquipment, setFleetEquipment] = useState<FleetEquipment[]>([]);
   const [fleetHistory, setFleetHistory] = useState<FleetHistoryEntry[]>([]);
   const [decontaminationOperations, setDecontaminationOperations] = useState<DecontaminationOperation[]>([]);
+  const [checklists, setChecklists] = useState<OperationalChecklistData[]>([]);
+  const [isChecklistModalOpen, setIsChecklistModalOpen] = useState(false);
+  const [editingChecklist, setEditingChecklist] = useState<OperationalChecklistData | null>(null);
   const [appUsers, setAppUsers] = useState<AppUser[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [currentUserRole, setCurrentUserRole] = useState<UserRole>('user');
@@ -541,6 +554,7 @@ function AppContent() {
     orders: { moderator: true, admin: false, user: false },
     fleet: { moderator: true, admin: false, user: false },
     decontamination: { moderator: true, admin: true, user: true },
+    checklists: { moderator: true, admin: true, user: true },
     clients: { moderator: true, admin: true, user: false },
     equipments: { moderator: true, admin: true, user: true },
   });
@@ -561,6 +575,7 @@ function AppContent() {
 
   // Authorization helper function
   const isTabAllowed = (tab: string): boolean => {
+    if (tab === 'checklists') return !!moduleVisibility.checklists?.[effectiveRole];
     if (tab === 'decontamination') return !!moduleVisibility.decontamination?.[effectiveRole];
     if (tab === 'dashboard') return !!moduleVisibility.dashboard?.[effectiveRole];
     if (tab === 'orders') return !!moduleVisibility.orders?.[effectiveRole];
@@ -577,9 +592,11 @@ function AppContent() {
   useEffect(() => {
     if (!user) return;
     if (!isTabAllowed(activeTab)) {
-      const fallbackTab = isTabAllowed('decontamination')
-        ? 'decontamination'
-        : (['decontamination', 'equipments', 'clients', 'orders', 'fleet', 'dashboard', 'approvals', 'access', 'settings', 'audits'] as const).find(t => isTabAllowed(t)) || 'decontamination';
+      const fallbackTab = isTabAllowed('checklists')
+        ? 'checklists'
+        : (isTabAllowed('decontamination')
+          ? 'decontamination'
+          : (['checklists', 'decontamination', 'equipments', 'clients', 'orders', 'fleet', 'dashboard', 'approvals', 'access', 'settings', 'audits'] as const).find(t => isTabAllowed(t)) || 'checklists');
       
       if (activeTab !== fallbackTab) {
         setActiveTab(fallbackTab as any);
@@ -601,8 +618,8 @@ function AppContent() {
             setActiveTab(hash as any);
           }
         } else {
-          // Silent block & redirect to allowed decontamination page
-          const fallback = isTabAllowed('decontamination') ? 'decontamination' : 'equipments';
+          // Silent block & redirect to allowed page
+          const fallback = isTabAllowed('checklists') ? 'checklists' : (isTabAllowed('decontamination') ? 'decontamination' : 'equipments');
           setActiveTab(fallback as any);
           window.location.hash = fallback;
         }
@@ -712,6 +729,9 @@ function AppContent() {
     hingeCheck: { status: 'NA', value: '' } as InspectionCheck,
     reworkCheck: { status: 'NA', value: '' } as InspectionCheck,
   });
+
+  const [activeChecklistData, setActiveChecklistData] = useState<OperationalChecklistData | null>(null);
+  const [osFormMode, setOsFormMode] = useState<'checklist' | 'quick'>('checklist');
 
   const [confirmModal, setConfirmModal] = useState<{
     isOpen: boolean;
@@ -906,7 +926,11 @@ function AppContent() {
 
     const unsubVisibility = onSnapshot(doc(db, 'settings', 'moduleVisibility'), (snapshot) => {
       if (snapshot.exists()) {
-        setModuleVisibility(snapshot.data() as ModuleVisibilityConfig);
+        const data = snapshot.data() as ModuleVisibilityConfig;
+        setModuleVisibility({
+          ...data,
+          checklists: data.checklists || { moderator: true, admin: true, user: true }
+        });
       }
     });
 
@@ -919,6 +943,18 @@ function AppContent() {
       }));
     });
 
+    const unsubChecklists = onSnapshot(collection(db, 'checklists'), (snapshot) => {
+      const list = snapshot.docs.map(d => ({ id: d.id, ...d.data() })) as OperationalChecklistData[];
+      setChecklists(list.sort((a, b) => {
+        const tA = a.updatedAt?.toMillis ? a.updatedAt.toMillis() : (a.createdAt?.toMillis ? a.createdAt.toMillis() : 0);
+        const tB = b.updatedAt?.toMillis ? b.updatedAt.toMillis() : (b.createdAt?.toMillis ? b.createdAt.toMillis() : 0);
+        return tB - tA;
+      }));
+    }, (error) => {
+      console.error("Checklists listener error:", error);
+      handleFirestoreError(error, OperationType.GET, 'checklists');
+    });
+
     return () => {
       unsubOrders();
       unsubClients();
@@ -929,6 +965,7 @@ function AppContent() {
       unsubDecontamination();
       unsubVisibility();
       unsubDelReqs();
+      unsubChecklists();
     };
   }, [user, isAuthReady, currentUserRole]);
 
@@ -1314,6 +1351,23 @@ function AppContent() {
         rodLockCheck: formData.rodLockCheck,
         hingeCheck: formData.hingeCheck,
         reworkCheck: formData.reworkCheck,
+        checklistModel: activeChecklistData?.modelType || detectChecklistModel(formData.family, formData.subFamily, formData.equipmentNumber),
+        checklistData: activeChecklistData ? {
+          ...activeChecklistData,
+          equipmentTag: formData.equipmentNumber || activeChecklistData.equipmentTag,
+          clientId: formData.clientId || activeChecklistData.clientId,
+          clientName: (clients.find(c => c.id === formData.clientId)?.razaoSocial || activeChecklistData.clientName || 'N/A'),
+          equipmentType: finalFamily || activeChecklistData.equipmentType,
+          subModel: formData.subFamily || activeChecklistData.subModel || '',
+          status: formData.status,
+          priority: formData.priority,
+          inspectorName: formData.maintenanceTechnician || formData.createdBy || activeChecklistData.inspectorName || currentUserName,
+          approverName: formData.closedBy || activeChecklistData.approverName || '',
+          slingNumber: formData.slingCheck?.value || activeChecklistData.slingNumber || '',
+          slingStatus: formData.slingCheck?.status || activeChecklistData.slingStatus || 'OK',
+          reworkRequired: formData.reworkCheck?.status === 'OK',
+          reworkNotes: formData.reworkCheck?.value || activeChecklistData.reworkNotes || '',
+        } : null,
       };
 
       console.log('Attempting to save order with data:', orderData);
@@ -1822,6 +1876,29 @@ function AppContent() {
       hingeCheck: order.hingeCheck || { status: 'NA', value: '' },
       reworkCheck: order.reworkCheck || { status: 'NA', value: '' },
     });
+
+    const client = clients.find(c => c.id === order.clientId);
+    const clientName = client?.razaoSocial || (order.clientId === 'na' ? 'NÃO DEFINIDO / N/A' : '');
+    const detectedModel = order.checklistModel || detectChecklistModel(order.family, order.subFamily, order.equipmentNumber);
+    const checklistPayload = order.checklistData || createDefaultChecklistData(detectedModel, {
+      equipmentTag: order.equipmentNumber || '',
+      clientId: order.clientId || '',
+      clientName: clientName,
+      equipmentType: order.family || '',
+      subModel: order.subFamily || '',
+      inspectionDate: order.startDate?.toDate ? format(order.startDate.toDate(), 'yyyy-MM-dd') : format(new Date(), 'yyyy-MM-dd'),
+      expirationDate: order.endDate?.toDate ? format(order.endDate.toDate(), 'yyyy-MM-dd') : '',
+      inspectorName: order.maintenanceTechnician || order.createdBy || currentUserName,
+      approverName: order.closedBy || '',
+      status: order.status || 'Em Manutenção',
+      priority: order.priority || 'Média',
+      slingNumber: order.slingCheck?.value || '',
+      slingStatus: order.slingCheck?.status || 'OK',
+      reworkRequired: order.reworkCheck?.status === 'OK',
+      reworkNotes: order.reworkCheck?.value || ''
+    });
+    setActiveChecklistData(checklistPayload);
+
     setOsModalTab(initialTab);
     setModalType('os');
     setAccessError(null);
@@ -1861,6 +1938,37 @@ function AppContent() {
   };
 
 const generatePDF = (order: any) => {
+    // If order has rich checklist data or is a specialized tank/ccu model, use dedicated operational PDF generator
+    if (order.checklistData) {
+      generateOperationalChecklistPDF(order.checklistData, logoUrl);
+      return;
+    }
+
+    const detectedModel = detectChecklistModel(order.family, order.subFamily, order.equipmentNumber);
+    if (detectedModel !== 'CCU' || order.checklistModel) {
+      const client = clients.find(c => c.id === order.clientId);
+      const clientName = order.clientId === 'na' ? 'NÃO DEFINIDO / N/A' : (client?.razaoSocial || 'N/A');
+      const richData = createDefaultChecklistData(detectedModel, {
+        equipmentTag: order.equipmentNumber,
+        clientId: order.clientId,
+        clientName: clientName,
+        equipmentType: order.family,
+        subModel: order.subFamily,
+        inspectionDate: order.startDate?.toDate ? format(order.startDate.toDate(), 'yyyy-MM-dd') : format(new Date(), 'yyyy-MM-dd'),
+        expirationDate: order.endDate?.toDate ? format(order.endDate.toDate(), 'yyyy-MM-dd') : '',
+        inspectorName: order.maintenanceTechnician || order.createdBy,
+        approverName: order.closedBy,
+        status: order.status,
+        priority: order.priority,
+        slingNumber: order.slingCheck?.value || '',
+        slingStatus: order.slingCheck?.status || 'OK',
+        reworkRequired: order.reworkCheck?.status === 'OK',
+        reworkNotes: order.reworkCheck?.value || ''
+      });
+      generateOperationalChecklistPDF(richData, logoUrl);
+      return;
+    }
+
     const doc = new jsPDF();
     const client = clients.find(c => c.id === order.clientId);
     const clientName = order.clientId === 'na' ? 'NÃO DEFINIDO / N/A' : (client?.razaoSocial || 'N/A');
@@ -2861,6 +2969,84 @@ const generatePDF = (order: any) => {
     });
   };
 
+  const handleSaveChecklist = async (data: OperationalChecklistData) => {
+    if (!user) return;
+    try {
+      const cleanData: Record<string, any> = { ...data };
+
+      // Ensure uppercase tags
+      if (cleanData.equipmentTag) {
+        cleanData.equipmentTag = String(cleanData.equipmentTag).trim().toUpperCase();
+      }
+      if (cleanData.slingTag) {
+        cleanData.slingTag = String(cleanData.slingTag).trim().toUpperCase();
+      }
+      if (cleanData.gpsTag) {
+        cleanData.gpsTag = String(cleanData.gpsTag).trim().toUpperCase();
+      }
+
+      if (cleanData.id) {
+        const id = cleanData.id;
+        delete cleanData.id;
+        const docRef = doc(db, 'checklists', id);
+        await updateDoc(docRef, {
+          ...cleanData,
+          updatedAt: serverTimestamp()
+        });
+        await addAuditLog('UPDATE', 'OS', id, `Atualizou checklist operacional: ${data.equipmentTag || ''} (${data.checklistType})`);
+      } else {
+        delete cleanData.id;
+        const docRef = await addDoc(collection(db, 'checklists'), {
+          ...cleanData,
+          userId: user.uid,
+          createdBy: currentUserName,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp()
+        });
+        await addAuditLog('CREATE', 'OS', docRef.id, `Criou novo checklist operacional: ${data.equipmentTag || ''} (${data.checklistType})`);
+      }
+      setSuccessMessage("Checklist operacional salvo com sucesso!");
+      setTimeout(() => setSuccessMessage(null), 4000);
+      setIsChecklistModalOpen(false);
+      setEditingChecklist(null);
+    } catch (error: any) {
+      console.error("Error saving checklist:", error);
+      setGlobalError("Erro ao salvar checklist operacional.");
+      try {
+        handleFirestoreError(error, OperationType.WRITE, 'checklists');
+      } catch (e) {}
+      throw error;
+    }
+  };
+
+  const handleDeleteChecklist = async (id: string, name: string) => {
+    if (!user) return;
+    if (!isModerator) {
+      handleOpenDeleteModal('Checklist Operacional', id, 'checklists', name);
+      return;
+    }
+
+    setConfirmModal({
+      isOpen: true,
+      title: 'Excluir Checklist Operacional',
+      message: `Tem certeza que deseja excluir o checklist do equipamento "${name}"? Esta ação não pode ser desfeita.`,
+      type: 'danger',
+      onConfirm: async () => {
+        try {
+          await deleteDoc(doc(db, 'checklists', id));
+          await addAuditLog('DELETE', 'OS', id, `Excluiu checklist operacional do equipamento ${name}`);
+          setSuccessMessage('Checklist excluído com sucesso!');
+          setTimeout(() => setSuccessMessage(null), 3000);
+        } catch (error) {
+          console.error('Error deleting checklist:', error);
+          setGlobalError('Erro ao excluir checklist.');
+        } finally {
+          setConfirmModal(prev => ({ ...prev, isOpen: false }));
+        }
+      }
+    });
+  };
+
   const handleOpenDeleteModal = (itemType: string, itemId: string, itemCollection: string, itemName: string) => {
     setDeleteModalState({
       isOpen: true,
@@ -3821,6 +4007,22 @@ const generatePDF = (order: any) => {
               </button>
             )}
 
+            {isTabAllowed('checklists') && (
+              <button
+                onClick={() => { setActiveTab('checklists'); window.location.hash = 'checklists'; }}
+                className={cn(
+                  "sidebar-item w-full group",
+                  activeTab === 'checklists' ? "sidebar-item-active" : "sidebar-item-inactive"
+                )}
+              >
+                <div className={cn("p-2 rounded-xl transition-all duration-300", activeTab === 'checklists' ? "bg-blue-600 text-white" : "bg-slate-50 dark:bg-slate-800 group-hover:bg-blue-50 dark:group-hover:bg-blue-900/30 group-hover:text-blue-600 dark:group-hover:text-blue-400")}>
+                  <ClipboardCheck className="w-4 h-4" />
+                </div>
+                Checklists
+                {activeTab === 'checklists' && <motion.div layoutId="active-pill" className="absolute right-4 w-1.5 h-1.5 bg-blue-600 dark:bg-blue-400 rounded-full" />}
+              </button>
+            )}
+
             {isTabAllowed('clients') && (
               <button
                 onClick={() => { setActiveTab('clients'); window.location.hash = 'clients'; }}
@@ -4032,6 +4234,7 @@ const generatePDF = (order: any) => {
                  activeTab === 'orders' ? 'Gestão de OS' :
                  activeTab === 'fleet' ? 'Gestão da Frota' :
                  activeTab === 'decontamination' ? 'Descontaminação' :
+                 activeTab === 'checklists' ? 'Checklists Operacionais' :
                  activeTab === 'clients' ? 'Gestão de Clientes' : 
                  activeTab === 'equipments' ? 'Gestão de Equipamentos' :
                  activeTab === 'approvals' ? 'Aprovações Pendentes' :
@@ -4050,6 +4253,7 @@ const generatePDF = (order: any) => {
                     : activeTab === 'orders' ? 'Controle operacional' :
                     activeTab === 'fleet' ? 'Controle de ativos e inspeções PCP' :
                     activeTab === 'decontamination' ? 'Controle de lavagem e descontaminação' :
+                    activeTab === 'checklists' ? 'Inspeções técnicas e laudos normativos' :
                     activeTab === 'clients' ? 'Base de parceiros' :
                     activeTab === 'equipments' ? 'Ativos registrados' :
                     activeTab === 'approvals' ? 'Solicitações e autorizações' :
@@ -4147,6 +4351,14 @@ const generatePDF = (order: any) => {
                       hingeCheck: { status: 'NA', value: '' },
                       reworkCheck: { status: 'NA', value: '' },
                     });
+                    const initialModel = detectChecklistModel('', '', '');
+                    setActiveChecklistData(createDefaultChecklistData(initialModel, {
+                      inspectorName: currentUserName,
+                      inspectionDate: format(new Date(), 'yyyy-MM-dd'),
+                      status: 'Em Manutenção',
+                      priority: 'Média'
+                    }));
+                    setOsFormMode('checklist');
                     setModalType('os'); 
                     setAccessError(null); 
                     setIsModalOpen(true); 
@@ -4157,6 +4369,7 @@ const generatePDF = (order: any) => {
                   Nova OS
                 </button>
               )}
+
 
               {activeTab === 'clients' && (
                 <button
@@ -4753,6 +4966,25 @@ const generatePDF = (order: any) => {
                   onSaveOperation={handleSaveDecontaminationOperation}
                   onDeleteOperation={handleDeleteDecontaminationOperation}
                   onRequestDelete={handleOpenDeleteModal}
+                />
+              ) : activeTab === 'checklists' ? (
+                <ChecklistsModule
+                  checklists={checklists}
+                  clients={clients}
+                  fleetEquipment={fleetEquipment}
+                  canDelete={canDelete}
+                  onNewChecklist={() => {
+                    setEditingChecklist(null);
+                    setIsChecklistModalOpen(true);
+                  }}
+                  onEditChecklist={(item) => {
+                    setEditingChecklist(item);
+                    setIsChecklistModalOpen(true);
+                  }}
+                  onDeleteChecklist={(id, name) => {
+                    handleDeleteChecklist(id, name);
+                  }}
+                  logoUrl={logoUrl}
                 />
               ) : activeTab === 'orders' ? (
                 <div className="space-y-6">
@@ -6179,10 +6411,35 @@ const generatePDF = (order: any) => {
                 </div>
 
                 {modalType === 'os' && (
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <div className="flex items-center bg-slate-200/60 dark:bg-slate-800/80 p-1 rounded-2xl border border-slate-300/60 dark:border-slate-700/60 shadow-inner">
+                      <button
+                        type="button"
+                        onClick={() => setOsFormMode('checklist')}
+                        className={cn(
+                          "px-3.5 py-1.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer",
+                          osFormMode === 'checklist' ? "bg-blue-600 text-white shadow-md" : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                        )}
+                      >
+                        <ClipboardCheck className="w-3.5 h-3.5" />
+                        <span>Checklist Fiel ao Modelo</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setOsFormMode('quick')}
+                        className={cn(
+                          "px-3.5 py-1.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer",
+                          osFormMode === 'quick' ? "bg-blue-600 text-white shadow-md" : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                        )}
+                      >
+                        <FileSpreadsheet className="w-3.5 h-3.5" />
+                        <span>Ficha Rápida</span>
+                      </button>
+                    </div>
+
                     <button
                       type="button"
-                      onClick={() => generatePDF(editingOrder || { ...formData, id: 'preview' })}
+                      onClick={() => generatePDF(editingOrder || { ...formData, id: 'preview', checklistData: activeChecklistData, checklistModel: activeChecklistData?.modelType })}
                       className="px-4 py-2 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/50 rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center gap-2 border border-blue-200 dark:border-blue-800 shadow-sm cursor-pointer"
                       title="Baixar PDF Oficial"
                     >
@@ -6211,6 +6468,76 @@ const generatePDF = (order: any) => {
 
               {modalType === 'os' ? (
                 <div className="flex-1 overflow-y-auto custom-scrollbar p-2 sm:p-4 md:p-6 bg-slate-100/80 dark:bg-slate-950/90">
+                  {osFormMode === 'checklist' ? (
+                    <ChecklistRenderer
+                      data={activeChecklistData || createDefaultChecklistData(detectChecklistModel(formData.family, formData.subFamily, formData.equipmentNumber), {
+                        equipmentTag: formData.equipmentNumber,
+                        clientId: formData.clientId,
+                        clientName: clients.find(c => c.id === formData.clientId)?.razaoSocial || '',
+                        equipmentType: formData.family,
+                        subModel: formData.subFamily,
+                        inspectionDate: formData.startDate,
+                        expirationDate: formData.endDate,
+                        inspectorName: formData.maintenanceTechnician || formData.createdBy || currentUserName,
+                        approverName: formData.closedBy || '',
+                        status: formData.status,
+                        priority: formData.priority,
+                        slingNumber: formData.slingCheck?.value || '',
+                        slingStatus: formData.slingCheck?.status || 'OK',
+                        reworkRequired: formData.reworkCheck?.status === 'OK',
+                        reworkNotes: formData.reworkCheck?.value || '',
+                        inspectorSignatureUrl: currentUserSignatureUrl,
+                      })}
+                      onChange={(updatedData) => {
+                        setActiveChecklistData(updatedData);
+                        setFormData(prev => ({
+                          ...prev,
+                          equipmentNumber: updatedData.equipmentTag || prev.equipmentNumber,
+                          clientId: updatedData.clientId || prev.clientId,
+                          family: updatedData.equipmentType || prev.family,
+                          subFamily: updatedData.subModel || prev.subFamily,
+                          startDate: updatedData.inspectionDate || prev.startDate,
+                          endDate: updatedData.expirationDate || prev.endDate,
+                          status: (updatedData.status === 'Concluído' ? 'Concluído' : 'Em Manutenção') as 'Em Manutenção' | 'Concluído',
+                          priority: (updatedData.priority || prev.priority) as 'Baixa' | 'Média' | 'Alta' | 'Urgente',
+                          maintenanceTechnician: updatedData.inspectorName || prev.maintenanceTechnician,
+                          closedBy: updatedData.approverName || prev.closedBy,
+                          slingCheck: { status: updatedData.slingStatus, value: updatedData.slingNumber || '' },
+                          reworkCheck: { status: updatedData.reworkRequired ? 'OK' : 'NA', value: updatedData.reworkNotes || '' },
+                        }));
+                      }}
+                      onSave={async () => {
+                        const fakeEv = { preventDefault: () => {} } as any;
+                        await handleSubmit(fakeEv);
+                      }}
+                      onPrintPDF={() => {
+                        const dummyOrder = {
+                          ...(editingOrder || {}),
+                          equipmentNumber: activeChecklistData?.equipmentTag || formData.equipmentNumber,
+                          clientId: activeChecklistData?.clientId || formData.clientId,
+                          family: activeChecklistData?.equipmentType || formData.family,
+                          subFamily: activeChecklistData?.subModel || formData.subFamily,
+                          startDate: formData.startDate ? { toDate: () => parseISO(formData.startDate) } : null,
+                          endDate: formData.endDate ? { toDate: () => parseISO(formData.endDate) } : null,
+                          status: activeChecklistData?.status || formData.status,
+                          priority: activeChecklistData?.priority || formData.priority,
+                          checklistModel: activeChecklistData?.modelType,
+                          checklistData: activeChecklistData,
+                        };
+                        generatePDF(dummyOrder);
+                      }}
+                      isSubmitting={isSubmitting}
+                      isReadOnly={osModalTab === 'view'}
+                      clients={clients}
+                      equipments={equipments}
+                      fleetEquipment={fleetEquipment}
+                      currentUser={user}
+                      currentUserName={currentUserName}
+                      currentUserRole={currentUserRole}
+                      currentUserSignatureUrl={currentUserSignatureUrl}
+                      currentUserJobTitle={currentUserJobTitle}
+                    />
+                  ) : (
                   <form onSubmit={handleSubmit} className="w-full max-w-[1140px] mx-auto bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100 rounded-3xl border-2 border-slate-200/90 dark:border-slate-800 shadow-2xl p-6 sm:p-10 md:p-12 space-y-8 font-sans my-1">
                     {/* Document Header Accent Strip */}
                     <div className="h-2.5 bg-slate-800 dark:bg-slate-700 w-full rounded-t -mt-5 sm:-mt-8 md:-mt-12 -mx-5 sm:-mx-8 md:-mx-12 mb-6"></div>
@@ -6707,6 +7034,7 @@ const generatePDF = (order: any) => {
                       </div>
                     </div>
                   </form>
+                  )}
                 </div>
               ) : modalType === 'equipment' ? (
                 <form onSubmit={handleEquipmentSubmit} className="p-8 space-y-6">
@@ -7139,6 +7467,24 @@ const generatePDF = (order: any) => {
         itemType={deleteModalState.itemType}
         itemName={deleteModalState.itemName}
         userRole={effectiveRole}
+      />
+
+      {/* Independent Checklist Modal */}
+      <ChecklistModal
+        isOpen={isChecklistModalOpen}
+        onClose={() => {
+          setIsChecklistModalOpen(false);
+          setEditingChecklist(null);
+        }}
+        onSave={handleSaveChecklist}
+        initialData={editingChecklist}
+        clients={clients}
+        equipments={equipments}
+        fleetEquipment={fleetEquipment}
+        currentUserName={currentUserName}
+        currentUserJobTitle={currentUserJobTitle}
+        currentUserSignatureUrl={currentUserSignatureUrl}
+        logoUrl={logoUrl}
       />
     </div>
   );

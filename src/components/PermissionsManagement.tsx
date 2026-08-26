@@ -85,6 +85,12 @@ const MODULE_DEFINITIONS: { key: keyof ModuleVisibilityConfig; name: string; des
     icon: <Droplet className="w-4 h-4 text-cyan-500" />
   },
   {
+    key: 'checklists',
+    name: 'Checklists Operacionais',
+    description: 'Inspeções técnicas completas para CCU e Tanques 1.500L, 5.000L e 5.200L',
+    icon: <FileSpreadsheet className="w-4 h-4 text-blue-500" />
+  },
+  {
     key: 'clients',
     name: 'Gestão de Clientes',
     description: 'Cadastro e consulta de clientes parceiros',

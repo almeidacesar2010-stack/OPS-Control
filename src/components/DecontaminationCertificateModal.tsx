@@ -160,15 +160,20 @@ export function DecontaminationCertificateModal({
   const [generalNotes, setGeneralNotes] = useState(DEFAULT_GENERAL_NOTES);
   const [isGenerating, setIsGenerating] = useState(false);
 
-  // Available Clients list (strictly from the tanks module TANK_CLIENTS)
+  // Available Clients list (includes system registered clients and TANK_CLIENTS)
   const availableClientsList = useMemo(() => {
     const listSet = new Set<string>();
     TANK_CLIENTS.forEach(c => listSet.add(c));
-    if (client && !TANK_CLIENTS.includes(client.toUpperCase() as any)) {
-      listSet.add(client.toUpperCase());
+    clients.forEach(c => {
+      if (c.razaoSocial?.trim()) {
+        listSet.add(c.razaoSocial.trim().toUpperCase());
+      }
+    });
+    if (client && !listSet.has(client.trim().toUpperCase())) {
+      listSet.add(client.trim().toUpperCase());
     }
     return Array.from(listSet).sort();
-  }, [client]);
+  }, [client, clients]);
 
   // Initialize fields when modal opens or editingCertificate changes
   useEffect(() => {

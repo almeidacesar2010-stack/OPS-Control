@@ -1,6 +1,6 @@
 {
   "name": "OPS Control",
-  "description": "Sistema de controle de operações OEG para PCP, com gestão de clientes, equipamentos registrados, ordens de serviço e dashboards de produtividade.",
+  "description": "Sistema de controle de operações OEG para PCP, com gestão de frotas, emissão de certificados de descontaminação e painel gerencial de produtividade e capacidade operacional.",
   "requestFramePermissions": [],
   "majorCapabilities": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"

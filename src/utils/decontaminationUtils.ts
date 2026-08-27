@@ -20,7 +20,7 @@ import { ptBR } from 'date-fns/locale';
 import { DecontaminationOperation, DecontaminationFilter, FilterPeriod } from '../types/decontamination';
 
 /**
- * Calculates duration in days between two YYYY-MM-DD or ISO dates
+ * Calculates duration in days between two YYYY-MM-DD or ISO dates using Business Days (Dias Úteis)
  */
 export function calculateDurationDays(startDateStr?: string, endDateStr?: string): number | null {
   if (!startDateStr || !endDateStr) return null;
@@ -28,9 +28,9 @@ export function calculateDurationDays(startDateStr?: string, endDateStr?: string
     const start = startOfDay(parseISO(startDateStr));
     const end = startOfDay(parseISO(endDateStr));
     if (isNaN(start.getTime()) || isNaN(end.getTime())) return null;
-    const diffMs = end.getTime() - start.getTime();
-    if (diffMs < 0) return 0;
-    return Math.round(diffMs / (1000 * 60 * 60 * 24));
+    if (start.getTime() > end.getTime()) return 0;
+    const bDays = countBusinessDays(start, end);
+    return Math.max(0, bDays - 1);
   } catch {
     return null;
   }
@@ -438,7 +438,56 @@ export function calculateElapsedDaysForBounds(start: Date, end: Date): number {
 }
 
 /**
- * Dashboard Overview KPIs with comparative percentage vs previous period
+ * Calculates total business days in the full period range (or elapsed if ongoing)
+ */
+export function getTotalPeriodBusinessDays(
+  period: FilterPeriod,
+  customStart?: string,
+  customEnd?: string,
+  allOperations: DecontaminationOperation[] = []
+): number {
+  const now = startOfDay(new Date());
+
+  if (period === 'today') return 1;
+  if (period === 'week') {
+    const start = startOfWeek(now, { weekStartsOn: 1 });
+    const end = endOfWeek(now, { weekStartsOn: 1 });
+    return Math.max(1, countBusinessDays(start, end));
+  }
+  if (period === 'month') {
+    const start = startOfMonth(now);
+    const end = endOfMonth(now);
+    return Math.max(1, countBusinessDays(start, end));
+  }
+  if (period === 'quarter') {
+    const start = startOfQuarter(now);
+    const end = endOfQuarter(now);
+    return Math.max(1, countBusinessDays(start, end));
+  }
+  if (period === 'semester') {
+    const start = startOfDay(subMonths(now, 6));
+    return Math.max(1, countBusinessDays(start, now));
+  }
+  if (period === 'year') {
+    const start = startOfYear(now);
+    const end = endOfYear(now);
+    return Math.max(1, countBusinessDays(start, end));
+  }
+  if (period === 'custom' && customStart && customEnd) {
+    try {
+      const start = startOfDay(parseISO(customStart));
+      const end = endOfDay(parseISO(customEnd));
+      return Math.max(1, countBusinessDays(start, end));
+    } catch {
+      return 1;
+    }
+  }
+  return calculatePeriodElapsedDays(period, customStart, customEnd, allOperations);
+}
+
+/**
+ * Dashboard Overview KPIs with comparative percentage vs previous period,
+ * Capacity estimation, and Demand vs Capacity metrics.
  */
 export function calculateDecontaminationKPIs(
   operations: DecontaminationOperation[],
@@ -463,21 +512,28 @@ export function calculateDecontaminationKPIs(
   // Compute daily average of completed decontaminations (ritmo médio em todo o período)
   const sourceAllOps = allOperations && allOperations.length > 0 ? allOperations : operations;
   const elapsedDays = calculatePeriodElapsedDays(period, customStart, customEnd, sourceAllOps);
-  const avgDailyDecon = completedOps.length / elapsedDays;
+  const totalPeriodDays = getTotalPeriodBusinessDays(period, customStart, customEnd, sourceAllOps);
+  
+  // 1. RITMO MÉDIO: Tanques finalizados ÷ Dias úteis considerados no período
+  const avgDailyDecon = elapsedDays > 0 ? completedOps.length / elapsedDays : 0;
 
-  // Compute Capacidade Operacional de Descontaminação (apenas dias com finalizações)
-  // Total de tanques descontaminados finalizados ÷ Quantidade de dias que tiveram pelo menos uma descontaminação finalizada
-  const completionDatesSet = new Set<string>();
+  // 2. PICO DE PRODUÇÃO (Maior volume de tanques descontaminados em um único dia no período)
+  const dailyCompletionCounts = new Map<string, number>();
   completedOps.forEach(op => {
     if (op.endDate && op.endDate.trim() !== '') {
       const cleanDate = op.endDate.trim().slice(0, 10);
-      completionDatesSet.add(cleanDate);
+      dailyCompletionCounts.set(cleanDate, (dailyCompletionCounts.get(cleanDate) || 0) + 1);
     }
   });
-  const activeCompletionDaysCount = completionDatesSet.size;
-  const operationalCapacity = activeCompletionDaysCount > 0 ? completedOps.length / activeCompletionDaysCount : 0;
 
-  const completionRate = totalReceived > 0 ? (completedOps.length / totalReceived) * 100 : 0;
+  let peakDailyCount = 0;
+  let peakProductionDate: string | null = null;
+  dailyCompletionCounts.forEach((count, date) => {
+    if (count > peakDailyCount) {
+      peakDailyCount = count;
+      peakProductionDate = date;
+    }
+  });
 
   // Compute previous period comparative
   const prevBounds = getPreviousPeriodBounds(period, customStart, customEnd);
@@ -490,24 +546,26 @@ export function calculateDecontaminationKPIs(
     avgDeconTimeHours: number | null;
     avgLeadTimeHours: number | null;
     avgDailyDecon: number | null;
-    operationalCapacity: number | null;
+    peakDailyCount: number | null;
   } | null = null;
 
   if (prevBounds) {
     const prevOps = sourceAllOps.filter(o => isOperationInDateBounds(o, prevBounds));
     const prevCompleted = prevOps.filter(o => o.status === 'completed' && o.endDate && o.endDate.trim() !== '');
     const prevElapsedDays = calculateElapsedDaysForBounds(prevBounds.start, prevBounds.end);
-    const prevAvgDailyDecon = prevCompleted.length / prevElapsedDays;
+    const prevAvgDailyDecon = prevElapsedDays > 0 ? prevCompleted.length / prevElapsedDays : 0;
 
-    const prevCompletionDatesSet = new Set<string>();
+    const prevDailyMap = new Map<string, number>();
     prevCompleted.forEach(op => {
       if (op.endDate && op.endDate.trim() !== '') {
         const cleanDate = op.endDate.trim().slice(0, 10);
-        prevCompletionDatesSet.add(cleanDate);
+        prevDailyMap.set(cleanDate, (prevDailyMap.get(cleanDate) || 0) + 1);
       }
     });
-    const prevActiveDays = prevCompletionDatesSet.size;
-    const prevOperationalCapacity = prevActiveDays > 0 ? prevCompleted.length / prevActiveDays : 0;
+    let prevPeak = 0;
+    prevDailyMap.forEach((c) => {
+      if (c > prevPeak) prevPeak = c;
+    });
 
     prevKPIs = {
       totalReceived: prevOps.length,
@@ -518,7 +576,7 @@ export function calculateDecontaminationKPIs(
       avgDeconTimeHours: computeAverage(prevCompleted.map(getDeconTimeHours)),
       avgLeadTimeHours: computeAverage(prevCompleted.map(getLeadTimeHours)),
       avgDailyDecon: prevAvgDailyDecon,
-      operationalCapacity: prevOperationalCapacity
+      peakDailyCount: prevPeak
     };
   }
 
@@ -531,19 +589,17 @@ export function calculateDecontaminationKPIs(
     avgDeconTimeHours: avgDeconTime,
     avgLeadTimeHours: avgLeadTime,
     avgDailyDecon,
-    operationalCapacity,
-    activeCompletionDaysCount,
-    completionRatePercent: completionRate,
+    peakDailyCount,
+    peakProductionDate,
+    elapsedBusinessDays: elapsedDays,
+    totalPeriodBusinessDays: totalPeriodDays,
     comparisons: {
       received: prevKPIs ? calculatePercentageChange(totalReceived, prevKPIs.totalReceived) : null,
       completed: prevKPIs ? calculatePercentageChange(completedOps.length, prevKPIs.completedCount) : null,
       waiting: prevKPIs ? calculatePercentageChange(waitingOps.length, prevKPIs.waitingCount) : null,
       inProgress: prevKPIs ? calculatePercentageChange(inProgressOps.length, prevKPIs.inProgressCount) : null,
-      avgWait: prevKPIs && avgWaitTime !== null && prevKPIs.avgWaitTimeHours !== null ? calculatePercentageChange(avgWaitTime, prevKPIs.avgWaitTimeHours) : null,
       avgDecon: prevKPIs && avgDeconTime !== null && prevKPIs.avgDeconTimeHours !== null ? calculatePercentageChange(avgDeconTime, prevKPIs.avgDeconTimeHours) : null,
-      avgLead: prevKPIs && avgLeadTime !== null && prevKPIs.avgLeadTimeHours !== null ? calculatePercentageChange(avgLeadTime, prevKPIs.avgLeadTimeHours) : null,
-      avgDailyDecon: prevKPIs && prevKPIs.avgDailyDecon !== null && prevKPIs.avgDailyDecon > 0 ? calculatePercentageChange(avgDailyDecon, prevKPIs.avgDailyDecon) : null,
-      operationalCapacity: prevKPIs && prevKPIs.operationalCapacity !== null && prevKPIs.operationalCapacity > 0 ? calculatePercentageChange(operationalCapacity, prevKPIs.operationalCapacity) : null
+      avgDailyDecon: prevKPIs && prevKPIs.avgDailyDecon !== null && prevKPIs.avgDailyDecon > 0 ? calculatePercentageChange(avgDailyDecon, prevKPIs.avgDailyDecon) : null
     }
   };
 }
@@ -635,86 +691,123 @@ export function calculateContaminationIndicators(operations: DecontaminationOper
   };
 }
 
-export type EvolutionChartMode = 'rx_vs_dc' | 'weekly' | 'monthly' | 'quarterly' | 'semestral';
+export type ProductivityHorizon = 'weekly' | 'monthly' | 'quarterly' | 'semestral' | 'all';
 
-export interface EvolutionChartDataPoint {
-  label: string;
-  recebidos: number;
-  descontaminados: number;
-  emAndamento: number;
-  avgDeconTimeDays: number | null;
+export interface DailyProductivityPoint {
+  dateKey: string;      // '2026-08-01'
+  label: string;        // '01/08'
+  fullDate: string;     // '01/08/2026'
+  dayOfWeek: string;    // 'Seg', 'Ter', etc.
+  finalizados: number;  // Quantidade de tanques finalizados naquele dia
+  isBusinessDay: boolean;
+  isPeak: boolean;
 }
 
 /**
- * Generates evolution chart data based on selected mode and operations list
+ * Generates Daily Productivity line chart data (Produtividade Diária da Descontaminação)
+ * Each point represents the REAL count of tanks decontaminated on that specific day (or 0 if none).
  */
-export function generateEvolutionChartData(operations: DecontaminationOperation[], mode: EvolutionChartMode): EvolutionChartDataPoint[] {
-  if (operations.length === 0) return [];
+export function generateDailyProductivityChartData(
+  operations: DecontaminationOperation[],
+  period: FilterPeriod,
+  customStart?: string,
+  customEnd?: string,
+  chartHorizon: ProductivityHorizon = 'monthly'
+): { data: DailyProductivityPoint[]; peakCount: number; peakDate: string | null } {
+  const now = startOfDay(new Date());
 
-  // Sort operations ascending by arrival date
-  const sorted = [...operations].sort((a, b) => {
-    const da = a.arrivalDate ? parseISO(a.arrivalDate).getTime() : 0;
-    const db = b.arrivalDate ? parseISO(b.arrivalDate).getTime() : 0;
-    return da - db;
-  });
+  let startDate: Date;
+  let endDate: Date;
 
-  const map = new Map<string, { label: string; recebidos: number; descontaminados: number; emAndamento: number; deconTimes: number[] }>();
-
-  sorted.forEach(op => {
-    if (!op.arrivalDate) return;
+  if (period === 'custom' && customStart && customEnd) {
     try {
-      const date = parseISO(op.arrivalDate);
-      if (isNaN(date.getTime())) return;
-
-      let key = '';
-      let label = '';
-
-      if (mode === 'weekly') {
-        const weekStart = startOfWeek(date, { weekStartsOn: 1 });
-        key = format(weekStart, 'yyyy-MM-dd');
-        label = `Sem ${format(weekStart, 'dd/MM')}`;
-      } else if (mode === 'monthly') {
-        key = format(date, 'yyyy-MM');
-        label = format(date, 'MMM/yy', { locale: ptBR }).toUpperCase();
-      } else if (mode === 'quarterly') {
-        const q = Math.floor(date.getMonth() / 3) + 1;
-        key = `${date.getFullYear()}-Q${q}`;
-        label = `${q}º Trim. ${date.getFullYear()}`;
-      } else if (mode === 'semestral') {
-        const s = date.getMonth() < 6 ? 1 : 2;
-        key = `${date.getFullYear()}-S${s}`;
-        label = `${s}º Sem. ${date.getFullYear()}`;
-      } else {
-        key = format(date, 'yyyy-MM');
-        label = format(date, 'MMM/yy', { locale: ptBR }).toUpperCase();
-      }
-
-      if (!map.has(key)) {
-        map.set(key, { label, recebidos: 0, descontaminados: 0, emAndamento: 0, deconTimes: [] });
-      }
-
-      const item = map.get(key)!;
-      item.recebidos += 1;
-      if (op.status === 'completed') {
-        item.descontaminados += 1;
-        const dt = getDeconTimeHours(op);
-        if (dt !== null && !isNaN(dt)) {
-          item.deconTimes.push(dt);
-        }
-      } else if (op.status === 'in_progress' || op.status === 'waiting') {
-        item.emAndamento += 1;
-      }
+      startDate = startOfDay(parseISO(customStart));
+      endDate = startOfDay(parseISO(customEnd));
     } catch {
-      // ignore invalid dates
+      startDate = startOfMonth(now);
+      endDate = now;
+    }
+  } else if (period === 'today') {
+    startDate = startOfWeek(now, { weekStartsOn: 1 });
+    endDate = endOfWeek(now, { weekStartsOn: 1 });
+  } else if (chartHorizon === 'weekly' || period === 'week') {
+    startDate = startOfWeek(now, { weekStartsOn: 1 });
+    endDate = endOfWeek(now, { weekStartsOn: 1 });
+  } else if (chartHorizon === 'monthly' || period === 'month') {
+    startDate = startOfMonth(now);
+    endDate = endOfMonth(now);
+  } else if (chartHorizon === 'quarterly' || period === 'quarter') {
+    startDate = startOfQuarter(now);
+    endDate = endOfQuarter(now);
+  } else if (chartHorizon === 'semestral' || period === 'semester') {
+    startDate = startOfDay(subMonths(now, 6));
+    endDate = now;
+  } else {
+    // 'all' / 'geral' or 'year'
+    let earliest = startOfMonth(subMonths(now, 2));
+    operations.forEach(op => {
+      const dStr = op.arrivalDate || op.startDate || op.endDate;
+      if (dStr) {
+        try {
+          const d = startOfDay(parseISO(dStr));
+          if (!isNaN(d.getTime()) && d.getTime() < earliest.getTime()) {
+            earliest = d;
+          }
+        } catch {}
+      }
+    });
+    startDate = earliest;
+    endDate = now;
+  }
+
+  // Count completions on each exact day (using endDate of completed ops)
+  const completedMap = new Map<string, number>();
+  operations.forEach(op => {
+    if (op.status === 'completed' && op.endDate && op.endDate.trim() !== '') {
+      const cleanDate = op.endDate.trim().slice(0, 10);
+      completedMap.set(cleanDate, (completedMap.get(cleanDate) || 0) + 1);
     }
   });
 
-  return Array.from(map.values()).map(item => ({
-    label: item.label,
-    recebidos: item.recebidos,
-    descontaminados: item.descontaminados,
-    emAndamento: item.emAndamento,
-    avgDeconTimeDays: computeAverage(item.deconTimes)
-  }));
+  // Calculate peak in the active filtered operations
+  let peakCount = 0;
+  let peakDate: string | null = null;
+  completedMap.forEach((count, date) => {
+    if (count > peakCount) {
+      peakCount = count;
+      peakDate = date;
+    }
+  });
+
+  const points: DailyProductivityPoint[] = [];
+  const current = new Date(startDate);
+  const endLimit = endDate.getTime() < startDate.getTime() ? startDate : endDate;
+
+  const dayNames = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+
+  let guard = 0;
+  while (current.getTime() <= endLimit.getTime() && guard < 400) {
+    guard++;
+    const dateKey = format(current, 'yyyy-MM-dd');
+    const label = format(current, 'dd/MM');
+    const fullDate = format(current, 'dd/MM/yyyy');
+    const dayOfWeek = dayNames[current.getDay()];
+    const isBusDay = isBusinessDay(current);
+    const finalizados = completedMap.get(dateKey) || 0;
+
+    points.push({
+      dateKey,
+      label,
+      fullDate,
+      dayOfWeek,
+      finalizados,
+      isBusinessDay: isBusDay,
+      isPeak: finalizados > 0 && finalizados === peakCount
+    });
+
+    current.setDate(current.getDate() + 1);
+  }
+
+  return { data: points, peakCount, peakDate };
 }
 

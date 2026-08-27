@@ -33,7 +33,18 @@ import {
   Minimize2,
   Truck,
   Award,
-  Info
+  Info,
+  Gauge,
+  Zap,
+  Flame,
+  Target,
+  Scale,
+  Activity,
+  ArrowUpRight,
+  ArrowDownRight,
+  X,
+  Eye,
+  ExternalLink
 } from 'lucide-react';
 import { 
   BarChart, 
@@ -46,7 +57,10 @@ import {
   Cell,
   Legend,
   AreaChart,
-  Area
+  Area,
+  ComposedChart,
+  LineChart,
+  Line
 } from 'recharts';
 import { format, parseISO } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -70,13 +84,16 @@ import {
   formatHours, 
   formatDays,
   formatDailyAverage,
+  formatDateDisplay,
+  calculateDurationDays,
   isOperationInPeriod, 
   calculateDecontaminationKPIs, 
   calculateClientIndicators, 
   calculateModelIndicators, 
   calculateContaminationIndicators,
-  generateEvolutionChartData,
-  EvolutionChartMode,
+  generateDailyProductivityChartData,
+  ProductivityHorizon,
+  DailyProductivityPoint,
   ComparisonResult
 } from '../utils/decontaminationUtils';
 import { UserRole } from '../types';
@@ -305,8 +322,15 @@ export function DecontaminationManagement({
   // Client sorting option
   const [clientSortOption, setClientSortOption] = useState<'decon_desc' | 'decon_asc' | 'tempo_desc' | 'tempo_asc'>('decon_desc');
 
-  // Chart mode
-  const [chartMode, setChartMode] = useState<EvolutionChartMode>('monthly');
+  // Chart Horizon for Daily Productivity
+  const [chartHorizon, setChartHorizon] = useState<ProductivityHorizon>('monthly');
+
+  // Modals for Aguardando and Em Descontaminação lists
+  const [isWaitingModalOpen, setIsWaitingModalOpen] = useState(false);
+  const [isInProgressModalOpen, setIsInProgressModalOpen] = useState(false);
+
+  // Today ISO date string
+  const todayStr = useMemo(() => format(new Date(), 'yyyy-MM-dd'), []);
 
   // Filter state
   const [filterPeriod, setFilterPeriod] = useState<FilterPeriod>('all');
@@ -353,15 +377,24 @@ export function DecontaminationManagement({
     );
   }, [operations, filterPeriod, customStartDate, customEndDate]);
 
+  // Specific filtered lists for interactive cards & modals
+  const waitingOps = useMemo(() => {
+    return dateFilteredOperations.filter(op => op.status === 'waiting');
+  }, [dateFilteredOperations]);
+
+  const inProgressOps = useMemo(() => {
+    return dateFilteredOperations.filter(op => op.status === 'in_progress');
+  }, [dateFilteredOperations]);
+
   // Compute Overview KPIs with comparative percentage vs previous period
   const kpis = useMemo(() => {
     return calculateDecontaminationKPIs(dateFilteredOperations, filterPeriod, customStartDate, customEndDate, operations);
   }, [dateFilteredOperations, filterPeriod, customStartDate, customEndDate, operations]);
 
-  // Generate Evolution Chart Data
-  const chartData = useMemo(() => {
-    return generateEvolutionChartData(dateFilteredOperations, chartMode);
-  }, [dateFilteredOperations, chartMode]);
+  // Generate Daily Productivity Chart Data (tanques finalizados por dia)
+  const dailyProductivity = useMemo(() => {
+    return generateDailyProductivityChartData(dateFilteredOperations, filterPeriod, customStartDate, customEndDate, chartHorizon);
+  }, [dateFilteredOperations, filterPeriod, customStartDate, customEndDate, chartHorizon]);
 
   // Compute Client Indicators
   const clientIndicators = useMemo(() => {
@@ -730,211 +763,198 @@ export function DecontaminationManagement({
         )}
       </div>
 
-      {/* DASHBOARD: 6 MAIN KPI CARDS - RITMO MÉDIO AS PRIMARY OPERATIONAL KPI */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4 items-stretch">
-        {/* Card 1: Tanques Recebidos (Sky/Indigo) */}
+      {/* SEÇÃO 1: KPIS PROTAGONISTAS — RITMO MÉDIO & PICO DE PRODUÇÃO */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-5 items-stretch">
+        {/* CARD PROTAGONISTA 1: RITMO MÉDIO */}
         <motion.div 
-          whileHover={{ y: -3 }}
+          whileHover={{ y: -2 }}
           transition={{ type: 'spring', stiffness: 400, damping: 25 }}
-          className="bg-white dark:bg-slate-900 p-4.5 sm:p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-sm relative overflow-hidden group flex flex-col justify-between h-full min-h-[160px]"
+          className="bg-gradient-to-br from-slate-900 via-slate-900 to-teal-950 text-white p-6 sm:p-7 rounded-3xl border-2 border-teal-500/50 shadow-xl shadow-teal-950/20 relative overflow-hidden flex flex-col justify-between"
         >
+          {/* Subtle Background Glow Accent */}
+          <div className="absolute top-0 right-0 -mr-16 -mt-16 w-48 h-48 bg-teal-500/10 rounded-full blur-3xl pointer-events-none" />
+
           <div>
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400 truncate pr-1">
-                Tanques Recebidos
-              </span>
-              <div className="w-9 h-9 bg-sky-500/10 text-sky-600 dark:text-sky-400 rounded-xl flex items-center justify-center border border-sky-500/20 shrink-0">
-                <Truck className="w-4.5 h-4.5" />
-              </div>
-            </div>
-
-            <div className="my-1">
-              <span className="text-3xl font-black text-sky-600 dark:text-sky-400 tracking-tight leading-none">
-                {kpis.totalReceived}
-              </span>
-            </div>
-          </div>
-          <p className="text-[11px] font-semibold text-slate-400 dark:text-slate-500 mt-3 leading-snug">
-            Tanques que chegaram à base no período
-          </p>
-        </motion.div>
-
-        {/* Card 2: Tanques Descontaminados (Green) */}
-        <motion.div 
-          whileHover={{ y: -3 }}
-          transition={{ type: 'spring', stiffness: 400, damping: 25 }}
-          className="bg-white dark:bg-slate-900 p-4.5 sm:p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-sm relative overflow-hidden group flex flex-col justify-between h-full min-h-[160px]"
-        >
-          <div>
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400 truncate pr-1">
-                Descontaminados
-              </span>
-              <div className="w-9 h-9 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 rounded-xl flex items-center justify-center border border-emerald-500/20 shrink-0">
-                <CheckCircle2 className="w-4.5 h-4.5" />
-              </div>
-            </div>
-
-            <div className="my-1">
-              <span className="text-3xl font-black text-emerald-600 dark:text-emerald-400 tracking-tight leading-none">
-                {kpis.completedCount}
-              </span>
-            </div>
-          </div>
-          <p className="text-[11px] font-semibold text-slate-400 dark:text-slate-500 mt-3 leading-snug">
-            Operações finalizadas no período
-          </p>
-        </motion.div>
-
-        {/* Card 3: Aguardando Descontaminação (Amber) */}
-        <motion.div 
-          whileHover={{ y: -3 }}
-          transition={{ type: 'spring', stiffness: 400, damping: 25 }}
-          className="bg-white dark:bg-slate-900 p-4.5 sm:p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-sm relative overflow-hidden group flex flex-col justify-between h-full min-h-[160px]"
-        >
-          <div>
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400 truncate pr-1">
-                Aguardando
-              </span>
-              <div className="w-9 h-9 bg-amber-500/10 text-amber-600 dark:text-amber-400 rounded-xl flex items-center justify-center border border-amber-500/20 shrink-0">
-                <Clock className="w-4.5 h-4.5" />
-              </div>
-            </div>
-
-            <div className="my-1">
-              <span className="text-3xl font-black text-amber-600 dark:text-amber-400 tracking-tight leading-none">
-                {kpis.waitingCount}
-              </span>
-            </div>
-          </div>
-          <p className="text-[11px] font-semibold text-slate-400 dark:text-slate-500 mt-3 leading-snug">
-            Tanques na fila aguardando início
-          </p>
-        </motion.div>
-
-        {/* Card 4: Em Descontaminação (Blue) */}
-        <motion.div 
-          whileHover={{ y: -3 }}
-          transition={{ type: 'spring', stiffness: 400, damping: 25 }}
-          className="bg-white dark:bg-slate-900 p-4.5 sm:p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-sm relative overflow-hidden group flex flex-col justify-between h-full min-h-[160px]"
-        >
-          <div>
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400 truncate pr-1">
-                Em Descontaminação
-              </span>
-              <div className="w-9 h-9 bg-blue-500/10 text-blue-600 dark:text-blue-400 rounded-xl flex items-center justify-center border border-blue-500/20 shrink-0">
-                <RefreshCw className="w-4.5 h-4.5 animate-spin-slow" />
-              </div>
-            </div>
-
-            <div className="my-1">
-              <span className="text-3xl font-black text-blue-600 dark:text-blue-400 tracking-tight leading-none">
-                {kpis.inProgressCount}
-              </span>
-            </div>
-          </div>
-          <p className="text-[11px] font-semibold text-slate-400 dark:text-slate-500 mt-3 leading-snug">
-            Processo de lavagem em andamento
-          </p>
-        </motion.div>
-
-        {/* Card 5: Prazo Médio de Conclusão (Purple / Indigo) */}
-        <motion.div 
-          whileHover={{ y: -3 }}
-          transition={{ type: 'spring', stiffness: 400, damping: 25 }}
-          className="bg-white dark:bg-slate-900 p-4.5 sm:p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-sm relative overflow-hidden group flex flex-col justify-between h-full min-h-[160px]"
-        >
-          <div>
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400 truncate pr-1">
-                Prazo Médio
-              </span>
-              <div className="w-9 h-9 bg-purple-500/10 text-purple-600 dark:text-purple-400 rounded-xl flex items-center justify-center border border-purple-500/20 shrink-0">
-                <Sparkles className="w-4.5 h-4.5" />
-              </div>
-            </div>
-
-            <div className="my-1">
-              <span className="text-3xl font-black text-purple-600 dark:text-purple-400 tracking-tight leading-none">
-                {formatDays(kpis.avgDeconTimeHours)}
-              </span>
-            </div>
-          </div>
-          <p className="text-[11px] font-semibold text-slate-400 dark:text-slate-500 mt-3 leading-snug">
-            Início → Finalização (em dias)
-          </p>
-        </motion.div>
-
-        {/* Card 6: Ritmo Médio (Teal / Cyan - PRINCIPAL KPI OPERACIONAL DESTAQUE MÁXIMO) */}
-        <motion.div 
-          whileHover={{ y: -3 }}
-          transition={{ type: 'spring', stiffness: 400, damping: 25 }}
-          className="bg-gradient-to-br from-teal-500/15 via-white to-teal-500/10 dark:from-teal-950/60 dark:via-slate-900 dark:to-teal-900/40 p-4.5 sm:p-5 rounded-2xl border-2 border-teal-500/80 dark:border-teal-400 ring-2 ring-teal-500/20 dark:ring-teal-400/25 shadow-md shadow-teal-500/10 relative overflow-hidden group flex flex-col justify-between h-full min-h-[160px]"
-        >
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <div className="flex items-center gap-1.5 min-w-0">
-                <span className="text-[11px] font-black uppercase tracking-wider text-teal-800 dark:text-teal-200 whitespace-nowrap">
-                  Ritmo Médio
+            {/* Protagonist Header Badge */}
+            <div className="flex items-center justify-between gap-2 mb-4">
+              <div className="inline-flex items-center gap-2 px-3 py-1 bg-teal-500/20 border border-teal-500/30 rounded-full">
+                <span className="w-2 h-2 rounded-full bg-teal-400 animate-pulse" />
+                <span className="text-[10px] font-black uppercase tracking-widest text-teal-300">
+                  Indicador Principal
                 </span>
+              </div>
+
+              <div className="flex items-center gap-1.5">
                 <div className="relative group/tip shrink-0">
-                  <Info className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400 hover:text-teal-700 cursor-help transition-colors" />
-                  <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 hidden group-hover/tip:block w-56 p-2.5 bg-slate-950 text-white text-[11px] font-medium rounded-xl shadow-xl border border-slate-800 z-50 pointer-events-none leading-relaxed text-center">
-                    Mostra o ritmo médio de descontaminações por dia útil ao longo de todo o período selecionado.
-                    <div className="absolute left-1/2 -translate-x-1/2 top-full w-0 h-0 border-x-4 border-x-transparent border-t-4 border-t-slate-950"></div>
+                  <Info className="w-4 h-4 text-teal-400/80 hover:text-teal-300 cursor-help transition-colors" />
+                  <div className="absolute right-0 bottom-full mb-2 hidden group-hover/tip:block w-64 p-3 bg-slate-950 text-white text-[11px] font-medium rounded-xl shadow-2xl border border-slate-800 z-50 pointer-events-none leading-relaxed">
+                    <strong>Ritmo Médio:</strong> Tanques finalizados ÷ Dias úteis considerados no período selecionado.
+                    <div className="absolute right-3 top-full w-0 h-0 border-x-4 border-x-transparent border-t-4 border-t-slate-950" />
                   </div>
                 </div>
-              </div>
-              <div className="w-10 h-10 bg-teal-500/20 text-teal-700 dark:text-teal-200 rounded-xl flex items-center justify-center border border-teal-500/40 shadow-xs shrink-0">
-                <TrendingUp className="w-5 h-5 stroke-[2.5]" />
+                <div className="w-10 h-10 bg-teal-500/20 text-teal-300 rounded-xl flex items-center justify-center border border-teal-500/30">
+                  <TrendingUp className="w-5 h-5 stroke-[2.5]" />
+                </div>
               </div>
             </div>
 
-            <div className="flex flex-col">
-              <span className="text-4xl lg:text-[40px] font-black text-teal-600 dark:text-teal-400 tracking-tight leading-none">
+            {/* Protagonist Label */}
+            <h3 className="text-xs font-black uppercase tracking-wider text-teal-200">
+              Ritmo Médio de Descontaminação
+            </h3>
+
+            {/* Protagonist Giant Numeric Display */}
+            <div className="mt-3 flex items-baseline gap-3 flex-wrap">
+              <span className="text-5xl sm:text-6xl font-black text-white tracking-tight leading-none">
                 {formatDailyAverage(kpis.avgDailyDecon)}
               </span>
-              <span className="text-[10px] font-extrabold uppercase tracking-wider text-teal-700 dark:text-teal-300 mt-1">
-                tanques/dia útil
-              </span>
+              <div className="flex flex-col">
+                <span className="text-sm sm:text-base font-black uppercase tracking-wide text-teal-300">
+                  tanques / dia útil
+                </span>
+                <span className="text-[11px] font-semibold text-slate-400">
+                  média diária realizada
+                </span>
+              </div>
             </div>
           </div>
-          <p className="text-[11px] font-semibold text-teal-700/90 dark:text-teal-300/90 mt-3 leading-snug">
-            Tanques finalizados por dia útil no período
-          </p>
+
+          {/* Context & Description Footer inside Hero Card */}
+          <div className="mt-6 pt-5 border-t border-slate-800/80 flex flex-col gap-3">
+            <p className="text-xs font-semibold text-teal-100/90 leading-relaxed">
+              Média de tanques finalizados por dia útil no período.
+            </p>
+
+            <div className="flex items-center justify-between flex-wrap gap-2 text-xs">
+              <div className="flex items-center gap-1.5 text-slate-300 font-bold bg-slate-800/60 px-3 py-1.5 rounded-xl border border-slate-700/50">
+                <CheckCircle2 className="w-3.5 h-3.5 text-teal-400" />
+                <span>{kpis.completedCount} finalizados em {kpis.elapsedBusinessDays} dias úteis</span>
+              </div>
+
+              {kpis.comparisons.avgDailyDecon && kpis.comparisons.avgDailyDecon.hasSufficientData && (
+                <div className={`flex items-center gap-1 text-[11px] font-black px-2.5 py-1 rounded-lg ${
+                  kpis.comparisons.avgDailyDecon.isIncrease
+                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                    : !kpis.comparisons.avgDailyDecon.isNeutral
+                    ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                    : 'bg-slate-800 text-slate-400'
+                }`}>
+                  {kpis.comparisons.avgDailyDecon.isIncrease && <ArrowUpRight className="w-3.5 h-3.5" />}
+                  {!kpis.comparisons.avgDailyDecon.isIncrease && !kpis.comparisons.avgDailyDecon.isNeutral && <ArrowDownRight className="w-3.5 h-3.5" />}
+                  <span>
+                    {kpis.comparisons.avgDailyDecon.isIncrease ? '+' : !kpis.comparisons.avgDailyDecon.isNeutral ? '-' : ''}
+                    {kpis.comparisons.avgDailyDecon.percent}% vs. anterior
+                  </span>
+                </div>
+              )}
+            </div>
+          </div>
+        </motion.div>
+
+        {/* CARD PROTAGONISTA 2: PICO DE PRODUÇÃO */}
+        <motion.div 
+          whileHover={{ y: -2 }}
+          transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+          className="bg-gradient-to-br from-slate-900 via-slate-900 to-amber-950 text-white p-6 sm:p-7 rounded-3xl border-2 border-amber-500/50 shadow-xl shadow-amber-950/20 relative overflow-hidden flex flex-col justify-between"
+        >
+          {/* Subtle Background Glow Accent */}
+          <div className="absolute top-0 right-0 -mr-16 -mt-16 w-48 h-48 bg-amber-500/10 rounded-full blur-3xl pointer-events-none" />
+
+          <div>
+            {/* Protagonist Header Badge */}
+            <div className="flex items-center justify-between gap-2 mb-4">
+              <div className="inline-flex items-center gap-2 px-3 py-1 bg-amber-500/20 border border-amber-500/30 rounded-full">
+                <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+                <span className="text-[10px] font-black uppercase tracking-widest text-amber-300">
+                  Recorde Diário
+                </span>
+              </div>
+
+              <div className="flex items-center gap-1.5">
+                <div className="relative group/tip shrink-0">
+                  <Info className="w-4 h-4 text-amber-400/80 hover:text-amber-300 cursor-help transition-colors" />
+                  <div className="absolute right-0 bottom-full mb-2 hidden group-hover/tip:block w-64 p-3 bg-slate-950 text-white text-[11px] font-medium rounded-xl shadow-2xl border border-slate-800 z-50 pointer-events-none leading-relaxed">
+                    <strong>Pico de Produção:</strong> Maior quantidade de tanques descontaminados em um único dia no período selecionado.
+                    <div className="absolute right-3 top-full w-0 h-0 border-x-4 border-x-transparent border-t-4 border-t-slate-950" />
+                  </div>
+                </div>
+                <div className="w-10 h-10 bg-amber-500/20 text-amber-300 rounded-xl flex items-center justify-center border border-amber-500/30">
+                  <Zap className="w-5 h-5 stroke-[2.5]" />
+                </div>
+              </div>
+            </div>
+
+            {/* Protagonist Label */}
+            <h3 className="text-xs font-black uppercase tracking-wider text-amber-200">
+              Pico de Produção
+            </h3>
+
+            {/* Protagonist Giant Numeric Display */}
+            <div className="mt-3 flex items-baseline gap-3 flex-wrap">
+              <span className="text-5xl sm:text-6xl font-black text-white tracking-tight leading-none">
+                {kpis.peakDailyCount}
+              </span>
+              <div className="flex flex-col">
+                <span className="text-sm sm:text-base font-black uppercase tracking-wide text-amber-300">
+                  tanques em 1 dia
+                </span>
+                <span className="text-[11px] font-semibold text-slate-400">
+                  maior volume diário
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Context & Description Footer inside Peak Card */}
+          <div className="mt-6 pt-5 border-t border-slate-800/80 flex flex-col gap-3">
+            <p className="text-xs font-semibold text-amber-100/90 leading-relaxed">
+              Maior quantidade de tanques finalizados em um único dia no período.
+            </p>
+
+            <div className="flex items-center justify-between flex-wrap gap-2 text-xs">
+              <div className="flex items-center gap-1.5 text-slate-300 font-bold bg-slate-800/60 px-3 py-1.5 rounded-xl border border-slate-700/50">
+                <Calendar className="w-3.5 h-3.5 text-amber-400" />
+                <span>
+                  {kpis.peakProductionDate 
+                    ? `Pico registrado em ${formatDateDisplay(kpis.peakProductionDate)}` 
+                    : 'Nenhum tanque concluído no período'}
+                </span>
+              </div>
+            </div>
+          </div>
         </motion.div>
       </div>
 
-      {/* EVOLUTION CHARTS SECTION */}
+      {/* SEÇÃO 2: GRÁFICO PRINCIPAL — PRODUTIVIDADE DIÁRIA DA DESCONTAMINAÇÃO */}
       <div className="bg-white dark:bg-slate-900 rounded-[32px] border border-slate-200/50 dark:border-slate-800/50 p-6 md:p-8 shadow-sm space-y-6">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-200/80 dark:border-slate-800 pb-6">
           <div>
-            <h2 className="text-lg font-black uppercase tracking-tight text-slate-900 dark:text-white flex items-center gap-2.5">
-              <BarChart3 className="w-5 h-5 text-blue-600 dark:text-blue-400" />
-              Evolução Temporal das Operações de Descontaminação
-            </h2>
-            <p className="text-xs text-slate-500 font-bold mt-0.5">
-              Acompanhamento da quantidade de descontaminações concluídas e tempo médio (em dias)
+            <div className="flex items-center gap-3 flex-wrap">
+              <h2 className="text-lg font-black uppercase tracking-tight text-slate-900 dark:text-white flex items-center gap-2.5">
+                <BarChart3 className="w-5 h-5 text-teal-600 dark:text-teal-400" />
+                Produtividade Diária da Descontaminação
+              </h2>
+            </div>
+            <p className="text-xs text-slate-500 dark:text-slate-400 font-bold mt-0.5">
+              Quantidade real de tanques finalizados em cada dia no período selecionado (valores diários reais)
             </p>
           </div>
 
-          {/* Chart View Toggles */}
+          {/* Chart View Horizon Switches */}
           <div className="flex flex-wrap items-center gap-1.5 bg-slate-100 dark:bg-slate-800 p-1.5 rounded-2xl border border-slate-200/60 dark:border-slate-700/60">
             {[
               { id: 'weekly', label: 'Semanal' },
               { id: 'monthly', label: 'Mensal' },
               { id: 'quarterly', label: 'Trimestral' },
               { id: 'semestral', label: 'Semestral' },
-              { id: 'rx_vs_dc', label: 'Geral' }
+              { id: 'all', label: 'Geral' }
             ].map(m => (
               <button
                 key={m.id}
-                onClick={() => setChartMode(m.id as EvolutionChartMode)}
+                onClick={() => setChartHorizon(m.id as ProductivityHorizon)}
                 className={`px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all ${
-                  chartMode === m.id
-                    ? 'bg-blue-600 text-white shadow-md'
+                  chartHorizon === m.id
+                    ? 'bg-teal-600 text-white shadow-md shadow-teal-600/20'
                     : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
                 }`}
               >
@@ -944,19 +964,28 @@ export function DecontaminationManagement({
           </div>
         </div>
 
-        {/* Interactive Chart */}
+        {/* Interactive Line Chart */}
         <div className="h-80 w-full pt-2">
-          {chartData.length === 0 ? (
+          {dailyProductivity.data.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center text-slate-400 bg-slate-50/50 dark:bg-slate-800/20 rounded-2xl border border-dashed border-slate-200 dark:border-slate-800">
               <BarChart3 className="w-10 h-10 mb-2 opacity-50" />
-              <p className="text-xs font-bold">Nenhum dado registrado para o período e agrupamento selecionado.</p>
+              <p className="text-xs font-bold">Nenhum registro de atividade para o período selecionado.</p>
             </div>
           ) : (
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={chartData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#334155" opacity={0.2} />
-                <XAxis dataKey="label" tick={{ fontSize: 11, fontWeight: 700 }} />
-                <YAxis allowDecimals={false} tick={{ fontSize: 11, fontWeight: 700 }} />
+              <LineChart data={dailyProductivity.data} margin={{ top: 15, right: 30, left: -10, bottom: 5 }}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#334155" opacity={0.15} />
+                <XAxis 
+                  dataKey="label" 
+                  tick={{ fontSize: 11, fontWeight: 700 }}
+                  interval="preserveStartEnd"
+                  minTickGap={12}
+                />
+                <YAxis 
+                  allowDecimals={false} 
+                  tick={{ fontSize: 11, fontWeight: 700 }} 
+                  domain={[0, (dataMax: number) => Math.max(3, Math.ceil(dataMax * 1.25))]}
+                />
                 <Tooltip 
                   contentStyle={{ 
                     backgroundColor: '#0f172a', 
@@ -966,20 +995,210 @@ export function DecontaminationManagement({
                     fontWeight: 'bold',
                     fontSize: '12px'
                   }}
-                  formatter={(value: any, name: string) => {
-                    if (name === 'Tempo Médio (dias)') {
-                      return [value ? `${value} dia(s)` : 'Sem dados', name];
+                  content={({ active, payload }) => {
+                    if (active && payload && payload.length) {
+                      const data = payload[0].payload as DailyProductivityPoint;
+                      return (
+                        <div className="p-3 bg-slate-950 text-white rounded-2xl border border-slate-800 shadow-2xl space-y-1">
+                          <div className="text-[11px] font-black uppercase text-slate-400 flex items-center justify-between gap-4">
+                            <span>{data.fullDate} ({data.dayOfWeek})</span>
+                            <span className={data.isBusinessDay ? 'text-emerald-400' : 'text-slate-500'}>
+                              {data.isBusinessDay ? 'Dia Útil' : 'Fim de Semana / Feriado'}
+                            </span>
+                          </div>
+                          <div className="text-sm font-black text-teal-400 flex items-center gap-2">
+                            <span>{data.finalizados} {data.finalizados === 1 ? 'tanque descontaminado' : 'tanques descontaminados'}</span>
+                            {data.isPeak && (
+                              <span className="text-[9px] bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded-md border border-amber-500/30">
+                                PICO
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      );
                     }
-                    return [value, name];
+                    return null;
                   }}
                 />
-                <Legend wrapperStyle={{ paddingTop: '10px', fontSize: '11px', fontWeight: 'bold' }} />
-                <Bar dataKey="descontaminados" name="Descontaminações Concluídas" fill="#10b981" radius={[6, 6, 0, 0]} />
-                <Bar dataKey="emAndamento" name="Em Andamento / Aguardando" fill="#f59e0b" radius={[6, 6, 0, 0]} />
-              </BarChart>
+                <Line 
+                  type="monotone" 
+                  dataKey="finalizados" 
+                  name="Tanques Descontaminados" 
+                  stroke="#0d9488" 
+                  strokeWidth={3} 
+                  dot={{ r: 3.5, stroke: '#0d9488', strokeWidth: 2, fill: '#ffffff' }}
+                  activeDot={{ r: 6, stroke: '#0f766e', strokeWidth: 2.5, fill: '#2dd4bf' }}
+                />
+              </LineChart>
             </ResponsiveContainer>
           )}
         </div>
+      </div>
+
+      {/* SEÇÃO 3: CARDS OPERACIONAIS DE CONTEXTO */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4 items-stretch">
+        {/* Card 1: Tanques Recebidos */}
+        <motion.div 
+          whileHover={{ y: -2 }}
+          transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+          className="bg-white dark:bg-slate-900 p-4.5 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between min-h-[140px]"
+        >
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400 truncate pr-1">
+                Tanques Recebidos
+              </span>
+              <div className="w-8 h-8 bg-sky-500/10 text-sky-600 dark:text-sky-400 rounded-xl flex items-center justify-center border border-sky-500/20 shrink-0">
+                <Truck className="w-4 h-4" />
+              </div>
+            </div>
+
+            <div className="my-1">
+              <span className="text-3xl font-black text-sky-600 dark:text-sky-400 tracking-tight leading-none">
+                {kpis.totalReceived}
+              </span>
+            </div>
+          </div>
+          <p className="text-[10px] font-semibold text-slate-400 dark:text-slate-500 mt-2 leading-snug">
+            Chegaram à base no período
+          </p>
+        </motion.div>
+
+        {/* Card 2: Tanques Descontaminados */}
+        <motion.div 
+          whileHover={{ y: -2 }}
+          transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+          className="bg-white dark:bg-slate-900 p-4.5 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between min-h-[140px]"
+        >
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400 truncate pr-1">
+                Descontaminados
+              </span>
+              <div className="w-8 h-8 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 rounded-xl flex items-center justify-center border border-emerald-500/20 shrink-0">
+                <CheckCircle2 className="w-4 h-4" />
+              </div>
+            </div>
+
+            <div className="my-1">
+              <span className="text-3xl font-black text-emerald-600 dark:text-emerald-400 tracking-tight leading-none">
+                {kpis.completedCount}
+              </span>
+            </div>
+          </div>
+          <p className="text-[10px] font-semibold text-slate-400 dark:text-slate-500 mt-2 leading-snug">
+            Finalizados no período
+          </p>
+        </motion.div>
+
+        {/* Card 3: Aguardando Descontaminação (CLICÁVEL / INTERATIVO) */}
+        <motion.button 
+          type="button"
+          onClick={() => setIsWaitingModalOpen(true)}
+          whileHover={{ y: -3, scale: 1.01 }}
+          whileTap={{ scale: 0.98 }}
+          transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+          className="bg-white dark:bg-slate-900 p-4.5 rounded-2xl border-2 border-amber-500/40 dark:border-amber-500/40 hover:border-amber-500 shadow-sm hover:shadow-lg hover:shadow-amber-500/10 flex flex-col justify-between min-h-[140px] text-left cursor-pointer transition-all relative overflow-hidden group"
+        >
+          <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+            <span className="text-[9px] font-black uppercase px-2 py-0.5 bg-amber-500 text-white rounded-md">
+              Ver lista
+            </span>
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-[11px] font-black uppercase tracking-wider text-amber-700 dark:text-amber-300 truncate pr-1">
+                Aguardando
+              </span>
+              <div className="w-8 h-8 bg-amber-500/10 text-amber-600 dark:text-amber-400 rounded-xl flex items-center justify-center border border-amber-500/20 shrink-0 group-hover:bg-amber-500 group-hover:text-white transition-colors">
+                <Clock className="w-4 h-4" />
+              </div>
+            </div>
+
+            <div className="my-1 flex items-baseline gap-2">
+              <span className="text-3xl font-black text-amber-600 dark:text-amber-400 tracking-tight leading-none">
+                {kpis.waitingCount}
+              </span>
+              <span className="text-[10px] font-bold text-amber-600/70 dark:text-amber-400/70">
+                tanques
+              </span>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between mt-2 pt-2 border-t border-amber-100 dark:border-amber-950/60 text-[10px] font-bold text-amber-700 dark:text-amber-300">
+            <span>Clique para ver fila</span>
+            <ChevronRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
+          </div>
+        </motion.button>
+
+        {/* Card 4: Em Descontaminação (CLICÁVEL / INTERATIVO) */}
+        <motion.button 
+          type="button"
+          onClick={() => setIsInProgressModalOpen(true)}
+          whileHover={{ y: -3, scale: 1.01 }}
+          whileTap={{ scale: 0.98 }}
+          transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+          className="bg-white dark:bg-slate-900 p-4.5 rounded-2xl border-2 border-blue-500/40 dark:border-blue-500/40 hover:border-blue-500 shadow-sm hover:shadow-lg hover:shadow-blue-500/10 flex flex-col justify-between min-h-[140px] text-left cursor-pointer transition-all relative overflow-hidden group"
+        >
+          <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+            <span className="text-[9px] font-black uppercase px-2 py-0.5 bg-blue-500 text-white rounded-md">
+              Ver lista
+            </span>
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-[11px] font-black uppercase tracking-wider text-blue-700 dark:text-blue-300 truncate pr-1">
+                Em Descontaminação
+              </span>
+              <div className="w-8 h-8 bg-blue-500/10 text-blue-600 dark:text-blue-400 rounded-xl flex items-center justify-center border border-blue-500/20 shrink-0 group-hover:bg-blue-500 group-hover:text-white transition-colors">
+                <RefreshCw className="w-4 h-4 group-hover:animate-spin" />
+              </div>
+            </div>
+
+            <div className="my-1 flex items-baseline gap-2">
+              <span className="text-3xl font-black text-blue-600 dark:text-blue-400 tracking-tight leading-none">
+                {kpis.inProgressCount}
+              </span>
+              <span className="text-[10px] font-bold text-blue-600/70 dark:text-blue-400/70">
+                em processo
+              </span>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between mt-2 pt-2 border-t border-blue-100 dark:border-blue-950/60 text-[10px] font-bold text-blue-700 dark:text-blue-300">
+            <span>Clique para ver tanques</span>
+            <ChevronRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
+          </div>
+        </motion.button>
+
+        {/* Card 5: Prazo Médio */}
+        <motion.div 
+          whileHover={{ y: -2 }}
+          transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+          className="bg-white dark:bg-slate-900 p-4.5 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between min-h-[140px]"
+        >
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400 truncate pr-1">
+                Prazo Médio
+              </span>
+              <div className="w-8 h-8 bg-purple-500/10 text-purple-600 dark:text-purple-400 rounded-xl flex items-center justify-center border border-purple-500/20 shrink-0">
+                <Sparkles className="w-4 h-4" />
+              </div>
+            </div>
+
+            <div className="my-1">
+              <span className="text-3xl font-black text-purple-600 dark:text-purple-400 tracking-tight leading-none">
+                {formatDays(kpis.avgDeconTimeHours)}
+              </span>
+            </div>
+          </div>
+          <p className="text-[10px] font-semibold text-slate-400 dark:text-slate-500 mt-2 leading-snug">
+            Início → Fim em dias úteis
+          </p>
+        </motion.div>
       </div>
 
       {/* INDICADORES & RANKINGS SECTION */}
@@ -1792,6 +2011,247 @@ export function DecontaminationManagement({
           setIsCertModalOpen(true);
         }}
       />
+
+      {/* Modal: Lista de Tanques Aguardando Descontaminação */}
+      <AnimatePresence>
+        {isWaitingModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              className="bg-white dark:bg-slate-900 w-full max-w-2xl rounded-3xl border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden flex flex-col max-h-[85vh]"
+            >
+              {/* Header */}
+              <div className="p-5 sm:p-6 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between bg-slate-50/50 dark:bg-slate-800/50">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-2xl bg-amber-500/10 text-amber-600 dark:text-amber-400 flex items-center justify-center border border-amber-500/20 shrink-0">
+                    <Clock className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-black text-slate-900 dark:text-white uppercase tracking-tight">
+                      Aguardando Descontaminação — {waitingOps.length} {waitingOps.length === 1 ? 'tanque' : 'tanques'}
+                    </h3>
+                    <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+                      Tanques na fila aguardando início do processo de lavagem
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setIsWaitingModalOpen(false)}
+                  className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* List Content */}
+              <div className="p-4 sm:p-6 overflow-y-auto space-y-3 flex-1 divide-y divide-slate-100 dark:divide-slate-800/60">
+                {waitingOps.length === 0 ? (
+                  <div className="py-12 text-center text-slate-400 dark:text-slate-500">
+                    <Clock className="w-10 h-10 mx-auto mb-2 opacity-40" />
+                    <p className="text-sm font-bold">Nenhum tanque aguardando descontaminação no momento.</p>
+                  </div>
+                ) : (
+                  waitingOps.map(op => {
+                    const daysWaiting = calculateDurationDays(op.arrivalDate, todayStr);
+                    return (
+                      <div
+                        key={op.id}
+                        onClick={() => {
+                          setEditingOp(op);
+                          setIsWaitingModalOpen(false);
+                          setIsOpModalOpen(true);
+                        }}
+                        className="pt-3 first:pt-0 group cursor-pointer p-4 rounded-2xl hover:bg-slate-50 dark:hover:bg-slate-800/70 border border-transparent hover:border-slate-200 dark:hover:border-slate-700 transition-all flex items-center justify-between gap-4"
+                      >
+                        <div className="space-y-1.5 flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-sm font-black text-slate-900 dark:text-white group-hover:text-amber-600 dark:group-hover:text-amber-400 transition-colors">
+                              {op.equipmentNumber}
+                            </span>
+                            <span className="text-[10px] font-black uppercase px-2.5 py-0.5 rounded-full bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 border border-amber-200/60 dark:border-amber-800/60">
+                              Aguardando
+                            </span>
+                            {op.model && (
+                              <span className="text-[10px] font-bold text-slate-400">
+                                ({op.model})
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="text-xs text-slate-600 dark:text-slate-300 font-bold truncate">
+                            Cliente: <span className="text-slate-900 dark:text-white">{op.client || 'Não Informado'}</span>
+                          </div>
+
+                          <div className="flex items-center gap-3 text-[11px] text-slate-500 dark:text-slate-400 font-semibold flex-wrap">
+                            <span>Recebido: <strong>{formatDateDisplay(op.arrivalDate)}</strong></span>
+                            <span>•</span>
+                            <span className="text-amber-600 dark:text-amber-400 font-bold">
+                              Fila: {formatDays(daysWaiting)} {daysWaiting === 1 ? 'útil' : 'úteis'}
+                            </span>
+                            {op.product && (
+                              <>
+                                <span>•</span>
+                                <span>Produto: <strong className="text-slate-700 dark:text-slate-300">{op.product}</strong></span>
+                              </>
+                            )}
+                            {op.hasContamination && (
+                              <>
+                                <span>•</span>
+                                <span className="text-rose-500 font-bold">Apresentou Contaminação</span>
+                              </>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="shrink-0 flex items-center gap-1 text-xs font-black text-slate-400 group-hover:text-amber-600 dark:group-hover:text-amber-400 transition-colors">
+                          <span className="hidden sm:inline">Ver / Editar</span>
+                          <ChevronRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" />
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+
+              {/* Footer */}
+              <div className="p-4 border-t border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-800/40 flex items-center justify-between">
+                <span className="text-xs font-bold text-slate-500 dark:text-slate-400">
+                  Total de {waitingOps.length} {waitingOps.length === 1 ? 'tanque' : 'tanques'} na fila
+                </span>
+                <button
+                  onClick={() => setIsWaitingModalOpen(false)}
+                  className="px-5 py-2.5 bg-slate-900 text-white dark:bg-white dark:text-slate-900 font-black text-xs uppercase tracking-wider rounded-xl hover:opacity-90 transition-opacity"
+                >
+                  Fechar
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Modal: Lista de Tanques Em Descontaminação */}
+      <AnimatePresence>
+        {isInProgressModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              className="bg-white dark:bg-slate-900 w-full max-w-2xl rounded-3xl border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden flex flex-col max-h-[85vh]"
+            >
+              {/* Header */}
+              <div className="p-5 sm:p-6 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between bg-slate-50/50 dark:bg-slate-800/50">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-2xl bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center border border-blue-500/20 shrink-0">
+                    <RefreshCw className="w-5 h-5 animate-spin-slow" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-black text-slate-900 dark:text-white uppercase tracking-tight">
+                      Em Descontaminação — {inProgressOps.length} {inProgressOps.length === 1 ? 'tanque' : 'tanques'}
+                    </h3>
+                    <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+                      Tanques atualmente em processo de lavagem e descontaminação
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setIsInProgressModalOpen(false)}
+                  className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* List Content */}
+              <div className="p-4 sm:p-6 overflow-y-auto space-y-3 flex-1 divide-y divide-slate-100 dark:divide-slate-800/60">
+                {inProgressOps.length === 0 ? (
+                  <div className="py-12 text-center text-slate-400 dark:text-slate-500">
+                    <RefreshCw className="w-10 h-10 mx-auto mb-2 opacity-40" />
+                    <p className="text-sm font-bold">Nenhum tanque em descontaminação no momento.</p>
+                  </div>
+                ) : (
+                  inProgressOps.map(op => {
+                    const startRefDate = op.startDate || op.arrivalDate;
+                    const daysElapsed = calculateDurationDays(startRefDate, todayStr);
+                    return (
+                      <div
+                        key={op.id}
+                        onClick={() => {
+                          setEditingOp(op);
+                          setIsInProgressModalOpen(false);
+                          setIsOpModalOpen(true);
+                        }}
+                        className="pt-3 first:pt-0 group cursor-pointer p-4 rounded-2xl hover:bg-slate-50 dark:hover:bg-slate-800/70 border border-transparent hover:border-slate-200 dark:hover:border-slate-700 transition-all flex items-center justify-between gap-4"
+                      >
+                        <div className="space-y-1.5 flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-sm font-black text-slate-900 dark:text-white group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
+                              {op.equipmentNumber}
+                            </span>
+                            <span className="text-[10px] font-black uppercase px-2.5 py-0.5 rounded-full bg-blue-50 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300 border border-blue-200/60 dark:border-blue-800/60">
+                              Em lavagem
+                            </span>
+                            {op.model && (
+                              <span className="text-[10px] font-bold text-slate-400">
+                                ({op.model})
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="text-xs text-slate-600 dark:text-slate-300 font-bold truncate">
+                            Cliente: <span className="text-slate-900 dark:text-white">{op.client || 'Não Informado'}</span>
+                          </div>
+
+                          <div className="flex items-center gap-3 text-[11px] text-slate-500 dark:text-slate-400 font-semibold flex-wrap">
+                            <span>Início: <strong>{formatDateDisplay(op.startDate || op.arrivalDate)}</strong></span>
+                            <span>•</span>
+                            <span className="text-blue-600 dark:text-blue-400 font-bold">
+                              Em andamento há: {formatDays(daysElapsed)} {daysElapsed === 1 ? 'útil' : 'úteis'}
+                            </span>
+                            {op.product && (
+                              <>
+                                <span>•</span>
+                                <span>Produto: <strong className="text-slate-700 dark:text-slate-300">{op.product}</strong></span>
+                              </>
+                            )}
+                            {op.hasContamination && (
+                              <>
+                                <span>•</span>
+                                <span className="text-rose-500 font-bold">Apresentou Contaminação</span>
+                              </>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="shrink-0 flex items-center gap-1 text-xs font-black text-slate-400 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
+                          <span className="hidden sm:inline">Ver / Concluir</span>
+                          <ChevronRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" />
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+
+              {/* Footer */}
+              <div className="p-4 border-t border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-800/40 flex items-center justify-between">
+                <span className="text-xs font-bold text-slate-500 dark:text-slate-400">
+                  Total de {inProgressOps.length} {inProgressOps.length === 1 ? 'tanque' : 'tanques'} em andamento
+                </span>
+                <button
+                  onClick={() => setIsInProgressModalOpen(false)}
+                  className="px-5 py-2.5 bg-slate-900 text-white dark:bg-white dark:text-slate-900 font-black text-xs uppercase tracking-wider rounded-xl hover:opacity-90 transition-opacity"
+                >
+                  Fechar
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

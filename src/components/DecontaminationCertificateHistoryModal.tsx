@@ -106,14 +106,14 @@ export function DecontaminationCertificateHistoryModal({
   if (!isOpen) return null;
 
   const isModerator = userRole === 'moderator';
-  const isAdmin = userRole === 'admin';
-  const canApprove = isAdmin || isModerator;
+  const isAdmin = userRole === 'admin' || userRole === 'superadmin';
+  const canApprove = isAdmin || isModerator || userRole === 'gestor';
   const canDelete = isAdmin || isModerator;
 
   // Filter certificates by search term and status filter
   const filteredCertificates = certificates.filter(cert => {
-    const isApproved = cert.approvalStatus === 'approved' || Boolean(cert.approvedByName && cert.approvedDate);
-    const isPending = !isApproved;
+    const isApproved = cert.approvalStatus === 'approved' || (!cert.approvalStatus && Boolean(cert.approvedByName && cert.approvedDate));
+    const isPending = cert.approvalStatus === 'pending_approval' || (!cert.approvalStatus && !isApproved);
 
     // Status filter
     if (statusFilter === 'approved' && !isApproved) return false;
@@ -448,7 +448,7 @@ export function DecontaminationCertificateHistoryModal({
                     : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700 hover:bg-slate-100'
                 }`}
               >
-                Aprovados ({certificates.filter(c => c.approvalStatus === 'approved' || (!c.approvalStatus && c.approvedBy)).length})
+                Aprovados ({certificates.filter(c => c.approvalStatus === 'approved' || (!c.approvalStatus && Boolean(c.approvedByName && c.approvedDate))).length})
               </button>
               <button
                 type="button"
@@ -459,7 +459,7 @@ export function DecontaminationCertificateHistoryModal({
                     : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700 hover:bg-slate-100'
                 }`}
               >
-                Aguardando ({certificates.filter(c => c.approvalStatus === 'pending_approval').length})
+                Aguardando ({certificates.filter(c => c.approvalStatus === 'pending_approval' || (!c.approvalStatus && !c.approvedByName && !c.approvedBy)).length})
               </button>
             </div>
           </div>
@@ -490,15 +490,15 @@ export function DecontaminationCertificateHistoryModal({
                   </thead>
                   <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
                     {filteredCertificates.map(cert => {
-                      const isApproved = cert.approvalStatus === 'approved' || Boolean(cert.approvedByName && cert.approvedDate);
-                      const isPending = !isApproved;
+                      const isApproved = cert.approvalStatus === 'approved' || (!cert.approvalStatus && Boolean(cert.approvedByName && cert.approvedDate));
+                      const isPending = cert.approvalStatus === 'pending_approval' || (!cert.approvalStatus && !isApproved);
                       const issuerDisplay = cert.issuerName || cert.responsibleName || 'Inspetor OEG';
                       const issuerDateDisplay = formatCertificateDate(cert.issueDate || cert.createdAt);
                       const issuerTimeDisplay = cert.issueTime || '';
 
-                      const approverDisplay = cert.approvedByName || cert.approvedBy;
-                      const approverDateDisplay = cert.approvedDate ? formatCertificateDate(cert.approvedDate) : '';
-                      const approverTimeDisplay = cert.approvedTime || '';
+                      const approverDisplay = isApproved ? (cert.approvedByName || cert.approvedBy) : null;
+                      const approverDateDisplay = isApproved && cert.approvedDate ? formatCertificateDate(cert.approvedDate) : '';
+                      const approverTimeDisplay = isApproved && cert.approvedTime ? cert.approvedTime : '';
 
                       const tankCount = cert.tankCount || cert.tanks?.length || 0;
 
@@ -519,24 +519,22 @@ export function DecontaminationCertificateHistoryModal({
                             {cert.client || '—'}
                           </td>
                           <td className="p-3.5">
-                            <div className="flex flex-col gap-1 max-w-xs">
-                              <span className="text-[10px] text-slate-500 font-bold">
-                                {tankCount} {tankCount === 1 ? 'tanque' : 'tanques'}
-                              </span>
+                            <div className="flex flex-col gap-1.5 max-w-sm">
+                              <div className="flex items-center gap-2">
+                                <span className="text-[10px] text-slate-500 font-black uppercase tracking-wider">
+                                  {tankCount} {tankCount === 1 ? 'tanque' : 'tanques'}
+                                </span>
+                              </div>
                               <div className="flex flex-wrap gap-1">
-                                {(cert.tanks || []).slice(0, 3).map((t, idx) => (
+                                {(cert.tanks || []).map((t, idx) => (
                                   <span
                                     key={idx}
-                                    className="px-2 py-0.5 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 rounded-md text-[10px] font-black uppercase"
+                                    title={`Tanque: ${t.equipmentNumber} | Modelo: ${t.description || 'N/A'} | Produto: ${t.product || 'NÃO INFORMADO'} | Data: ${formatCertificateDate(t.decontaminationDate)}`}
+                                    className="px-2 py-0.5 bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800/60 rounded-md text-[10px] font-black uppercase tracking-wide hover:border-blue-400 transition-colors"
                                   >
                                     {t.equipmentNumber}
                                   </span>
                                 ))}
-                                {(cert.tanks || []).length > 3 && (
-                                  <span className="text-[10px] text-slate-400 font-bold self-center">
-                                    +{(cert.tanks || []).length - 3} mais
-                                  </span>
-                                )}
                               </div>
                             </div>
                           </td>
@@ -761,11 +759,11 @@ export function DecontaminationCertificateHistoryModal({
                       Registro de Auditoria
                     </span>
                     <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase ${
-                      detailsCert.approvalStatus === 'approved' || (!detailsCert.approvalStatus && detailsCert.approvedBy)
+                      detailsCert.approvalStatus === 'approved' || (!detailsCert.approvalStatus && Boolean(detailsCert.approvedByName && detailsCert.approvedDate))
                         ? 'bg-emerald-950 text-emerald-400 border border-emerald-800/60'
                         : 'bg-amber-950 text-amber-400 border border-amber-800/60'
                     }`}>
-                      {detailsCert.approvalStatus === 'approved' || (!detailsCert.approvalStatus && detailsCert.approvedBy) ? 'Aprovado' : 'Aguardando Aprovação'}
+                      {detailsCert.approvalStatus === 'approved' || (!detailsCert.approvalStatus && Boolean(detailsCert.approvedByName && detailsCert.approvedDate)) ? 'Aprovado' : 'Aguardando Aprovação'}
                     </span>
                   </div>
                   <h3 className="text-lg font-black text-white uppercase tracking-tight mt-0.5">
@@ -821,11 +819,13 @@ export function DecontaminationCertificateHistoryModal({
                     Responsável Aprovador
                   </span>
                   <span className="text-sm font-black text-slate-900 dark:text-white">
-                    {detailsCert.approvedByName || detailsCert.approvedBy || (
+                    {(detailsCert.approvalStatus === 'approved' || (!detailsCert.approvalStatus && Boolean(detailsCert.approvedByName && detailsCert.approvedDate))) ? (
+                      detailsCert.approvedByName || detailsCert.approvedBy
+                    ) : (
                       <span className="text-amber-500 italic font-normal text-xs">Pendente de aprovação</span>
                     )}
                   </span>
-                  {detailsCert.approvedDate && (
+                  {(detailsCert.approvalStatus === 'approved' || (!detailsCert.approvalStatus && Boolean(detailsCert.approvedByName && detailsCert.approvedDate))) && detailsCert.approvedDate && (
                     <div className="text-[11px] text-slate-500 font-bold mt-1 flex items-center gap-1">
                       <CheckCircle2 className="w-3 h-3 text-emerald-500" />
                       {formatCertificateDate(detailsCert.approvedDate)} {detailsCert.approvedTime && `às ${detailsCert.approvedTime}`}
@@ -939,7 +939,7 @@ export function DecontaminationCertificateHistoryModal({
             {/* Footer Actions */}
             <div className="p-6 bg-slate-50 dark:bg-slate-950 border-t border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-3 shrink-0">
               <div className="flex flex-wrap items-center gap-2">
-                {detailsCert.approvalStatus !== 'approved' && !detailsCert.approvedByName && canApprove && onApproveCertificate && (
+                {(detailsCert.approvalStatus === 'pending_approval' || (!detailsCert.approvalStatus && !detailsCert.approvedByName && !detailsCert.approvedBy)) && canApprove && onApproveCertificate && (
                   <button
                     type="button"
                     onClick={() => handleApproveClick(detailsCert)}
@@ -1054,16 +1054,37 @@ export function DecontaminationCertificateHistoryModal({
                   <span className="font-bold text-slate-800 dark:text-slate-200">{confirmApproveCert.client}</span>
                 </div>
                 <div className="flex justify-between items-center text-xs">
-                  <span className="text-slate-400 font-bold uppercase">Tanques ({confirmApproveCert.tanks?.length || 0}):</span>
-                  <span className="font-bold text-blue-600 dark:text-blue-400">
-                    {confirmApproveCert.tanks?.map(t => t.equipmentNumber).join(', ') || 'Nenhum'}
-                  </span>
-                </div>
-                <div className="flex justify-between items-center text-xs">
                   <span className="text-slate-400 font-bold uppercase">Emissor Técnico:</span>
                   <span className="font-medium text-slate-700 dark:text-slate-300">
                     {confirmApproveCert.issuerName || confirmApproveCert.responsibleName || 'Inspetor OEG'}
                   </span>
+                </div>
+
+                <div className="pt-2 border-t border-slate-200 dark:border-slate-700/60">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-slate-500 dark:text-slate-400 font-black text-[11px] uppercase tracking-wider">
+                      Tanques a Aprovar ({confirmApproveCert.tanks?.length || 0}):
+                    </span>
+                  </div>
+                  <div className="max-h-36 overflow-y-auto space-y-1.5 pr-1">
+                    {(confirmApproveCert.tanks || []).map((tank, idx) => (
+                      <div key={idx} className="flex items-center justify-between p-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs">
+                        <div className="flex items-center gap-2">
+                          <span className="w-5 h-5 rounded-full bg-blue-100 dark:bg-blue-950/80 text-blue-600 dark:text-blue-400 text-[10px] font-black flex items-center justify-center">
+                            {idx + 1}
+                          </span>
+                          <div>
+                            <span className="font-mono font-black text-blue-600 dark:text-blue-400 uppercase">{tank.equipmentNumber}</span>
+                            <span className="text-[10px] text-slate-400 ml-1.5 uppercase font-medium">({tank.description || 'Tanque'})</span>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <div className="text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase">{tank.product || 'NÃO INFORMADO'}</div>
+                          <div className="text-[9px] text-slate-400">{formatCertificateDate(tank.decontaminationDate)}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
 

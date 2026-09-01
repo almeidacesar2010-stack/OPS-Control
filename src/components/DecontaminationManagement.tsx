@@ -87,14 +87,17 @@ import {
   formatDateDisplay,
   calculateDurationDays,
   isOperationInPeriod, 
-  calculateDecontaminationKPIs, 
+  calculateMainIndicators,
+  generateRhythmDashboardData,
+  generateProductivityDashboardData,
+  computePercentageVariation,
   calculateClientIndicators, 
   calculateModelIndicators, 
   calculateContaminationIndicators,
-  generateDailyProductivityChartData,
-  ProductivityHorizon,
-  DailyProductivityPoint,
-  ComparisonResult
+  DeconFilterPeriod,
+  RhythmDashboardData,
+  ProductivityDashboardData,
+  MainIndicatorsData
 } from '../utils/decontaminationUtils';
 import { UserRole } from '../types';
 import { DecontaminationModal } from './DecontaminationModal';
@@ -229,6 +232,17 @@ export function DecontaminationManagement({
       const { id, ...rawCertData } = cert;
       const certData = cleanForFirestore(rawCertData);
       
+      if (cert.approvalStatus === 'pending_approval') {
+        certData.approvedByName = null;
+        certData.approvedById = null;
+        certData.approvedDate = null;
+        certData.approvedTime = null;
+        certData.approvedAt = null;
+        certData.approvedBy = null;
+        certData.approvedByJobTitle = null;
+        certData.approvedBySignatureUrl = null;
+      }
+
       if (id && !id.startsWith('cert_')) {
         await setDoc(doc(db, 'decontaminationCertificates', id), {
           ...certData,
@@ -316,14 +330,19 @@ export function DecontaminationManagement({
     }
   };
 
+  // Dashboard View Switcher: 'ritmo' | 'produtividade'
+  const [activeDashboard, setActiveDashboard] = useState<'ritmo' | 'produtividade'>('ritmo');
+
+  // Filter Period: [ SEMANAL ] [ MENSAL ] [ TRIMESTRAL ] [ SEMESTRAL ] [ PERSONALIZADO ]
+  const [filterPeriod, setFilterPeriod] = useState<DeconFilterPeriod>('month');
+  const [customStartDate, setCustomStartDate] = useState('');
+  const [customEndDate, setCustomEndDate] = useState('');
+
   // Active view tab for indicators & rankings section
   const [activeIndicatorTab, setActiveIndicatorTab] = useState<'clients' | 'models' | 'contamination'>('clients');
 
   // Client sorting option
   const [clientSortOption, setClientSortOption] = useState<'decon_desc' | 'decon_asc' | 'tempo_desc' | 'tempo_asc'>('decon_desc');
-
-  // Chart Horizon for Daily Productivity
-  const [chartHorizon, setChartHorizon] = useState<ProductivityHorizon>('monthly');
 
   // Modals for Aguardando and Em Descontaminação lists
   const [isWaitingModalOpen, setIsWaitingModalOpen] = useState(false);
@@ -331,11 +350,6 @@ export function DecontaminationManagement({
 
   // Today ISO date string
   const todayStr = useMemo(() => format(new Date(), 'yyyy-MM-dd'), []);
-
-  // Filter state
-  const [filterPeriod, setFilterPeriod] = useState<FilterPeriod>('all');
-  const [customStartDate, setCustomStartDate] = useState('');
-  const [customEndDate, setCustomEndDate] = useState('');
 
   // Search & Table Filters
   const [searchTerm, setSearchTerm] = useState('');
@@ -370,7 +384,22 @@ export function DecontaminationManagement({
     }
   };
 
-  // Filter operations by date range period
+  // 1. CALCULATE TOP 4 MAIN INDICATORS (Parte 1)
+  const mainIndicators = useMemo<MainIndicatorsData>(() => {
+    return calculateMainIndicators(operations, filterPeriod, customStartDate, customEndDate);
+  }, [operations, filterPeriod, customStartDate, customEndDate]);
+
+  // 2. GENERATE RHYTHM DASHBOARD DATA (Parte 2)
+  const rhythmData = useMemo<RhythmDashboardData>(() => {
+    return generateRhythmDashboardData(operations, filterPeriod, customStartDate, customEndDate);
+  }, [operations, filterPeriod, customStartDate, customEndDate]);
+
+  // 3. GENERATE PRODUCTIVITY DASHBOARD DATA (Parte 3)
+  const productivityData = useMemo<ProductivityDashboardData>(() => {
+    return generateProductivityDashboardData(operations, filterPeriod, customStartDate, customEndDate);
+  }, [operations, filterPeriod, customStartDate, customEndDate]);
+
+  // Filter operations by date range period for lower sections & tables
   const dateFilteredOperations = useMemo(() => {
     return operations.filter(op => 
       isOperationInPeriod(op, filterPeriod, customStartDate, customEndDate)
@@ -379,22 +408,12 @@ export function DecontaminationManagement({
 
   // Specific filtered lists for interactive cards & modals
   const waitingOps = useMemo(() => {
-    return dateFilteredOperations.filter(op => op.status === 'waiting');
-  }, [dateFilteredOperations]);
+    return mainIndicators.waitingTanksList;
+  }, [mainIndicators.waitingTanksList]);
 
   const inProgressOps = useMemo(() => {
-    return dateFilteredOperations.filter(op => op.status === 'in_progress');
-  }, [dateFilteredOperations]);
-
-  // Compute Overview KPIs with comparative percentage vs previous period
-  const kpis = useMemo(() => {
-    return calculateDecontaminationKPIs(dateFilteredOperations, filterPeriod, customStartDate, customEndDate, operations);
-  }, [dateFilteredOperations, filterPeriod, customStartDate, customEndDate, operations]);
-
-  // Generate Daily Productivity Chart Data (tanques finalizados por dia)
-  const dailyProductivity = useMemo(() => {
-    return generateDailyProductivityChartData(dateFilteredOperations, filterPeriod, customStartDate, customEndDate, chartHorizon);
-  }, [dateFilteredOperations, filterPeriod, customStartDate, customEndDate, chartHorizon]);
+    return mainIndicators.inProgressTanksList;
+  }, [mainIndicators.inProgressTanksList]);
 
   // Compute Client Indicators
   const clientIndicators = useMemo(() => {
@@ -702,43 +721,227 @@ export function DecontaminationManagement({
         </div>
       </div>
 
-      {/* Global Date Filter Bar */}
-      <div className="bg-white/90 dark:bg-slate-900/90 backdrop-blur-xl p-6 rounded-[32px] border border-slate-200/50 dark:border-slate-800/50 shadow-sm space-y-4">
-        <div className="flex items-center justify-between flex-wrap gap-4">
-          <div className="flex items-center gap-2">
-            <Calendar className="w-5 h-5 text-blue-600 dark:text-blue-400" />
-            <span className="text-xs font-black uppercase tracking-wider text-slate-900 dark:text-white">
-              Filtrar Indicadores por Período
-            </span>
+      {/* ========================================================== */}
+      {/* PARTE 1 — QUATRO INDICADORES PRINCIPAIS                   */}
+      {/* ========================================================== */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5 items-stretch">
+        {/* INDICADOR 1 — TANQUES DESCONTAMINADOS */}
+        <motion.div 
+          whileHover={{ y: -2 }}
+          transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+          className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between min-h-[160px] relative overflow-hidden"
+        >
+          <div className="flex items-center justify-between gap-2 mb-3">
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-500/10 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border border-emerald-500/20 rounded-full">
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              <span className="text-[10px] font-black uppercase tracking-wider">Finalizados</span>
+            </div>
+            <div className="w-10 h-10 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 rounded-2xl flex items-center justify-center border border-emerald-500/20 shrink-0">
+              <CheckCircle2 className="w-5 h-5 stroke-[2.5]" />
+            </div>
           </div>
 
-          {/* Quick Period Presets */}
-          <div className="flex flex-wrap items-center gap-1.5 bg-slate-100 dark:bg-slate-800/80 p-1.5 rounded-2xl border border-slate-200/50 dark:border-slate-700/50">
-            {[
-              { id: 'all', label: 'Todos' },
-              { id: 'week', label: 'Semana' },
-              { id: 'month', label: 'Mês' },
-              { id: 'quarter', label: 'Trimestre' },
-              { id: 'semester', label: 'Semestre' },
-              { id: 'year', label: 'Ano' },
-              { id: 'custom', label: 'Personalizado' }
-            ].map(p => (
+          <div>
+            <h3 className="text-xs font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+              Tanques Descontaminados
+            </h3>
+            <div className="mt-2 flex items-baseline gap-2">
+              <span className="text-4xl sm:text-5xl font-black text-slate-900 dark:text-white tracking-tight leading-none">
+                {mainIndicators.totalCompletedInPeriod}
+              </span>
+              <span className="text-xs font-bold text-slate-400">tanques</span>
+            </div>
+          </div>
+
+          <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800/80">
+            <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
+              Finalizados em {mainIndicators.periodLabel}
+            </p>
+          </div>
+        </motion.div>
+
+        {/* INDICADOR 2 — TANQUES EM DESCONTAMINAÇÃO (CLICÁVEL) */}
+        <motion.button
+          type="button"
+          onClick={() => setIsInProgressModalOpen(true)}
+          whileHover={{ y: -3, scale: 1.01 }}
+          whileTap={{ scale: 0.98 }}
+          transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+          className="bg-white dark:bg-slate-900 p-6 rounded-3xl border-2 border-blue-500/30 dark:border-blue-500/40 hover:border-blue-500 shadow-sm hover:shadow-lg hover:shadow-blue-500/10 flex flex-col justify-between min-h-[160px] text-left cursor-pointer transition-all relative overflow-hidden group"
+        >
+          <div className="flex items-center justify-between gap-2 mb-3">
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-blue-500/10 dark:bg-blue-500/20 text-blue-700 dark:text-blue-300 border border-blue-500/20 rounded-full">
+              <RefreshCw className="w-3.5 h-3.5 group-hover:animate-spin" />
+              <span className="text-[10px] font-black uppercase tracking-wider">Em Processo</span>
+            </div>
+            <div className="w-10 h-10 bg-blue-500/10 text-blue-600 dark:text-blue-400 rounded-2xl flex items-center justify-center border border-blue-500/20 shrink-0 group-hover:bg-blue-600 group-hover:text-white transition-colors">
+              <RefreshCw className="w-5 h-5" />
+            </div>
+          </div>
+
+          <div>
+            <h3 className="text-xs font-black uppercase tracking-wider text-blue-700 dark:text-blue-300">
+              Em Descontaminação
+            </h3>
+            <div className="mt-2 flex items-baseline gap-2">
+              <span className="text-4xl sm:text-5xl font-black text-blue-600 dark:text-blue-400 tracking-tight leading-none">
+                {mainIndicators.inProgressCount}
+              </span>
+              <span className="text-xs font-bold text-blue-600/70 dark:text-blue-400/70">em lavagem</span>
+            </div>
+          </div>
+
+          <div className="mt-4 pt-3 border-t border-blue-100 dark:border-blue-950/60 flex items-center justify-between text-[11px] font-bold text-blue-600 dark:text-blue-400">
+            <span>Clique para ver lista</span>
+            <ChevronRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
+          </div>
+        </motion.button>
+
+        {/* INDICADOR 3 — TANQUES AGUARDANDO (CLICÁVEL) */}
+        <motion.button
+          type="button"
+          onClick={() => setIsWaitingModalOpen(true)}
+          whileHover={{ y: -3, scale: 1.01 }}
+          whileTap={{ scale: 0.98 }}
+          transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+          className="bg-white dark:bg-slate-900 p-6 rounded-3xl border-2 border-amber-500/30 dark:border-amber-500/40 hover:border-amber-500 shadow-sm hover:shadow-lg hover:shadow-amber-500/10 flex flex-col justify-between min-h-[160px] text-left cursor-pointer transition-all relative overflow-hidden group"
+        >
+          <div className="flex items-center justify-between gap-2 mb-3">
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-amber-500/10 dark:bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/20 rounded-full">
+              <Clock className="w-3.5 h-3.5" />
+              <span className="text-[10px] font-black uppercase tracking-wider">Fila Atual</span>
+            </div>
+            <div className="w-10 h-10 bg-amber-500/10 text-amber-600 dark:text-amber-400 rounded-2xl flex items-center justify-center border border-amber-500/20 shrink-0 group-hover:bg-amber-500 group-hover:text-white transition-colors">
+              <Clock className="w-5 h-5" />
+            </div>
+          </div>
+
+          <div>
+            <h3 className="text-xs font-black uppercase tracking-wider text-amber-700 dark:text-amber-300">
+              Aguardando Descontaminação
+            </h3>
+            <div className="mt-2 flex items-baseline gap-2">
+              <span className="text-4xl sm:text-5xl font-black text-amber-600 dark:text-amber-400 tracking-tight leading-none">
+                {mainIndicators.waitingCount}
+              </span>
+              <span className="text-xs font-bold text-amber-600/70 dark:text-amber-400/70">na fila</span>
+            </div>
+          </div>
+
+          <div className="mt-4 pt-3 border-t border-amber-100 dark:border-amber-950/60 flex items-center justify-between text-[11px] font-bold text-amber-700 dark:text-amber-300">
+            <span>Clique para ver fila</span>
+            <ChevronRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
+          </div>
+        </motion.button>
+
+        {/* INDICADOR 4 — TEMPO MÉDIO DE DESCONTAMINAÇÃO */}
+        <motion.div 
+          whileHover={{ y: -2 }}
+          transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+          className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between min-h-[160px] relative overflow-hidden"
+        >
+          <div className="flex items-center justify-between gap-2 mb-3">
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-purple-500/10 dark:bg-purple-500/20 text-purple-700 dark:text-purple-300 border border-purple-500/20 rounded-full">
+              <Gauge className="w-3.5 h-3.5" />
+              <span className="text-[10px] font-black uppercase tracking-wider">Prazo Médio</span>
+            </div>
+            <div className="w-10 h-10 bg-purple-500/10 text-purple-600 dark:text-purple-400 rounded-2xl flex items-center justify-center border border-purple-500/20 shrink-0">
+              <Sparkles className="w-5 h-5 stroke-[2.5]" />
+            </div>
+          </div>
+
+          <div>
+            <h3 className="text-xs font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+              Tempo Médio de Descontaminação
+            </h3>
+            <div className="mt-2 flex items-baseline gap-2">
+              <span className="text-3xl sm:text-4xl font-black text-purple-600 dark:text-purple-400 tracking-tight leading-none">
+                {formatDays(mainIndicators.avgDeconDurationDays)}
+              </span>
+            </div>
+          </div>
+
+          <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800/80">
+            <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
+              Início → Conclusão em dias úteis
+            </p>
+          </div>
+        </motion.div>
+      </div>
+
+      {/* ========================================================== */}
+      {/* SELETOR DE DASHBOARD & FILTRO DE PERÍODO                   */}
+      {/* ========================================================== */}
+      <div className="bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl p-5 sm:p-6 rounded-[28px] border border-slate-200/60 dark:border-slate-800/60 shadow-sm space-y-4">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          {/* Dashboard Switcher (RITMO / PRODUTIVIDADE) */}
+          <div className="flex items-center gap-3">
+            <span className="text-xs font-black uppercase tracking-wider text-slate-400 hidden sm:inline">
+              Visualização:
+            </span>
+            <div className="flex items-center p-1.5 bg-slate-100 dark:bg-slate-800/90 rounded-2xl border border-slate-200/70 dark:border-slate-700/60 w-full sm:w-auto">
               <button
-                key={p.id}
-                onClick={() => setFilterPeriod(p.id as FilterPeriod)}
-                className={`px-3.5 py-2 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all ${
-                  filterPeriod === p.id
-                    ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20'
-                    : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
+                type="button"
+                onClick={() => setActiveDashboard('ritmo')}
+                className={`flex-1 sm:flex-none px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center justify-center gap-2 ${
+                  activeDashboard === 'ritmo'
+                    ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                 }`}
               >
-                {p.label}
+                <TrendingUp className="w-4 h-4" />
+                <span>Ritmo</span>
               </button>
-            ))}
+
+              <button
+                type="button"
+                onClick={() => setActiveDashboard('produtividade')}
+                className={`flex-1 sm:flex-none px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center justify-center gap-2 ${
+                  activeDashboard === 'produtividade'
+                    ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-600/30'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                <Zap className="w-4 h-4" />
+                <span>Produtividade</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Period Filter (SEMANAL, MENSAL, TRIMESTRAL, SEMESTRAL, PERSONALIZADO) */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex items-center gap-1.5 text-xs font-black uppercase tracking-wider text-slate-400 mr-1">
+              <Calendar className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+              <span className="hidden sm:inline">Período:</span>
+            </div>
+            <div className="flex flex-wrap items-center gap-1 bg-slate-100 dark:bg-slate-800 p-1.5 rounded-2xl border border-slate-200/60 dark:border-slate-700/60">
+              {[
+                { id: 'week', label: 'Semanal' },
+                { id: 'month', label: 'Mensal' },
+                { id: 'quarter', label: 'Trimestral' },
+                { id: 'semester', label: 'Semestral' },
+                { id: 'custom', label: 'Personalizado' }
+              ].map(p => (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => setFilterPeriod(p.id as DeconFilterPeriod)}
+                  className={`px-3.5 py-2 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all ${
+                    filterPeriod === p.id
+                      ? activeDashboard === 'ritmo'
+                        ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20'
+                        : 'bg-emerald-600 text-white shadow-md shadow-emerald-500/20'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 
-        {/* Custom Date Pickers */}
+        {/* Custom Date Pickers (only when filterPeriod === 'custom') */}
         {filterPeriod === 'custom' && (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-3 border-t border-slate-200/60 dark:border-slate-800">
             <div>
@@ -763,443 +966,598 @@ export function DecontaminationManagement({
         )}
       </div>
 
-      {/* SEÇÃO 1: KPIS PROTAGONISTAS — RITMO MÉDIO & PICO DE PRODUÇÃO */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-5 items-stretch">
-        {/* CARD PROTAGONISTA 1: RITMO MÉDIO */}
-        <motion.div 
-          whileHover={{ y: -2 }}
-          transition={{ type: 'spring', stiffness: 400, damping: 25 }}
-          className="bg-gradient-to-br from-slate-900 via-slate-900 to-teal-950 text-white p-6 sm:p-7 rounded-3xl border-2 border-teal-500/50 shadow-xl shadow-teal-950/20 relative overflow-hidden flex flex-col justify-between"
-        >
-          {/* Subtle Background Glow Accent */}
-          <div className="absolute top-0 right-0 -mr-16 -mt-16 w-48 h-48 bg-teal-500/10 rounded-full blur-3xl pointer-events-none" />
+      {/* ========================================================== */}
+      {/* DASHBOARD 1: RITMO (Velocidade da Operação)                */}
+      {/* ========================================================== */}
+      {activeDashboard === 'ritmo' && (
+        <div className="space-y-6 animate-fade-in">
+          {/* CARDS DE APOIO DE RITMO */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5 items-stretch">
+            {/* Card 1: RITMO ATUAL */}
+            <motion.div 
+              whileHover={{ y: -2 }}
+              transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+              className="bg-gradient-to-br from-slate-900 via-slate-900 to-blue-950 text-white p-6 rounded-3xl border-2 border-blue-500/50 shadow-xl shadow-blue-950/20 relative overflow-hidden flex flex-col justify-between min-h-[170px]"
+            >
+              <div className="absolute top-0 right-0 -mr-12 -mt-12 w-36 h-36 bg-blue-500/10 rounded-full blur-2xl pointer-events-none" />
 
-          <div>
-            {/* Protagonist Header Badge */}
-            <div className="flex items-center justify-between gap-2 mb-4">
-              <div className="inline-flex items-center gap-2 px-3 py-1 bg-teal-500/20 border border-teal-500/30 rounded-full">
-                <span className="w-2 h-2 rounded-full bg-teal-400 animate-pulse" />
-                <span className="text-[10px] font-black uppercase tracking-widest text-teal-300">
-                  Indicador Principal
-                </span>
-              </div>
-
-              <div className="flex items-center gap-1.5">
-                <div className="relative group/tip shrink-0">
-                  <Info className="w-4 h-4 text-teal-400/80 hover:text-teal-300 cursor-help transition-colors" />
-                  <div className="absolute right-0 bottom-full mb-2 hidden group-hover/tip:block w-64 p-3 bg-slate-950 text-white text-[11px] font-medium rounded-xl shadow-2xl border border-slate-800 z-50 pointer-events-none leading-relaxed">
-                    <strong>Ritmo Médio:</strong> Tanques finalizados ÷ Dias úteis considerados no período selecionado.
-                    <div className="absolute right-3 top-full w-0 h-0 border-x-4 border-x-transparent border-t-4 border-t-slate-950" />
+              <div>
+                <div className="flex items-center justify-between gap-2 mb-3">
+                  <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 bg-blue-500/20 border border-blue-500/30 rounded-full">
+                    <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
+                    <span className="text-[9px] font-black uppercase tracking-widest text-blue-300">
+                      Ritmo Atual
+                    </span>
+                  </div>
+                  <div className="w-8 h-8 bg-blue-500/20 text-blue-300 rounded-xl flex items-center justify-center border border-blue-500/30 shrink-0">
+                    <TrendingUp className="w-4 h-4" />
                   </div>
                 </div>
-                <div className="w-10 h-10 bg-teal-500/20 text-teal-300 rounded-xl flex items-center justify-center border border-teal-500/30">
-                  <TrendingUp className="w-5 h-5 stroke-[2.5]" />
-                </div>
-              </div>
-            </div>
 
-            {/* Protagonist Label */}
-            <h3 className="text-xs font-black uppercase tracking-wider text-teal-200">
-              Ritmo Médio de Descontaminação
-            </h3>
+                <h3 className="text-[11px] font-black uppercase tracking-wider text-blue-200">
+                  Ritmo de Descontaminação
+                </h3>
 
-            {/* Protagonist Giant Numeric Display */}
-            <div className="mt-3 flex items-baseline gap-3 flex-wrap">
-              <span className="text-5xl sm:text-6xl font-black text-white tracking-tight leading-none">
-                {formatDailyAverage(kpis.avgDailyDecon)}
-              </span>
-              <div className="flex flex-col">
-                <span className="text-sm sm:text-base font-black uppercase tracking-wide text-teal-300">
-                  tanques / dia útil
-                </span>
-                <span className="text-[11px] font-semibold text-slate-400">
-                  média diária realizada
-                </span>
-              </div>
-            </div>
-          </div>
-
-          {/* Context & Description Footer inside Hero Card */}
-          <div className="mt-6 pt-5 border-t border-slate-800/80 flex flex-col gap-3">
-            <p className="text-xs font-semibold text-teal-100/90 leading-relaxed">
-              Média de tanques finalizados por dia útil no período.
-            </p>
-
-            <div className="flex items-center justify-between flex-wrap gap-2 text-xs">
-              <div className="flex items-center gap-1.5 text-slate-300 font-bold bg-slate-800/60 px-3 py-1.5 rounded-xl border border-slate-700/50">
-                <CheckCircle2 className="w-3.5 h-3.5 text-teal-400" />
-                <span>{kpis.completedCount} finalizados em {kpis.elapsedBusinessDays} dias úteis</span>
-              </div>
-
-              {kpis.comparisons.avgDailyDecon && kpis.comparisons.avgDailyDecon.hasSufficientData && (
-                <div className={`flex items-center gap-1 text-[11px] font-black px-2.5 py-1 rounded-lg ${
-                  kpis.comparisons.avgDailyDecon.isIncrease
-                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-                    : !kpis.comparisons.avgDailyDecon.isNeutral
-                    ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
-                    : 'bg-slate-800 text-slate-400'
-                }`}>
-                  {kpis.comparisons.avgDailyDecon.isIncrease && <ArrowUpRight className="w-3.5 h-3.5" />}
-                  {!kpis.comparisons.avgDailyDecon.isIncrease && !kpis.comparisons.avgDailyDecon.isNeutral && <ArrowDownRight className="w-3.5 h-3.5" />}
-                  <span>
-                    {kpis.comparisons.avgDailyDecon.isIncrease ? '+' : !kpis.comparisons.avgDailyDecon.isNeutral ? '-' : ''}
-                    {kpis.comparisons.avgDailyDecon.percent}% vs. anterior
+                <div className="mt-2 flex items-baseline gap-2 flex-wrap">
+                  <span className="text-4xl font-black text-white tracking-tight leading-none">
+                    {formatDailyAverage(rhythmData.currentPace)}
+                  </span>
+                  <span className="text-xs font-black uppercase text-blue-300">
+                    tanques / dia útil
                   </span>
                 </div>
+              </div>
+
+              <div className="mt-4 pt-3 border-t border-slate-800/80">
+                <p className="text-[11px] font-bold text-slate-300 truncate">
+                  Período: <span className="text-blue-300 font-black">{rhythmData.currentPeriodLabel}</span>
+                </p>
+                <p className="text-[10px] text-slate-400 mt-0.5 font-medium">
+                  Tanques finalizados ÷ dias úteis do período
+                </p>
+              </div>
+            </motion.div>
+
+            {/* Card 2: MAIOR RITMO */}
+            <motion.div 
+              whileHover={{ y: -2 }}
+              transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+              className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between min-h-[170px]"
+            >
+              <div>
+                <div className="flex items-center justify-between gap-2 mb-3">
+                  <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 bg-emerald-500/10 dark:bg-emerald-500/20 border border-emerald-500/20 dark:border-emerald-500/30 rounded-full">
+                    <span className="text-[9px] font-black uppercase tracking-widest text-emerald-700 dark:text-emerald-300">
+                      Pico de Ritmo
+                    </span>
+                  </div>
+                  <div className="w-8 h-8 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 rounded-xl flex items-center justify-center border border-emerald-500/20 shrink-0">
+                    <Award className="w-4 h-4" />
+                  </div>
+                </div>
+
+                <h3 className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                  Maior Ritmo
+                </h3>
+
+                <div className="mt-2 flex items-baseline gap-2 flex-wrap">
+                  <span className="text-4xl font-black text-emerald-600 dark:text-emerald-400 tracking-tight leading-none">
+                    {formatDailyAverage(rhythmData.maxPace)}
+                  </span>
+                  <span className="text-xs font-black uppercase text-emerald-700 dark:text-emerald-300">
+                    tanques / dia útil
+                  </span>
+                </div>
+              </div>
+
+              <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800">
+                <p className="text-[11px] font-bold text-slate-700 dark:text-slate-300 truncate">
+                  {rhythmData.maxPacePeriod ? `Registrado em ${rhythmData.maxPacePeriod}` : '—'}
+                </p>
+                <p className="text-[10px] text-slate-400 mt-0.5 font-medium">
+                  Maior velocidade registrada
+                </p>
+              </div>
+            </motion.div>
+
+            {/* Card 3: MENOR RITMO */}
+            <motion.div 
+              whileHover={{ y: -2 }}
+              transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+              className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between min-h-[170px]"
+            >
+              <div>
+                <div className="flex items-center justify-between gap-2 mb-3">
+                  <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 bg-amber-500/10 dark:bg-amber-500/20 border border-amber-500/20 dark:border-amber-500/30 rounded-full">
+                    <span className="text-[9px] font-black uppercase tracking-widest text-amber-700 dark:text-amber-300">
+                      Menor Velocidade
+                    </span>
+                  </div>
+                  <div className="w-8 h-8 bg-amber-500/10 text-amber-600 dark:text-amber-400 rounded-xl flex items-center justify-center border border-amber-500/20 shrink-0">
+                    <Gauge className="w-4 h-4" />
+                  </div>
+                </div>
+
+                <h3 className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                  Menor Ritmo
+                </h3>
+
+                <div className="mt-2 flex items-baseline gap-2 flex-wrap">
+                  <span className="text-4xl font-black text-amber-600 dark:text-amber-400 tracking-tight leading-none">
+                    {formatDailyAverage(rhythmData.minPace)}
+                  </span>
+                  <span className="text-xs font-black uppercase text-amber-700 dark:text-amber-300">
+                    tanques / dia útil
+                  </span>
+                </div>
+              </div>
+
+              <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800">
+                <p className="text-[11px] font-bold text-slate-700 dark:text-slate-300 truncate">
+                  {rhythmData.minPacePeriod ? `Registrado em ${rhythmData.minPacePeriod}` : '—'}
+                </p>
+                <p className="text-[10px] text-slate-400 mt-0.5 font-medium">
+                  Menor velocidade apurada
+                </p>
+              </div>
+            </motion.div>
+
+            {/* Card 4: VARIAÇÃO DO RITMO */}
+            <motion.div 
+              whileHover={{ y: -2 }}
+              transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+              className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between min-h-[170px]"
+            >
+              <div>
+                <div className="flex items-center justify-between gap-2 mb-3">
+                  <div className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full border text-[9px] font-black uppercase tracking-widest ${
+                    rhythmData.variation.direction === 'up'
+                      ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/20'
+                      : rhythmData.variation.direction === 'down'
+                      ? 'bg-rose-500/10 text-rose-700 dark:text-rose-300 border-rose-500/20'
+                      : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-300 dark:border-slate-700'
+                  }`}>
+                    {rhythmData.variation.direction === 'up' && <ArrowUpRight className="w-3 h-3" />}
+                    {rhythmData.variation.direction === 'down' && <ArrowDownRight className="w-3 h-3" />}
+                    {rhythmData.variation.direction === 'stable' && <Minus className="w-3 h-3" />}
+                    <span>{rhythmData.variation.label}</span>
+                  </div>
+                  <div className={`w-8 h-8 rounded-xl flex items-center justify-center border shrink-0 ${
+                    rhythmData.variation.direction === 'up'
+                      ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
+                      : rhythmData.variation.direction === 'down'
+                      ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20'
+                      : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-300 dark:border-slate-700'
+                  }`}>
+                    <Activity className="w-4 h-4" />
+                  </div>
+                </div>
+
+                <h3 className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                  Variação do Ritmo
+                </h3>
+
+                <div className="mt-2 flex items-baseline gap-2 flex-wrap">
+                  <span className={`text-3xl font-black tracking-tight leading-none ${
+                    rhythmData.variation.direction === 'up'
+                      ? 'text-emerald-600 dark:text-emerald-400'
+                      : rhythmData.variation.direction === 'down'
+                      ? 'text-rose-600 dark:text-rose-400'
+                      : 'text-slate-700 dark:text-slate-300'
+                  }`}>
+                    {rhythmData.variation.formattedDiff}
+                  </span>
+                </div>
+              </div>
+
+              <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800">
+                <p className="text-[11px] font-bold text-slate-700 dark:text-slate-300">
+                  {rhythmData.variation.hasSufficientData ? 'Comparado ao período anterior' : 'Histórico em formação'}
+                </p>
+                <p className="text-[10px] text-slate-400 mt-0.5 font-medium">
+                  {rhythmData.variation.label}
+                </p>
+              </div>
+            </motion.div>
+          </div>
+
+          {/* GRÁFICO DE EVOLUÇÃO DO RITMO */}
+          <div className="bg-white dark:bg-slate-900 rounded-[32px] border border-slate-200/50 dark:border-slate-800/50 p-6 md:p-8 shadow-sm space-y-6">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-200/80 dark:border-slate-800 pb-6">
+              <div>
+                <h2 className="text-lg font-black uppercase tracking-tight text-slate-900 dark:text-white flex items-center gap-2.5">
+                  <TrendingUp className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+                  Evolução do Ritmo de Descontaminação
+                </h2>
+                <p className="text-xs text-slate-500 dark:text-slate-400 font-bold mt-0.5">
+                  Velocidade da operação calculada: Tanques finalizados ÷ Dias úteis do período
+                </p>
+              </div>
+            </div>
+
+            <div className="h-80 w-full pt-2">
+              {rhythmData.chartData.length === 0 ? (
+                <div className="h-full flex flex-col items-center justify-center text-slate-400 bg-slate-50/50 dark:bg-slate-800/20 rounded-2xl border border-dashed border-slate-200 dark:border-slate-800">
+                  <BarChart3 className="w-10 h-10 mb-2 opacity-50" />
+                  <p className="text-xs font-bold">Nenhum dado de ritmo para o período selecionado.</p>
+                </div>
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={rhythmData.chartData} margin={{ top: 15, right: 30, left: -10, bottom: 5 }}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#334155" opacity={0.15} />
+                    <XAxis 
+                      dataKey="label" 
+                      tick={{ fontSize: 11, fontWeight: 700 }}
+                      interval="preserveStartEnd"
+                      minTickGap={12}
+                    />
+                    <YAxis 
+                      allowDecimals={true} 
+                      tick={{ fontSize: 11, fontWeight: 700 }} 
+                      domain={[0, (dataMax: number) => Math.max(2, Math.ceil((dataMax + 0.5) * 1.25))]}
+                    />
+                    <Tooltip 
+                      contentStyle={{ 
+                        backgroundColor: '#0f172a', 
+                        borderRadius: '16px', 
+                        border: '1px solid #334155',
+                        color: '#fff',
+                        fontWeight: 'bold',
+                        fontSize: '12px'
+                      }}
+                      content={({ active, payload }) => {
+                        if (active && payload && payload.length) {
+                          const data = payload[0].payload as any;
+                          return (
+                            <div className="p-3.5 bg-slate-950 text-white rounded-2xl border border-slate-800 shadow-2xl space-y-2 min-w-[230px]">
+                              <div className="text-[11px] font-black uppercase text-slate-400 border-b border-slate-800 pb-1.5 flex items-center justify-between gap-3">
+                                <span>{data.fullPeriodLabel}</span>
+                                {data.isCurrent && (
+                                  <span className="text-[9px] bg-blue-500/20 text-blue-300 px-1.5 py-0.5 rounded">
+                                    ATUAL
+                                  </span>
+                                )}
+                              </div>
+                              
+                              <div className="space-y-1">
+                                <div className="text-sm font-black text-blue-400 flex items-center justify-between gap-2">
+                                  <span>Ritmo:</span>
+                                  <span className="text-base font-black text-white">{formatDailyAverage(data.ritmo)} tanques/dia útil</span>
+                                </div>
+                                <div className="text-[11px] font-medium text-slate-300 flex items-center justify-between gap-2">
+                                  <span>Tanques Finalizados:</span>
+                                  <span className="font-bold text-white">{data.completedCount} tanques</span>
+                                </div>
+                                <div className="text-[11px] font-medium text-slate-300 flex items-center justify-between gap-2">
+                                  <span>Dias Úteis:</span>
+                                  <span className="font-bold text-white">{data.businessDays} dias</span>
+                                </div>
+                              </div>
+
+                              {(data.isMax || data.isMin) && (
+                                <div className="pt-1.5 border-t border-slate-800/80 flex items-center gap-2">
+                                  {data.isMax && (
+                                    <span className="text-[9px] font-black bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded border border-emerald-500/30">
+                                      MAIOR RITMO
+                                    </span>
+                                  )}
+                                  {data.isMin && (
+                                    <span className="text-[9px] font-black bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30">
+                                      MENOR RITMO
+                                    </span>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        }
+                        return null;
+                      }}
+                    />
+                    <Line 
+                      type="monotone" 
+                      dataKey="ritmo" 
+                      name="Ritmo (Tanques / Dia Útil)" 
+                      stroke="#2563eb" 
+                      strokeWidth={3.5} 
+                      dot={{ r: 4.5, stroke: '#2563eb', strokeWidth: 2, fill: '#ffffff' }}
+                      activeDot={{ r: 7, stroke: '#1d4ed8', strokeWidth: 2.5, fill: '#60a5fa' }}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
               )}
             </div>
           </div>
-        </motion.div>
+        </div>
+      )}
 
-        {/* CARD PROTAGONISTA 2: PICO DE PRODUÇÃO */}
-        <motion.div 
-          whileHover={{ y: -2 }}
-          transition={{ type: 'spring', stiffness: 400, damping: 25 }}
-          className="bg-gradient-to-br from-slate-900 via-slate-900 to-amber-950 text-white p-6 sm:p-7 rounded-3xl border-2 border-amber-500/50 shadow-xl shadow-amber-950/20 relative overflow-hidden flex flex-col justify-between"
-        >
-          {/* Subtle Background Glow Accent */}
-          <div className="absolute top-0 right-0 -mr-16 -mt-16 w-48 h-48 bg-amber-500/10 rounded-full blur-3xl pointer-events-none" />
+      {/* ========================================================== */}
+      {/* DASHBOARD 2: PRODUTIVIDADE (Capacidade Real de Produção)   */}
+      {/* ========================================================== */}
+      {activeDashboard === 'produtividade' && (
+        <div className="space-y-6 animate-fade-in">
+          {/* CARDS DE APOIO DE PRODUTIVIDADE */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5 items-stretch">
+            {/* Card 1: PICO DE PRODUÇÃO DIÁRIA */}
+            <motion.div 
+              whileHover={{ y: -2 }}
+              transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+              className="bg-gradient-to-br from-slate-900 via-slate-900 to-emerald-950 text-white p-6 rounded-3xl border-2 border-emerald-500/50 shadow-xl shadow-emerald-950/20 relative overflow-hidden flex flex-col justify-between min-h-[170px]"
+            >
+              <div className="absolute top-0 right-0 -mr-12 -mt-12 w-36 h-36 bg-emerald-500/10 rounded-full blur-2xl pointer-events-none" />
 
-          <div>
-            {/* Protagonist Header Badge */}
-            <div className="flex items-center justify-between gap-2 mb-4">
-              <div className="inline-flex items-center gap-2 px-3 py-1 bg-amber-500/20 border border-amber-500/30 rounded-full">
-                <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
-                <span className="text-[10px] font-black uppercase tracking-widest text-amber-300">
-                  Recorde Diário
-                </span>
-              </div>
-
-              <div className="flex items-center gap-1.5">
-                <div className="relative group/tip shrink-0">
-                  <Info className="w-4 h-4 text-amber-400/80 hover:text-amber-300 cursor-help transition-colors" />
-                  <div className="absolute right-0 bottom-full mb-2 hidden group-hover/tip:block w-64 p-3 bg-slate-950 text-white text-[11px] font-medium rounded-xl shadow-2xl border border-slate-800 z-50 pointer-events-none leading-relaxed">
-                    <strong>Pico de Produção:</strong> Maior quantidade de tanques descontaminados em um único dia no período selecionado.
-                    <div className="absolute right-3 top-full w-0 h-0 border-x-4 border-x-transparent border-t-4 border-t-slate-950" />
+              <div>
+                <div className="flex items-center justify-between gap-2 mb-3">
+                  <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 bg-emerald-500/20 border border-emerald-500/30 rounded-full">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                    <span className="text-[9px] font-black uppercase tracking-widest text-emerald-300">
+                      Capacidade Máxima
+                    </span>
+                  </div>
+                  <div className="w-8 h-8 bg-emerald-500/20 text-emerald-300 rounded-xl flex items-center justify-center border border-emerald-500/30 shrink-0">
+                    <Zap className="w-4 h-4" />
                   </div>
                 </div>
-                <div className="w-10 h-10 bg-amber-500/20 text-amber-300 rounded-xl flex items-center justify-center border border-amber-500/30">
-                  <Zap className="w-5 h-5 stroke-[2.5]" />
+
+                <h3 className="text-[11px] font-black uppercase tracking-wider text-emerald-200">
+                  Pico de Produção Diária
+                </h3>
+
+                <div className="mt-2 flex items-baseline gap-2 flex-wrap">
+                  <span className="text-4xl font-black text-white tracking-tight leading-none">
+                    {productivityData.peakDailyCount}
+                  </span>
+                  <span className="text-xs font-black uppercase text-emerald-300">
+                    tanques em 1 dia
+                  </span>
                 </div>
               </div>
-            </div>
 
-            {/* Protagonist Label */}
-            <h3 className="text-xs font-black uppercase tracking-wider text-amber-200">
-              Pico de Produção
-            </h3>
+              <div className="mt-4 pt-3 border-t border-slate-800/80">
+                <p className="text-[11px] font-bold text-slate-300 truncate">
+                  {productivityData.peakDailyDate 
+                    ? `Pico em ${formatDateDisplay(productivityData.peakDailyDate)}` 
+                    : 'Nenhum tanque no período'}
+                </p>
+                <p className="text-[10px] text-slate-400 mt-0.5 font-medium">
+                  Maior volume concluído em um único dia
+                </p>
+              </div>
+            </motion.div>
 
-            {/* Protagonist Giant Numeric Display */}
-            <div className="mt-3 flex items-baseline gap-3 flex-wrap">
-              <span className="text-5xl sm:text-6xl font-black text-white tracking-tight leading-none">
-                {kpis.peakDailyCount}
-              </span>
-              <div className="flex flex-col">
-                <span className="text-sm sm:text-base font-black uppercase tracking-wide text-amber-300">
-                  tanques em 1 dia
-                </span>
-                <span className="text-[11px] font-semibold text-slate-400">
-                  maior volume diário
-                </span>
+            {/* Card 2: TOTAL DESCONTAMINADO */}
+            <motion.div 
+              whileHover={{ y: -2 }}
+              transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+              className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between min-h-[170px]"
+            >
+              <div>
+                <div className="flex items-center justify-between gap-2 mb-3">
+                  <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 bg-blue-500/10 dark:bg-blue-500/20 border border-blue-500/20 dark:border-blue-500/30 rounded-full">
+                    <span className="text-[9px] font-black uppercase tracking-widest text-blue-700 dark:text-blue-300">
+                      Volume Real
+                    </span>
+                  </div>
+                  <div className="w-8 h-8 bg-blue-500/10 text-blue-600 dark:text-blue-400 rounded-xl flex items-center justify-center border border-blue-500/20 shrink-0">
+                    <CheckCircle2 className="w-4 h-4" />
+                  </div>
+                </div>
+
+                <h3 className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                  Total Descontaminado
+                </h3>
+
+                <div className="mt-2 flex items-baseline gap-2 flex-wrap">
+                  <span className="text-4xl font-black text-blue-600 dark:text-blue-400 tracking-tight leading-none">
+                    {productivityData.totalDescontaminado}
+                  </span>
+                  <span className="text-xs font-black uppercase text-blue-700 dark:text-blue-300">
+                    tanques
+                  </span>
+                </div>
+              </div>
+
+              <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800">
+                <p className="text-[11px] font-bold text-slate-700 dark:text-slate-300 truncate">
+                  Período: {productivityData.currentPeriodLabel}
+                </p>
+                <p className="text-[10px] text-slate-400 mt-0.5 font-medium">
+                  Volume total concluído no período
+                </p>
+              </div>
+            </motion.div>
+
+            {/* Card 3: MÉDIA DE PRODUÇÃO */}
+            <motion.div 
+              whileHover={{ y: -2 }}
+              transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+              className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between min-h-[170px]"
+            >
+              <div>
+                <div className="flex items-center justify-between gap-2 mb-3">
+                  <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 bg-indigo-500/10 dark:bg-indigo-500/20 border border-indigo-500/20 dark:border-indigo-500/30 rounded-full">
+                    <span className="text-[9px] font-black uppercase tracking-widest text-indigo-700 dark:text-indigo-300">
+                      Média Histórica
+                    </span>
+                  </div>
+                  <div className="w-8 h-8 bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 rounded-xl flex items-center justify-center border border-indigo-500/20 shrink-0">
+                    <BarChart3 className="w-4 h-4" />
+                  </div>
+                </div>
+
+                <h3 className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                  Média de Produção
+                </h3>
+
+                <div className="mt-2 flex items-baseline gap-2 flex-wrap">
+                  <span className="text-4xl font-black text-indigo-600 dark:text-indigo-400 tracking-tight leading-none">
+                    {formatDailyAverage(productivityData.avgProductionPerPeriod)}
+                  </span>
+                  <span className="text-xs font-black uppercase text-indigo-700 dark:text-indigo-300">
+                    tanques
+                  </span>
+                </div>
+              </div>
+
+              <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800">
+                <p className="text-[11px] font-bold text-slate-700 dark:text-slate-300 truncate">
+                  Média {productivityData.periodUnitLabel}
+                </p>
+                <p className="text-[10px] text-slate-400 mt-0.5 font-medium">
+                  Produção média observada
+                </p>
+              </div>
+            </motion.div>
+
+            {/* Card 4: VARIAÇÃO DA PRODUTIVIDADE */}
+            <motion.div 
+              whileHover={{ y: -2 }}
+              transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+              className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between min-h-[170px]"
+            >
+              <div>
+                <div className="flex items-center justify-between gap-2 mb-3">
+                  <div className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full border text-[9px] font-black uppercase tracking-widest ${
+                    productivityData.variation.direction === 'up'
+                      ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/20'
+                      : productivityData.variation.direction === 'down'
+                      ? 'bg-rose-500/10 text-rose-700 dark:text-rose-300 border-rose-500/20'
+                      : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-300 dark:border-slate-700'
+                  }`}>
+                    {productivityData.variation.direction === 'up' && <ArrowUpRight className="w-3 h-3" />}
+                    {productivityData.variation.direction === 'down' && <ArrowDownRight className="w-3 h-3" />}
+                    {productivityData.variation.direction === 'stable' && <Minus className="w-3 h-3" />}
+                    <span>{productivityData.variation.label}</span>
+                  </div>
+                  <div className={`w-8 h-8 rounded-xl flex items-center justify-center border shrink-0 ${
+                    productivityData.variation.direction === 'up'
+                      ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
+                      : productivityData.variation.direction === 'down'
+                      ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20'
+                      : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-300 dark:border-slate-700'
+                  }`}>
+                    <Activity className="w-4 h-4" />
+                  </div>
+                </div>
+
+                <h3 className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                  Variação da Produtividade
+                </h3>
+
+                <div className="mt-2 flex items-baseline gap-2 flex-wrap">
+                  <span className={`text-3xl font-black tracking-tight leading-none ${
+                    productivityData.variation.direction === 'up'
+                      ? 'text-emerald-600 dark:text-emerald-400'
+                      : productivityData.variation.direction === 'down'
+                      ? 'text-rose-600 dark:text-rose-400'
+                      : 'text-slate-700 dark:text-slate-300'
+                  }`}>
+                    {productivityData.variation.formattedDiff}
+                  </span>
+                </div>
+              </div>
+
+              <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800">
+                <p className="text-[11px] font-bold text-slate-700 dark:text-slate-300">
+                  {productivityData.variation.hasSufficientData ? 'Comparado ao período anterior' : 'Histórico em formação'}
+                </p>
+                <p className="text-[10px] text-slate-400 mt-0.5 font-medium">
+                  {productivityData.variation.label}
+                </p>
+              </div>
+            </motion.div>
+          </div>
+
+          {/* GRÁFICO DE PRODUÇÃO */}
+          <div className="bg-white dark:bg-slate-900 rounded-[32px] border border-slate-200/50 dark:border-slate-800/50 p-6 md:p-8 shadow-sm space-y-6">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-200/80 dark:border-slate-800 pb-6">
+              <div>
+                <h2 className="text-lg font-black uppercase tracking-tight text-slate-900 dark:text-white flex items-center gap-2.5">
+                  <BarChart3 className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
+                  Acompanhamento da Produção de Descontaminação
+                </h2>
+                <p className="text-xs text-slate-500 dark:text-slate-400 font-bold mt-0.5">
+                  Volume real de tanques finalizados em cada período
+                </p>
               </div>
             </div>
-          </div>
 
-          {/* Context & Description Footer inside Peak Card */}
-          <div className="mt-6 pt-5 border-t border-slate-800/80 flex flex-col gap-3">
-            <p className="text-xs font-semibold text-amber-100/90 leading-relaxed">
-              Maior quantidade de tanques finalizados em um único dia no período.
-            </p>
-
-            <div className="flex items-center justify-between flex-wrap gap-2 text-xs">
-              <div className="flex items-center gap-1.5 text-slate-300 font-bold bg-slate-800/60 px-3 py-1.5 rounded-xl border border-slate-700/50">
-                <Calendar className="w-3.5 h-3.5 text-amber-400" />
-                <span>
-                  {kpis.peakProductionDate 
-                    ? `Pico registrado em ${formatDateDisplay(kpis.peakProductionDate)}` 
-                    : 'Nenhum tanque concluído no período'}
-                </span>
-              </div>
+            <div className="h-80 w-full pt-2">
+              {productivityData.chartData.length === 0 ? (
+                <div className="h-full flex flex-col items-center justify-center text-slate-400 bg-slate-50/50 dark:bg-slate-800/20 rounded-2xl border border-dashed border-slate-200 dark:border-slate-800">
+                  <BarChart3 className="w-10 h-10 mb-2 opacity-50" />
+                  <p className="text-xs font-bold">Nenhum registro de produção para o período selecionado.</p>
+                </div>
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={productivityData.chartData} margin={{ top: 15, right: 30, left: -10, bottom: 5 }}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#334155" opacity={0.15} />
+                    <XAxis 
+                      dataKey="label" 
+                      tick={{ fontSize: 11, fontWeight: 700 }}
+                      interval="preserveStartEnd"
+                      minTickGap={12}
+                    />
+                    <YAxis 
+                      allowDecimals={false} 
+                      tick={{ fontSize: 11, fontWeight: 700 }} 
+                      domain={[0, (dataMax: number) => Math.max(3, Math.ceil(dataMax * 1.25))]}
+                    />
+                    <Tooltip 
+                      contentStyle={{ 
+                        backgroundColor: '#0f172a', 
+                        borderRadius: '16px', 
+                        border: '1px solid #334155',
+                        color: '#fff',
+                        fontWeight: 'bold',
+                        fontSize: '12px'
+                      }}
+                      content={({ active, payload }) => {
+                        if (active && payload && payload.length) {
+                          const data = payload[0].payload as any;
+                          return (
+                            <div className="p-3.5 bg-slate-950 text-white rounded-2xl border border-slate-800 shadow-2xl space-y-1.5 min-w-[200px]">
+                              <div className="text-[11px] font-black uppercase text-slate-400 flex items-center justify-between gap-3 border-b border-slate-800 pb-1">
+                                <span>{data.fullPeriodLabel}</span>
+                                {data.isCurrent && (
+                                  <span className="text-[9px] bg-emerald-500/20 text-emerald-300 px-1.5 py-0.5 rounded">
+                                    ATUAL
+                                  </span>
+                                )}
+                              </div>
+                              <div className="text-sm font-black text-emerald-400 flex items-center justify-between gap-2 pt-1">
+                                <span>Finalizados:</span>
+                                <span className="text-base font-black text-white">{data.finalizados} {data.finalizados === 1 ? 'tanque' : 'tanques'}</span>
+                              </div>
+                              {data.isPeak && (
+                                <div className="pt-1 border-t border-slate-800">
+                                  <span className="text-[9px] font-black bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30">
+                                    PICO DE VOLUME
+                                  </span>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        }
+                        return null;
+                      }}
+                    />
+                    <Line 
+                      type="monotone" 
+                      dataKey="finalizados" 
+                      name="Tanques Descontaminados" 
+                      stroke="#10b981" 
+                      strokeWidth={3.5} 
+                      dot={{ r: 4.5, stroke: '#10b981', strokeWidth: 2, fill: '#ffffff' }}
+                      activeDot={{ r: 7, stroke: '#047857', strokeWidth: 2.5, fill: '#34d399' }}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              )}
             </div>
-          </div>
-        </motion.div>
-      </div>
-
-      {/* SEÇÃO 2: GRÁFICO PRINCIPAL — PRODUTIVIDADE DIÁRIA DA DESCONTAMINAÇÃO */}
-      <div className="bg-white dark:bg-slate-900 rounded-[32px] border border-slate-200/50 dark:border-slate-800/50 p-6 md:p-8 shadow-sm space-y-6">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-200/80 dark:border-slate-800 pb-6">
-          <div>
-            <div className="flex items-center gap-3 flex-wrap">
-              <h2 className="text-lg font-black uppercase tracking-tight text-slate-900 dark:text-white flex items-center gap-2.5">
-                <BarChart3 className="w-5 h-5 text-teal-600 dark:text-teal-400" />
-                Produtividade Diária da Descontaminação
-              </h2>
-            </div>
-            <p className="text-xs text-slate-500 dark:text-slate-400 font-bold mt-0.5">
-              Quantidade real de tanques finalizados em cada dia no período selecionado (valores diários reais)
-            </p>
-          </div>
-
-          {/* Chart View Horizon Switches */}
-          <div className="flex flex-wrap items-center gap-1.5 bg-slate-100 dark:bg-slate-800 p-1.5 rounded-2xl border border-slate-200/60 dark:border-slate-700/60">
-            {[
-              { id: 'weekly', label: 'Semanal' },
-              { id: 'monthly', label: 'Mensal' },
-              { id: 'quarterly', label: 'Trimestral' },
-              { id: 'semestral', label: 'Semestral' },
-              { id: 'all', label: 'Geral' }
-            ].map(m => (
-              <button
-                key={m.id}
-                onClick={() => setChartHorizon(m.id as ProductivityHorizon)}
-                className={`px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all ${
-                  chartHorizon === m.id
-                    ? 'bg-teal-600 text-white shadow-md shadow-teal-600/20'
-                    : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
-                }`}
-              >
-                {m.label}
-              </button>
-            ))}
           </div>
         </div>
-
-        {/* Interactive Line Chart */}
-        <div className="h-80 w-full pt-2">
-          {dailyProductivity.data.length === 0 ? (
-            <div className="h-full flex flex-col items-center justify-center text-slate-400 bg-slate-50/50 dark:bg-slate-800/20 rounded-2xl border border-dashed border-slate-200 dark:border-slate-800">
-              <BarChart3 className="w-10 h-10 mb-2 opacity-50" />
-              <p className="text-xs font-bold">Nenhum registro de atividade para o período selecionado.</p>
-            </div>
-          ) : (
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={dailyProductivity.data} margin={{ top: 15, right: 30, left: -10, bottom: 5 }}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#334155" opacity={0.15} />
-                <XAxis 
-                  dataKey="label" 
-                  tick={{ fontSize: 11, fontWeight: 700 }}
-                  interval="preserveStartEnd"
-                  minTickGap={12}
-                />
-                <YAxis 
-                  allowDecimals={false} 
-                  tick={{ fontSize: 11, fontWeight: 700 }} 
-                  domain={[0, (dataMax: number) => Math.max(3, Math.ceil(dataMax * 1.25))]}
-                />
-                <Tooltip 
-                  contentStyle={{ 
-                    backgroundColor: '#0f172a', 
-                    borderRadius: '16px', 
-                    border: '1px solid #334155',
-                    color: '#fff',
-                    fontWeight: 'bold',
-                    fontSize: '12px'
-                  }}
-                  content={({ active, payload }) => {
-                    if (active && payload && payload.length) {
-                      const data = payload[0].payload as DailyProductivityPoint;
-                      return (
-                        <div className="p-3 bg-slate-950 text-white rounded-2xl border border-slate-800 shadow-2xl space-y-1">
-                          <div className="text-[11px] font-black uppercase text-slate-400 flex items-center justify-between gap-4">
-                            <span>{data.fullDate} ({data.dayOfWeek})</span>
-                            <span className={data.isBusinessDay ? 'text-emerald-400' : 'text-slate-500'}>
-                              {data.isBusinessDay ? 'Dia Útil' : 'Fim de Semana / Feriado'}
-                            </span>
-                          </div>
-                          <div className="text-sm font-black text-teal-400 flex items-center gap-2">
-                            <span>{data.finalizados} {data.finalizados === 1 ? 'tanque descontaminado' : 'tanques descontaminados'}</span>
-                            {data.isPeak && (
-                              <span className="text-[9px] bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded-md border border-amber-500/30">
-                                PICO
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    }
-                    return null;
-                  }}
-                />
-                <Line 
-                  type="monotone" 
-                  dataKey="finalizados" 
-                  name="Tanques Descontaminados" 
-                  stroke="#0d9488" 
-                  strokeWidth={3} 
-                  dot={{ r: 3.5, stroke: '#0d9488', strokeWidth: 2, fill: '#ffffff' }}
-                  activeDot={{ r: 6, stroke: '#0f766e', strokeWidth: 2.5, fill: '#2dd4bf' }}
-                />
-              </LineChart>
-            </ResponsiveContainer>
-          )}
-        </div>
-      </div>
-
-      {/* SEÇÃO 3: CARDS OPERACIONAIS DE CONTEXTO */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4 items-stretch">
-        {/* Card 1: Tanques Recebidos */}
-        <motion.div 
-          whileHover={{ y: -2 }}
-          transition={{ type: 'spring', stiffness: 400, damping: 25 }}
-          className="bg-white dark:bg-slate-900 p-4.5 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between min-h-[140px]"
-        >
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400 truncate pr-1">
-                Tanques Recebidos
-              </span>
-              <div className="w-8 h-8 bg-sky-500/10 text-sky-600 dark:text-sky-400 rounded-xl flex items-center justify-center border border-sky-500/20 shrink-0">
-                <Truck className="w-4 h-4" />
-              </div>
-            </div>
-
-            <div className="my-1">
-              <span className="text-3xl font-black text-sky-600 dark:text-sky-400 tracking-tight leading-none">
-                {kpis.totalReceived}
-              </span>
-            </div>
-          </div>
-          <p className="text-[10px] font-semibold text-slate-400 dark:text-slate-500 mt-2 leading-snug">
-            Chegaram à base no período
-          </p>
-        </motion.div>
-
-        {/* Card 2: Tanques Descontaminados */}
-        <motion.div 
-          whileHover={{ y: -2 }}
-          transition={{ type: 'spring', stiffness: 400, damping: 25 }}
-          className="bg-white dark:bg-slate-900 p-4.5 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between min-h-[140px]"
-        >
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400 truncate pr-1">
-                Descontaminados
-              </span>
-              <div className="w-8 h-8 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 rounded-xl flex items-center justify-center border border-emerald-500/20 shrink-0">
-                <CheckCircle2 className="w-4 h-4" />
-              </div>
-            </div>
-
-            <div className="my-1">
-              <span className="text-3xl font-black text-emerald-600 dark:text-emerald-400 tracking-tight leading-none">
-                {kpis.completedCount}
-              </span>
-            </div>
-          </div>
-          <p className="text-[10px] font-semibold text-slate-400 dark:text-slate-500 mt-2 leading-snug">
-            Finalizados no período
-          </p>
-        </motion.div>
-
-        {/* Card 3: Aguardando Descontaminação (CLICÁVEL / INTERATIVO) */}
-        <motion.button 
-          type="button"
-          onClick={() => setIsWaitingModalOpen(true)}
-          whileHover={{ y: -3, scale: 1.01 }}
-          whileTap={{ scale: 0.98 }}
-          transition={{ type: 'spring', stiffness: 400, damping: 25 }}
-          className="bg-white dark:bg-slate-900 p-4.5 rounded-2xl border-2 border-amber-500/40 dark:border-amber-500/40 hover:border-amber-500 shadow-sm hover:shadow-lg hover:shadow-amber-500/10 flex flex-col justify-between min-h-[140px] text-left cursor-pointer transition-all relative overflow-hidden group"
-        >
-          <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
-            <span className="text-[9px] font-black uppercase px-2 py-0.5 bg-amber-500 text-white rounded-md">
-              Ver lista
-            </span>
-          </div>
-
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-[11px] font-black uppercase tracking-wider text-amber-700 dark:text-amber-300 truncate pr-1">
-                Aguardando
-              </span>
-              <div className="w-8 h-8 bg-amber-500/10 text-amber-600 dark:text-amber-400 rounded-xl flex items-center justify-center border border-amber-500/20 shrink-0 group-hover:bg-amber-500 group-hover:text-white transition-colors">
-                <Clock className="w-4 h-4" />
-              </div>
-            </div>
-
-            <div className="my-1 flex items-baseline gap-2">
-              <span className="text-3xl font-black text-amber-600 dark:text-amber-400 tracking-tight leading-none">
-                {kpis.waitingCount}
-              </span>
-              <span className="text-[10px] font-bold text-amber-600/70 dark:text-amber-400/70">
-                tanques
-              </span>
-            </div>
-          </div>
-
-          <div className="flex items-center justify-between mt-2 pt-2 border-t border-amber-100 dark:border-amber-950/60 text-[10px] font-bold text-amber-700 dark:text-amber-300">
-            <span>Clique para ver fila</span>
-            <ChevronRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
-          </div>
-        </motion.button>
-
-        {/* Card 4: Em Descontaminação (CLICÁVEL / INTERATIVO) */}
-        <motion.button 
-          type="button"
-          onClick={() => setIsInProgressModalOpen(true)}
-          whileHover={{ y: -3, scale: 1.01 }}
-          whileTap={{ scale: 0.98 }}
-          transition={{ type: 'spring', stiffness: 400, damping: 25 }}
-          className="bg-white dark:bg-slate-900 p-4.5 rounded-2xl border-2 border-blue-500/40 dark:border-blue-500/40 hover:border-blue-500 shadow-sm hover:shadow-lg hover:shadow-blue-500/10 flex flex-col justify-between min-h-[140px] text-left cursor-pointer transition-all relative overflow-hidden group"
-        >
-          <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
-            <span className="text-[9px] font-black uppercase px-2 py-0.5 bg-blue-500 text-white rounded-md">
-              Ver lista
-            </span>
-          </div>
-
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-[11px] font-black uppercase tracking-wider text-blue-700 dark:text-blue-300 truncate pr-1">
-                Em Descontaminação
-              </span>
-              <div className="w-8 h-8 bg-blue-500/10 text-blue-600 dark:text-blue-400 rounded-xl flex items-center justify-center border border-blue-500/20 shrink-0 group-hover:bg-blue-500 group-hover:text-white transition-colors">
-                <RefreshCw className="w-4 h-4 group-hover:animate-spin" />
-              </div>
-            </div>
-
-            <div className="my-1 flex items-baseline gap-2">
-              <span className="text-3xl font-black text-blue-600 dark:text-blue-400 tracking-tight leading-none">
-                {kpis.inProgressCount}
-              </span>
-              <span className="text-[10px] font-bold text-blue-600/70 dark:text-blue-400/70">
-                em processo
-              </span>
-            </div>
-          </div>
-
-          <div className="flex items-center justify-between mt-2 pt-2 border-t border-blue-100 dark:border-blue-950/60 text-[10px] font-bold text-blue-700 dark:text-blue-300">
-            <span>Clique para ver tanques</span>
-            <ChevronRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
-          </div>
-        </motion.button>
-
-        {/* Card 5: Prazo Médio */}
-        <motion.div 
-          whileHover={{ y: -2 }}
-          transition={{ type: 'spring', stiffness: 400, damping: 25 }}
-          className="bg-white dark:bg-slate-900 p-4.5 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between min-h-[140px]"
-        >
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400 truncate pr-1">
-                Prazo Médio
-              </span>
-              <div className="w-8 h-8 bg-purple-500/10 text-purple-600 dark:text-purple-400 rounded-xl flex items-center justify-center border border-purple-500/20 shrink-0">
-                <Sparkles className="w-4 h-4" />
-              </div>
-            </div>
-
-            <div className="my-1">
-              <span className="text-3xl font-black text-purple-600 dark:text-purple-400 tracking-tight leading-none">
-                {formatDays(kpis.avgDeconTimeHours)}
-              </span>
-            </div>
-          </div>
-          <p className="text-[10px] font-semibold text-slate-400 dark:text-slate-500 mt-2 leading-snug">
-            Início → Fim em dias úteis
-          </p>
-        </motion.div>
-      </div>
+      )}
 
       {/* INDICADORES & RANKINGS SECTION */}
       <div className="bg-white dark:bg-slate-900 rounded-[32px] border border-slate-200/50 dark:border-slate-800/50 p-6 md:p-8 shadow-sm space-y-6">

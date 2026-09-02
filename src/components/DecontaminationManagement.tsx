@@ -62,7 +62,7 @@ import {
   LineChart,
   Line
 } from 'recharts';
-import { format, parseISO } from 'date-fns';
+import { format, parseISO, subMonths, addMonths } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { motion, AnimatePresence } from 'motion/react';
 import { collection, addDoc, setDoc, deleteDoc, doc, getDoc, getDocs, where, onSnapshot, query, orderBy } from 'firebase/firestore';
@@ -333,10 +333,14 @@ export function DecontaminationManagement({
   // Dashboard View Switcher: 'ritmo' | 'produtividade'
   const [activeDashboard, setActiveDashboard] = useState<'ritmo' | 'produtividade'>('ritmo');
 
-  // Filter Period: [ SEMANAL ] [ MENSAL ] [ TRIMESTRAL ] [ SEMESTRAL ] [ PERSONALIZADO ]
-  const [filterPeriod, setFilterPeriod] = useState<DeconFilterPeriod>('month');
+  // Filter Period: [ TODOS ] [ SEMANAL ] [ MENSAL ] [ TRIMESTRAL ] [ SEMESTRAL ] [ PERSONALIZADO ]
+  const [filterPeriod, setFilterPeriod] = useState<DeconFilterPeriod>('all');
+  const [referenceDate, setReferenceDate] = useState<Date>(new Date());
   const [customStartDate, setCustomStartDate] = useState('');
   const [customEndDate, setCustomEndDate] = useState('');
+
+  // Table Period Filter: by default shows all records
+  const [selectedTablePeriodFilter, setSelectedTablePeriodFilter] = useState<'all' | 'kpi' | 'active_queue' | 'current_month' | 'previous_month'>('all');
 
   // Active view tab for indicators & rankings section
   const [activeIndicatorTab, setActiveIndicatorTab] = useState<'clients' | 'models' | 'contamination'>('clients');
@@ -386,25 +390,46 @@ export function DecontaminationManagement({
 
   // 1. CALCULATE TOP 4 MAIN INDICATORS (Parte 1)
   const mainIndicators = useMemo<MainIndicatorsData>(() => {
-    return calculateMainIndicators(operations, filterPeriod, customStartDate, customEndDate);
-  }, [operations, filterPeriod, customStartDate, customEndDate]);
+    return calculateMainIndicators(operations, filterPeriod, customStartDate, customEndDate, referenceDate);
+  }, [operations, filterPeriod, customStartDate, customEndDate, referenceDate]);
 
   // 2. GENERATE RHYTHM DASHBOARD DATA (Parte 2)
   const rhythmData = useMemo<RhythmDashboardData>(() => {
-    return generateRhythmDashboardData(operations, filterPeriod, customStartDate, customEndDate);
-  }, [operations, filterPeriod, customStartDate, customEndDate]);
+    return generateRhythmDashboardData(operations, filterPeriod, customStartDate, customEndDate, referenceDate);
+  }, [operations, filterPeriod, customStartDate, customEndDate, referenceDate]);
 
   // 3. GENERATE PRODUCTIVITY DASHBOARD DATA (Parte 3)
   const productivityData = useMemo<ProductivityDashboardData>(() => {
-    return generateProductivityDashboardData(operations, filterPeriod, customStartDate, customEndDate);
-  }, [operations, filterPeriod, customStartDate, customEndDate]);
+    return generateProductivityDashboardData(operations, filterPeriod, customStartDate, customEndDate, referenceDate);
+  }, [operations, filterPeriod, customStartDate, customEndDate, referenceDate]);
 
   // Filter operations by date range period for lower sections & tables
   const dateFilteredOperations = useMemo(() => {
     return operations.filter(op => 
-      isOperationInPeriod(op, filterPeriod, customStartDate, customEndDate)
+      isOperationInPeriod(op, filterPeriod, customStartDate, customEndDate, referenceDate)
     );
-  }, [operations, filterPeriod, customStartDate, customEndDate]);
+  }, [operations, filterPeriod, customStartDate, customEndDate, referenceDate]);
+
+  // Base operations for the operational table based on table period filter
+  const tableBaseOperations = useMemo(() => {
+    if (selectedTablePeriodFilter === 'all') {
+      return operations;
+    }
+    if (selectedTablePeriodFilter === 'active_queue') {
+      return operations.filter(op => op.status === 'waiting' || op.status === 'in_progress');
+    }
+    if (selectedTablePeriodFilter === 'kpi') {
+      return dateFilteredOperations;
+    }
+    if (selectedTablePeriodFilter === 'current_month') {
+      return operations.filter(op => isOperationInPeriod(op, 'month', undefined, undefined, new Date()));
+    }
+    if (selectedTablePeriodFilter === 'previous_month') {
+      const prevM = subMonths(new Date(), 1);
+      return operations.filter(op => isOperationInPeriod(op, 'month', undefined, undefined, prevM));
+    }
+    return operations;
+  }, [operations, selectedTablePeriodFilter, dateFilteredOperations]);
 
   // Specific filtered lists for interactive cards & modals
   const waitingOps = useMemo(() => {
@@ -454,7 +479,7 @@ export function DecontaminationManagement({
 
   // Count operations with pending information (missing product or missing invoice)
   const pendingInfoCount = useMemo(() => {
-    return dateFilteredOperations.filter(op => {
+    return tableBaseOperations.filter(op => {
       if (searchTerm.trim()) {
         const term = searchTerm.toLowerCase();
         const matchesTank = op.equipmentNumber?.toLowerCase().includes(term);
@@ -466,6 +491,7 @@ export function DecontaminationManagement({
           return false;
         }
       }
+
       if (selectedStatusFilter !== 'all' && op.status !== selectedStatusFilter) return false;
       if (selectedClientFilter !== 'all' && op.client !== selectedClientFilter) return false;
       if (selectedModelFilter !== 'all' && op.model !== selectedModelFilter) return false;
@@ -475,7 +501,7 @@ export function DecontaminationManagement({
       return (!op.product || op.product.trim() === '') || (!op.invoiceNumber || op.invoiceNumber.trim() === '');
     }).length;
   }, [
-    dateFilteredOperations, 
+    tableBaseOperations, 
     searchTerm, 
     selectedStatusFilter, 
     selectedClientFilter, 
@@ -485,7 +511,7 @@ export function DecontaminationManagement({
 
   // Filter & Sort Operations for Main Table
   const tableFilteredOperations = useMemo(() => {
-    return dateFilteredOperations.filter(op => {
+    return tableBaseOperations.filter(op => {
       // Search term
       if (searchTerm.trim()) {
         const term = searchTerm.toLowerCase();
@@ -584,7 +610,7 @@ export function DecontaminationManagement({
       return (a.equipmentNumber || '').localeCompare(b.equipmentNumber || '');
     });
   }, [
-    dateFilteredOperations, 
+    tableBaseOperations, 
     searchTerm, 
     selectedStatusFilter, 
     selectedClientFilter, 
@@ -916,6 +942,7 @@ export function DecontaminationManagement({
             </div>
             <div className="flex flex-wrap items-center gap-1 bg-slate-100 dark:bg-slate-800 p-1.5 rounded-2xl border border-slate-200/60 dark:border-slate-700/60">
               {[
+                { id: 'all', label: 'Todos' },
                 { id: 'week', label: 'Semanal' },
                 { id: 'month', label: 'Mensal' },
                 { id: 'quarter', label: 'Trimestral' },
@@ -938,6 +965,40 @@ export function DecontaminationManagement({
                 </button>
               ))}
             </div>
+
+            {/* Month Navigator when filterPeriod === 'month' */}
+            {filterPeriod === 'month' && (
+              <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 px-2.5 py-1 rounded-2xl border border-slate-200/60 dark:border-slate-700/60">
+                <button
+                  type="button"
+                  onClick={() => setReferenceDate(prev => subMonths(prev, 1))}
+                  className="p-1 hover:bg-white dark:hover:bg-slate-700 rounded-lg text-slate-600 dark:text-slate-300 transition-colors"
+                  title="Mês anterior"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+                <span className="text-xs font-bold text-slate-700 dark:text-slate-200 capitalize px-1 min-w-[100px] text-center">
+                  {format(referenceDate, 'MMMM/yyyy', { locale: ptBR })}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setReferenceDate(prev => addMonths(prev, 1))}
+                  className="p-1 hover:bg-white dark:hover:bg-slate-700 rounded-lg text-slate-600 dark:text-slate-300 transition-colors"
+                  title="Próximo mês"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+                {format(referenceDate, 'yyyy-MM') !== format(new Date(), 'yyyy-MM') && (
+                  <button
+                    type="button"
+                    onClick={() => setReferenceDate(new Date())}
+                    className="text-[10px] font-bold text-blue-600 dark:text-blue-400 hover:underline ml-1 px-1"
+                  >
+                    Hoje
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         </div>
 
@@ -1919,6 +1980,22 @@ export function DecontaminationManagement({
               <span>Filtros:</span>
             </div>
 
+            {/* Table Period Filter */}
+            <select
+              value={selectedTablePeriodFilter}
+              onChange={e => {
+                setSelectedTablePeriodFilter(e.target.value as any);
+                setCurrentPage(1);
+              }}
+              className="px-3.5 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none shadow-xs"
+            >
+              <option value="all">📅 Todos os Registros ({operations.length})</option>
+              <option value="active_queue">⚡ Fila Ativa (Aguardando / Em Processo)</option>
+              <option value="kpi">🎯 Período dos Indicadores ({mainIndicators.periodLabel})</option>
+              <option value="current_month">📆 Mês Atual ({format(new Date(), 'MMMM/yyyy', { locale: ptBR })})</option>
+              <option value="previous_month">⏮️ Mês Anterior ({format(subMonths(new Date(), 1), 'MMMM/yyyy', { locale: ptBR })})</option>
+            </select>
+
             {/* Status Filter */}
             <select
               value={selectedStatusFilter}
@@ -1997,9 +2074,10 @@ export function DecontaminationManagement({
               <option value="complete">Informações Completas</option>
             </select>
 
-            {(selectedStatusFilter !== 'all' || selectedClientFilter !== 'all' || selectedModelFilter !== 'all' || selectedContaminationFilter !== 'all' || selectedPendingFilter !== 'all') && (
+            {(selectedTablePeriodFilter !== 'all' || selectedStatusFilter !== 'all' || selectedClientFilter !== 'all' || selectedModelFilter !== 'all' || selectedContaminationFilter !== 'all' || selectedPendingFilter !== 'all') && (
               <button
                 onClick={() => {
+                  setSelectedTablePeriodFilter('all');
                   setSelectedStatusFilter('all');
                   setSelectedClientFilter('all');
                   setSelectedModelFilter('all');

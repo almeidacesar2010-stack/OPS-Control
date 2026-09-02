@@ -18,7 +18,7 @@ import {
 import { ptBR } from 'date-fns/locale';
 import { DecontaminationOperation, DecontaminationStatus, FilterPeriod } from '../types/decontamination';
 
-export type DeconFilterPeriod = 'week' | 'month' | 'quarter' | 'semester' | 'custom';
+export type DeconFilterPeriod = 'all' | 'week' | 'month' | 'quarter' | 'semester' | 'custom';
 
 /**
  * Calculates Easter date for a given year using Meeus/Jones/Butcher algorithm
@@ -215,7 +215,8 @@ export function isOperationInPeriod(
   op: DecontaminationOperation, 
   period: FilterPeriod | DeconFilterPeriod, 
   customStart?: string, 
-  customEnd?: string
+  customEnd?: string,
+  referenceDate: Date = new Date()
 ): boolean {
   if (period === 'all') return true;
   const opDateStr = op.arrivalDate || op.startDate || op.endDate;
@@ -225,7 +226,7 @@ export function isOperationInPeriod(
     const opDate = startOfDay(parseISO(opDateStr.slice(0, 10)));
     if (isNaN(opDate.getTime())) return false;
 
-    const now = new Date();
+    const now = referenceDate;
 
     if (period === 'today') {
       return isWithinInterval(opDate, { start: startOfDay(now), end: endOfDay(now) });
@@ -303,6 +304,17 @@ export function getDeconPeriodBounds(
   referenceDate: Date = new Date()
 ): { current: PeriodInterval; previous: PeriodInterval | null } {
   const ref = startOfDay(referenceDate);
+
+  if (period === 'all') {
+    return {
+      current: {
+        start: new Date(2020, 0, 1),
+        end: new Date(2099, 11, 31),
+        label: 'Todo o Histórico'
+      },
+      previous: null
+    };
+  }
 
   if (period === 'week') {
     const curStart = startOfWeek(ref, { weekStartsOn: 1 });
@@ -633,7 +645,7 @@ export function generateRhythmDashboardData(
       });
       cur = new Date(cur.getTime() + 7 * 24 * 60 * 60 * 1000);
     }
-  } else if (period === 'month') {
+  } else if (period === 'month' || period === 'all') {
     // Generate chronological months starting strictly from first completed operation
     const minMonthStart = earliestCompletedDate
       ? startOfMonth(earliestCompletedDate)
@@ -951,7 +963,7 @@ export function generateProductivityDashboardData(
       });
       cur = new Date(cur.getTime() + 7 * 24 * 60 * 60 * 1000);
     }
-  } else if (period === 'month') {
+  } else if (period === 'month' || period === 'all') {
     periodUnitLabel = 'por mês';
     const minMonthStart = earliestCompletedDate
       ? startOfMonth(earliestCompletedDate)

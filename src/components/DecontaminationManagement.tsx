@@ -44,7 +44,8 @@ import {
   ArrowDownRight,
   X,
   Eye,
-  ExternalLink
+  ExternalLink,
+  CalendarCheck2
 } from 'lucide-react';
 import { 
   BarChart, 
@@ -62,7 +63,7 @@ import {
   LineChart,
   Line
 } from 'recharts';
-import { format, parseISO, subMonths, addMonths } from 'date-fns';
+import { format, parseISO, subMonths, addMonths, subWeeks, addWeeks } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { motion, AnimatePresence } from 'motion/react';
 import { collection, addDoc, setDoc, deleteDoc, doc, getDoc, getDocs, where, onSnapshot, query, orderBy } from 'firebase/firestore';
@@ -97,7 +98,10 @@ import {
   DeconFilterPeriod,
   RhythmDashboardData,
   ProductivityDashboardData,
-  MainIndicatorsData
+  MainIndicatorsData,
+  DECON_MIN_DATE,
+  DECON_MIN_DATE_OBJ,
+  isOpOnOrAfterMinDate
 } from '../utils/decontaminationUtils';
 import { UserRole } from '../types';
 import { DecontaminationModal } from './DecontaminationModal';
@@ -152,7 +156,7 @@ const parseDateToMillis = (dateStr?: string): number => {
 };
 
 export function DecontaminationManagement({
-  operations,
+  operations: rawOperations,
   fleetEquipments,
   clients,
   userRole = 'user',
@@ -165,6 +169,11 @@ export function DecontaminationManagement({
   onDeleteOperation,
   onRequestDelete
 }: DecontaminationManagementProps) {
+  // Regra de Negócio: Considerar apenas a partir de 03/08/2026 em diante
+  const operations = useMemo(() => {
+    return (rawOperations || []).filter(op => isOpOnOrAfterMinDate(op, DECON_MIN_DATE_OBJ));
+  }, [rawOperations]);
+
   const canDelete = userRole === 'admin' || userRole === 'moderator';
   // Modal states
   const [isOpModalOpen, setIsOpModalOpen] = useState(false);
@@ -333,8 +342,8 @@ export function DecontaminationManagement({
   // Dashboard View Switcher: 'ritmo' | 'produtividade'
   const [activeDashboard, setActiveDashboard] = useState<'ritmo' | 'produtividade'>('ritmo');
 
-  // Filter Period: [ TODOS ] [ SEMANAL ] [ MENSAL ] [ TRIMESTRAL ] [ SEMESTRAL ] [ PERSONALIZADO ]
-  const [filterPeriod, setFilterPeriod] = useState<DeconFilterPeriod>('all');
+  // Filter Period: [ DIAS ] [ SEMANAS ] [ PERSONALIZADO ]
+  const [filterPeriod, setFilterPeriod] = useState<DeconFilterPeriod>('weeks');
   const [referenceDate, setReferenceDate] = useState<Date>(new Date());
   const [customStartDate, setCustomStartDate] = useState('');
   const [customEndDate, setCustomEndDate] = useState('');
@@ -909,7 +918,7 @@ export function DecontaminationManagement({
               <button
                 type="button"
                 onClick={() => setActiveDashboard('ritmo')}
-                className={`flex-1 sm:flex-none px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center justify-center gap-2 ${
+                className={`flex-1 sm:flex-none px-5 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center justify-center gap-2 ${
                   activeDashboard === 'ritmo'
                     ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30'
                     : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
@@ -917,42 +926,60 @@ export function DecontaminationManagement({
               >
                 <TrendingUp className="w-4 h-4" />
                 <span>Ritmo</span>
+                <span className={`text-[9px] px-1.5 py-0.5 rounded font-black tracking-normal uppercase ${
+                  activeDashboard === 'ritmo'
+                    ? 'bg-blue-700/60 text-blue-100'
+                    : 'bg-slate-200 dark:bg-slate-700 text-slate-500 dark:text-slate-400'
+                }`}>
+                  Velocidade
+                </span>
               </button>
 
               <button
                 type="button"
                 onClick={() => setActiveDashboard('produtividade')}
-                className={`flex-1 sm:flex-none px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center justify-center gap-2 ${
+                className={`flex-1 sm:flex-none px-5 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center justify-center gap-2 ${
                   activeDashboard === 'produtividade'
                     ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-600/30'
                     : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                 }`}
               >
-                <Zap className="w-4 h-4" />
+                <BarChart3 className="w-4 h-4" />
                 <span>Produtividade</span>
+                <span className={`text-[9px] px-1.5 py-0.5 rounded font-black tracking-normal uppercase ${
+                  activeDashboard === 'produtividade'
+                    ? 'bg-emerald-700/60 text-emerald-100'
+                    : 'bg-slate-200 dark:bg-slate-700 text-slate-500 dark:text-slate-400'
+                }`}>
+                  Volume
+                </span>
               </button>
             </div>
           </div>
 
-          {/* Period Filter (SEMANAL, MENSAL, TRIMESTRAL, SEMESTRAL, PERSONALIZADO) */}
+          {/* COMPARATIVO FILTER */}
           <div className="flex items-center gap-2 flex-wrap">
             <div className="flex items-center gap-1.5 text-xs font-black uppercase tracking-wider text-slate-400 mr-1">
               <Calendar className="w-4 h-4 text-blue-600 dark:text-blue-400" />
-              <span className="hidden sm:inline">Período:</span>
+              <span className="hidden sm:inline">Comparativo:</span>
             </div>
+            {/* COMPARATIVO: [ DIAS ] [ SEMANAS ] [ PERSONALIZADO ] */}
             <div className="flex flex-wrap items-center gap-1 bg-slate-100 dark:bg-slate-800 p-1.5 rounded-2xl border border-slate-200/60 dark:border-slate-700/60">
               {[
-                { id: 'all', label: 'Todos' },
-                { id: 'week', label: 'Semanal' },
-                { id: 'month', label: 'Mensal' },
-                { id: 'quarter', label: 'Trimestral' },
-                { id: 'semester', label: 'Semestral' },
+                { id: 'days', label: 'Dias' },
+                { id: 'weeks', label: 'Semanas' },
                 { id: 'custom', label: 'Personalizado' }
               ].map(p => (
                 <button
                   key={p.id}
                   type="button"
-                  onClick={() => setFilterPeriod(p.id as DeconFilterPeriod)}
+                  id={`btn-comparativo-${p.id}`}
+                  onClick={() => {
+                    setFilterPeriod(p.id as DeconFilterPeriod);
+                    if (p.id === 'custom' && !customStartDate) {
+                      setCustomStartDate(DECON_MIN_DATE);
+                    }
+                  }}
                   className={`px-3.5 py-2 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all ${
                     filterPeriod === p.id
                       ? activeDashboard === 'ritmo'
@@ -965,40 +992,9 @@ export function DecontaminationManagement({
                 </button>
               ))}
             </div>
-
-            {/* Month Navigator when filterPeriod === 'month' */}
-            {filterPeriod === 'month' && (
-              <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 px-2.5 py-1 rounded-2xl border border-slate-200/60 dark:border-slate-700/60">
-                <button
-                  type="button"
-                  onClick={() => setReferenceDate(prev => subMonths(prev, 1))}
-                  className="p-1 hover:bg-white dark:hover:bg-slate-700 rounded-lg text-slate-600 dark:text-slate-300 transition-colors"
-                  title="Mês anterior"
-                >
-                  <ChevronLeft className="w-4 h-4" />
-                </button>
-                <span className="text-xs font-bold text-slate-700 dark:text-slate-200 capitalize px-1 min-w-[100px] text-center">
-                  {format(referenceDate, 'MMMM/yyyy', { locale: ptBR })}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setReferenceDate(prev => addMonths(prev, 1))}
-                  className="p-1 hover:bg-white dark:hover:bg-slate-700 rounded-lg text-slate-600 dark:text-slate-300 transition-colors"
-                  title="Próximo mês"
-                >
-                  <ChevronRight className="w-4 h-4" />
-                </button>
-                {format(referenceDate, 'yyyy-MM') !== format(new Date(), 'yyyy-MM') && (
-                  <button
-                    type="button"
-                    onClick={() => setReferenceDate(new Date())}
-                    className="text-[10px] font-bold text-blue-600 dark:text-blue-400 hover:underline ml-1 px-1"
-                  >
-                    Hoje
-                  </button>
-                )}
-              </div>
-            )}
+            <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500 hidden xl:inline">
+              (A partir de 03/08/2026)
+            </span>
           </div>
         </div>
 
@@ -1006,18 +1002,22 @@ export function DecontaminationManagement({
         {filterPeriod === 'custom' && (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-3 border-t border-slate-200/60 dark:border-slate-800">
             <div>
-              <label className="block text-[10px] font-black uppercase text-slate-400 mb-1">Data Início</label>
+              <label className="block text-[10px] font-black uppercase text-slate-400 mb-1">Data Inicial (mínimo: 03/08/2026)</label>
               <input
                 type="date"
-                value={customStartDate}
+                id="input-custom-start-date"
+                min="2026-08-03"
+                value={customStartDate || DECON_MIN_DATE}
                 onChange={e => setCustomStartDate(e.target.value)}
                 className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white"
               />
             </div>
             <div>
-              <label className="block text-[10px] font-black uppercase text-slate-400 mb-1">Data Fim</label>
+              <label className="block text-[10px] font-black uppercase text-slate-400 mb-1">Data Final</label>
               <input
                 type="date"
+                id="input-custom-end-date"
+                min="2026-08-03"
                 value={customEndDate}
                 onChange={e => setCustomEndDate(e.target.value)}
                 className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white"
@@ -1032,13 +1032,33 @@ export function DecontaminationManagement({
       {/* ========================================================== */}
       {activeDashboard === 'ritmo' && (
         <div className="space-y-6 animate-fade-in">
+          {/* BANNER CONCEITUAL RITMO */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-5 py-3.5 rounded-2xl bg-blue-50/80 dark:bg-blue-950/30 border border-blue-200/70 dark:border-blue-800/50">
+            <div className="flex items-center gap-2.5">
+              <div className="w-7 h-7 rounded-xl bg-blue-600 text-white flex items-center justify-center shrink-0 shadow-sm shadow-blue-600/30">
+                <TrendingUp className="w-3.5 h-3.5" />
+              </div>
+              <div>
+                <p className="text-xs font-black uppercase tracking-wider text-blue-950 dark:text-blue-200">
+                  Ritmo da Operação: <span className="font-bold text-blue-700 dark:text-blue-300 normal-case tracking-normal">“Qual é a velocidade da nossa operação?”</span>
+                </p>
+                <p className="text-[10px] font-semibold text-blue-600 dark:text-blue-400">
+                  Fórmula: tanques ÷ dias úteis (velocidade operacional)
+                </p>
+              </div>
+            </div>
+            <span className="self-start sm:self-center text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-full bg-blue-600 text-white shadow-sm">
+              Velocidade
+            </span>
+          </div>
+
           {/* CARDS DE APOIO DE RITMO */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5 items-stretch">
-            {/* Card 1: RITMO ATUAL */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-5 items-stretch">
+            {/* Card 1: RITMO MÉDIO */}
             <motion.div 
               whileHover={{ y: -2 }}
               transition={{ type: 'spring', stiffness: 400, damping: 25 }}
-              className="bg-gradient-to-br from-slate-900 via-slate-900 to-blue-950 text-white p-6 rounded-3xl border-2 border-blue-500/50 shadow-xl shadow-blue-950/20 relative overflow-hidden flex flex-col justify-between min-h-[170px]"
+              className="bg-gradient-to-br from-slate-900 via-slate-900 to-blue-950 text-white p-6 rounded-3xl border-2 border-blue-500/50 shadow-xl shadow-blue-950/20 relative overflow-hidden flex flex-col justify-between min-h-[190px]"
             >
               <div className="absolute top-0 right-0 -mr-12 -mt-12 w-36 h-36 bg-blue-500/10 rounded-full blur-2xl pointer-events-none" />
 
@@ -1047,7 +1067,7 @@ export function DecontaminationManagement({
                   <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 bg-blue-500/20 border border-blue-500/30 rounded-full">
                     <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
                     <span className="text-[9px] font-black uppercase tracking-widest text-blue-300">
-                      Ritmo Atual
+                      Velocidade Média
                     </span>
                   </div>
                   <div className="w-8 h-8 bg-blue-500/20 text-blue-300 rounded-xl flex items-center justify-center border border-blue-500/30 shrink-0">
@@ -1056,7 +1076,7 @@ export function DecontaminationManagement({
                 </div>
 
                 <h3 className="text-[11px] font-black uppercase tracking-wider text-blue-200">
-                  Ritmo de Descontaminação
+                  Ritmo Médio
                 </h3>
 
                 <div className="mt-2 flex items-baseline gap-2 flex-wrap">
@@ -1069,27 +1089,27 @@ export function DecontaminationManagement({
                 </div>
               </div>
 
-              <div className="mt-4 pt-3 border-t border-slate-800/80">
-                <p className="text-[11px] font-bold text-slate-300 truncate">
-                  Período: <span className="text-blue-300 font-black">{rhythmData.currentPeriodLabel}</span>
+              <div className="mt-4 pt-3 border-t border-slate-800/80 space-y-0.5">
+                <p className="text-[11px] text-blue-200 font-bold">
+                  {rhythmData.completedInCurrent} tanques ÷ {rhythmData.currentBusinessDays} dias úteis
                 </p>
-                <p className="text-[10px] text-slate-400 mt-0.5 font-medium">
-                  Tanques finalizados ÷ dias úteis do período
+                <p className="text-[10px] text-slate-400 font-medium truncate">
+                  Quantidade média de tanques descontaminados por dia útil
                 </p>
               </div>
             </motion.div>
 
-            {/* Card 2: MAIOR RITMO */}
+            {/* Card 2: MELHOR RITMO */}
             <motion.div 
               whileHover={{ y: -2 }}
               transition={{ type: 'spring', stiffness: 400, damping: 25 }}
-              className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between min-h-[170px]"
+              className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between min-h-[190px]"
             >
               <div>
                 <div className="flex items-center justify-between gap-2 mb-3">
                   <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 bg-emerald-500/10 dark:bg-emerald-500/20 border border-emerald-500/20 dark:border-emerald-500/30 rounded-full">
                     <span className="text-[9px] font-black uppercase tracking-widest text-emerald-700 dark:text-emerald-300">
-                      Pico de Ritmo
+                      Maior Velocidade
                     </span>
                   </div>
                   <div className="w-8 h-8 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 rounded-xl flex items-center justify-center border border-emerald-500/20 shrink-0">
@@ -1098,7 +1118,7 @@ export function DecontaminationManagement({
                 </div>
 
                 <h3 className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                  Maior Ritmo
+                  Melhor Ritmo
                 </h3>
 
                 <div className="mt-2 flex items-baseline gap-2 flex-wrap">
@@ -1111,21 +1131,21 @@ export function DecontaminationManagement({
                 </div>
               </div>
 
-              <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800">
+              <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 space-y-0.5">
                 <p className="text-[11px] font-bold text-slate-700 dark:text-slate-300 truncate">
-                  {rhythmData.maxPacePeriod ? `Registrado em ${rhythmData.maxPacePeriod}` : '—'}
+                  {rhythmData.maxPacePeriod ? `Registrado em ${rhythmData.maxPacePeriod}` : 'Período analisado'}
                 </p>
-                <p className="text-[10px] text-slate-400 mt-0.5 font-medium">
-                  Maior velocidade registrada
+                <p className="text-[10px] text-slate-400 font-medium">
+                  Maior ritmo encontrado entre os períodos analisados
                 </p>
               </div>
             </motion.div>
 
-            {/* Card 3: MENOR RITMO */}
+            {/* Card 3: PIOR RITMO */}
             <motion.div 
               whileHover={{ y: -2 }}
               transition={{ type: 'spring', stiffness: 400, damping: 25 }}
-              className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between min-h-[170px]"
+              className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between min-h-[190px]"
             >
               <div>
                 <div className="flex items-center justify-between gap-2 mb-3">
@@ -1140,7 +1160,7 @@ export function DecontaminationManagement({
                 </div>
 
                 <h3 className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                  Menor Ritmo
+                  Pior Ritmo
                 </h3>
 
                 <div className="mt-2 flex items-baseline gap-2 flex-wrap">
@@ -1153,70 +1173,12 @@ export function DecontaminationManagement({
                 </div>
               </div>
 
-              <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800">
+              <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 space-y-0.5">
                 <p className="text-[11px] font-bold text-slate-700 dark:text-slate-300 truncate">
-                  {rhythmData.minPacePeriod ? `Registrado em ${rhythmData.minPacePeriod}` : '—'}
+                  {rhythmData.minPacePeriod ? `Registrado em ${rhythmData.minPacePeriod}` : 'Período analisado'}
                 </p>
-                <p className="text-[10px] text-slate-400 mt-0.5 font-medium">
-                  Menor velocidade apurada
-                </p>
-              </div>
-            </motion.div>
-
-            {/* Card 4: VARIAÇÃO DO RITMO */}
-            <motion.div 
-              whileHover={{ y: -2 }}
-              transition={{ type: 'spring', stiffness: 400, damping: 25 }}
-              className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between min-h-[170px]"
-            >
-              <div>
-                <div className="flex items-center justify-between gap-2 mb-3">
-                  <div className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full border text-[9px] font-black uppercase tracking-widest ${
-                    rhythmData.variation.direction === 'up'
-                      ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/20'
-                      : rhythmData.variation.direction === 'down'
-                      ? 'bg-rose-500/10 text-rose-700 dark:text-rose-300 border-rose-500/20'
-                      : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-300 dark:border-slate-700'
-                  }`}>
-                    {rhythmData.variation.direction === 'up' && <ArrowUpRight className="w-3 h-3" />}
-                    {rhythmData.variation.direction === 'down' && <ArrowDownRight className="w-3 h-3" />}
-                    {rhythmData.variation.direction === 'stable' && <Minus className="w-3 h-3" />}
-                    <span>{rhythmData.variation.label}</span>
-                  </div>
-                  <div className={`w-8 h-8 rounded-xl flex items-center justify-center border shrink-0 ${
-                    rhythmData.variation.direction === 'up'
-                      ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
-                      : rhythmData.variation.direction === 'down'
-                      ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20'
-                      : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-300 dark:border-slate-700'
-                  }`}>
-                    <Activity className="w-4 h-4" />
-                  </div>
-                </div>
-
-                <h3 className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                  Variação do Ritmo
-                </h3>
-
-                <div className="mt-2 flex items-baseline gap-2 flex-wrap">
-                  <span className={`text-3xl font-black tracking-tight leading-none ${
-                    rhythmData.variation.direction === 'up'
-                      ? 'text-emerald-600 dark:text-emerald-400'
-                      : rhythmData.variation.direction === 'down'
-                      ? 'text-rose-600 dark:text-rose-400'
-                      : 'text-slate-700 dark:text-slate-300'
-                  }`}>
-                    {rhythmData.variation.formattedDiff}
-                  </span>
-                </div>
-              </div>
-
-              <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800">
-                <p className="text-[11px] font-bold text-slate-700 dark:text-slate-300">
-                  {rhythmData.variation.hasSufficientData ? 'Comparado ao período anterior' : 'Histórico em formação'}
-                </p>
-                <p className="text-[10px] text-slate-400 mt-0.5 font-medium">
-                  {rhythmData.variation.label}
+                <p className="text-[10px] text-slate-400 font-medium">
+                  Menor ritmo encontrado entre os períodos analisados
                 </p>
               </div>
             </motion.div>
@@ -1228,10 +1190,10 @@ export function DecontaminationManagement({
               <div>
                 <h2 className="text-lg font-black uppercase tracking-tight text-slate-900 dark:text-white flex items-center gap-2.5">
                   <TrendingUp className="w-5 h-5 text-blue-600 dark:text-blue-400" />
-                  Evolução do Ritmo de Descontaminação
+                  Evolução do Ritmo
                 </h2>
                 <p className="text-xs text-slate-500 dark:text-slate-400 font-bold mt-0.5">
-                  Velocidade da operação calculada: Tanques finalizados ÷ Dias úteis do período
+                  Evolução da velocidade operacional: tanques descontaminados por dia útil ({rhythmData.currentPeriodLabel})
                 </p>
               </div>
             </div>
@@ -1244,7 +1206,7 @@ export function DecontaminationManagement({
                 </div>
               ) : (
                 <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={rhythmData.chartData} margin={{ top: 15, right: 30, left: -10, bottom: 5 }}>
+                  <LineChart data={rhythmData.chartData} margin={{ top: 20, right: 30, left: -10, bottom: 5 }}>
                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#334155" opacity={0.15} />
                     <XAxis 
                       dataKey="label" 
@@ -1256,6 +1218,13 @@ export function DecontaminationManagement({
                       allowDecimals={true} 
                       tick={{ fontSize: 11, fontWeight: 700 }} 
                       domain={[0, (dataMax: number) => Math.max(2, Math.ceil((dataMax + 0.5) * 1.25))]}
+                      label={{ 
+                        value: 'Tanques por dia útil', 
+                        angle: -90, 
+                        position: 'insideLeft', 
+                        offset: 15,
+                        style: { fontSize: 10, fontWeight: 800, fill: '#64748b' } 
+                      }}
                     />
                     <Tooltip 
                       contentStyle={{ 
@@ -1286,12 +1255,12 @@ export function DecontaminationManagement({
                                   <span className="text-base font-black text-white">{formatDailyAverage(data.ritmo)} tanques/dia útil</span>
                                 </div>
                                 <div className="text-[11px] font-medium text-slate-300 flex items-center justify-between gap-2">
-                                  <span>Tanques Finalizados:</span>
+                                  <span>Tanques Concluídos:</span>
                                   <span className="font-bold text-white">{data.completedCount} tanques</span>
                                 </div>
                                 <div className="text-[11px] font-medium text-slate-300 flex items-center justify-between gap-2">
                                   <span>Dias Úteis:</span>
-                                  <span className="font-bold text-white">{data.businessDays} dias</span>
+                                  <span className="font-bold text-white">{data.businessDays} dias úteis</span>
                                 </div>
                               </div>
 
@@ -1299,12 +1268,12 @@ export function DecontaminationManagement({
                                 <div className="pt-1.5 border-t border-slate-800/80 flex items-center gap-2">
                                   {data.isMax && (
                                     <span className="text-[9px] font-black bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded border border-emerald-500/30">
-                                      MAIOR RITMO
+                                      MELHOR RITMO
                                     </span>
                                   )}
                                   {data.isMin && (
                                     <span className="text-[9px] font-black bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30">
-                                      MENOR RITMO
+                                      PIOR RITMO
                                     </span>
                                   )}
                                 </div>
@@ -1321,8 +1290,16 @@ export function DecontaminationManagement({
                       name="Ritmo (Tanques / Dia Útil)" 
                       stroke="#2563eb" 
                       strokeWidth={3.5} 
-                      dot={{ r: 4.5, stroke: '#2563eb', strokeWidth: 2, fill: '#ffffff' }}
-                      activeDot={{ r: 7, stroke: '#1d4ed8', strokeWidth: 2.5, fill: '#60a5fa' }}
+                      dot={{ r: 5, stroke: '#2563eb', strokeWidth: 2, fill: '#ffffff' }}
+                      activeDot={{ r: 8, stroke: '#1d4ed8', strokeWidth: 2.5, fill: '#60a5fa' }}
+                      label={{
+                        position: 'top',
+                        fill: '#2563eb',
+                        fontSize: 11,
+                        fontWeight: 800,
+                        offset: 8,
+                        formatter: (val: any) => (val !== undefined && val !== null ? formatDailyAverage(Number(val)) : '')
+                      }}
                     />
                   </LineChart>
                 </ResponsiveContainer>
@@ -1333,17 +1310,37 @@ export function DecontaminationManagement({
       )}
 
       {/* ========================================================== */}
-      {/* DASHBOARD 2: PRODUTIVIDADE (Capacidade Real de Produção)   */}
+      {/* DASHBOARD 2: PRODUTIVIDADE (Volume de Produção)            */}
       {/* ========================================================== */}
       {activeDashboard === 'produtividade' && (
         <div className="space-y-6 animate-fade-in">
-          {/* CARDS DE APOIO DE PRODUTIVIDADE */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5 items-stretch">
-            {/* Card 1: PICO DE PRODUÇÃO DIÁRIA */}
+          {/* BANNER CONCEITUAL PRODUTIVIDADE */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-5 py-3.5 rounded-2xl bg-emerald-50/80 dark:bg-emerald-950/30 border border-emerald-200/70 dark:border-emerald-800/50">
+            <div className="flex items-center gap-2.5">
+              <div className="w-7 h-7 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-sm shadow-emerald-600/30">
+                <BarChart3 className="w-3.5 h-3.5" />
+              </div>
+              <div>
+                <p className="text-xs font-black uppercase tracking-wider text-emerald-950 dark:text-emerald-200">
+                  Produtividade da Operação: <span className="font-bold text-emerald-700 dark:text-emerald-300 normal-case tracking-normal">“Qual é o volume que conseguimos produzir?”</span>
+                </p>
+                <p className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400">
+                  Foco: quantidade total de tanques produzidos (volume real de entrega)
+                </p>
+              </div>
+            </div>
+            <span className="self-start sm:self-center text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-full bg-emerald-600 text-white shadow-sm">
+              Volume
+            </span>
+          </div>
+
+          {/* CARDS DE APOIO DE PRODUTIVIDADE (3 INDICADORES EXCLUSIVOS) */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-5 items-stretch">
+            {/* Card 1: MÉDIA DE PRODUÇÃO */}
             <motion.div 
               whileHover={{ y: -2 }}
               transition={{ type: 'spring', stiffness: 400, damping: 25 }}
-              className="bg-gradient-to-br from-slate-900 via-slate-900 to-emerald-950 text-white p-6 rounded-3xl border-2 border-emerald-500/50 shadow-xl shadow-emerald-950/20 relative overflow-hidden flex flex-col justify-between min-h-[170px]"
+              className="bg-gradient-to-br from-slate-900 via-slate-900 to-emerald-950 text-white p-6 rounded-3xl border-2 border-emerald-500/50 shadow-xl shadow-emerald-950/20 relative overflow-hidden flex flex-col justify-between min-h-[190px]"
             >
               <div className="absolute top-0 right-0 -mr-12 -mt-12 w-36 h-36 bg-emerald-500/10 rounded-full blur-2xl pointer-events-none" />
 
@@ -1352,193 +1349,137 @@ export function DecontaminationManagement({
                   <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 bg-emerald-500/20 border border-emerald-500/30 rounded-full">
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
                     <span className="text-[9px] font-black uppercase tracking-widest text-emerald-300">
-                      Capacidade Máxima
+                      Volume Médio
                     </span>
                   </div>
                   <div className="w-8 h-8 bg-emerald-500/20 text-emerald-300 rounded-xl flex items-center justify-center border border-emerald-500/30 shrink-0">
-                    <Zap className="w-4 h-4" />
+                    <BarChart3 className="w-4 h-4" />
                   </div>
                 </div>
 
                 <h3 className="text-[11px] font-black uppercase tracking-wider text-emerald-200">
-                  Pico de Produção Diária
+                  Média de Produção
                 </h3>
 
                 <div className="mt-2 flex items-baseline gap-2 flex-wrap">
                   <span className="text-4xl font-black text-white tracking-tight leading-none">
-                    {productivityData.peakDailyCount}
+                    {formatDailyAverage(productivityData.avgProductionPerPeriod)}
                   </span>
                   <span className="text-xs font-black uppercase text-emerald-300">
+                    {productivityData.periodUnitLabel}
+                  </span>
+                </div>
+              </div>
+
+              <div className="mt-4 pt-3 border-t border-slate-800/80 space-y-0.5">
+                <p className="text-[11px] font-bold text-slate-300 truncate">
+                  {productivityData.periodSubLabel}
+                </p>
+                <p className="text-[10px] text-slate-400 font-medium">
+                  Quantidade média de tanques produzidos por período analisado
+                </p>
+              </div>
+            </motion.div>
+
+            {/* Card 2: MAIOR PRODUÇÃO EM 1 DIA */}
+            <motion.div 
+              whileHover={{ y: -2 }}
+              transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+              className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between min-h-[190px]"
+            >
+              <div>
+                <div className="flex items-center justify-between gap-2 mb-3">
+                  <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 bg-amber-500/10 dark:bg-amber-500/20 border border-amber-500/20 dark:border-amber-500/30 rounded-full">
+                    <span className="text-[9px] font-black uppercase tracking-widest text-amber-700 dark:text-amber-300">
+                      Recorde Diário
+                    </span>
+                  </div>
+                  <div className="w-8 h-8 bg-amber-500/10 text-amber-600 dark:text-amber-400 rounded-xl flex items-center justify-center border border-amber-500/20 shrink-0">
+                    <Zap className="w-4 h-4" />
+                  </div>
+                </div>
+
+                <h3 className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                  Maior Produção em 1 Dia
+                </h3>
+
+                <div className="mt-2 flex items-baseline gap-2 flex-wrap">
+                  <span className="text-4xl font-black text-amber-600 dark:text-amber-400 tracking-tight leading-none">
+                    {productivityData.peakDailyCount}
+                  </span>
+                  <span className="text-xs font-black uppercase text-amber-700 dark:text-amber-300">
                     tanques em 1 dia
                   </span>
                 </div>
               </div>
 
-              <div className="mt-4 pt-3 border-t border-slate-800/80">
-                <p className="text-[11px] font-bold text-slate-300 truncate">
+              <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 space-y-0.5">
+                <p className="text-[11px] font-bold text-slate-700 dark:text-slate-300 truncate">
                   {productivityData.peakDailyDate 
                     ? `Pico em ${formatDateDisplay(productivityData.peakDailyDate)}` 
                     : 'Nenhum tanque no período'}
                 </p>
-                <p className="text-[10px] text-slate-400 mt-0.5 font-medium">
-                  Maior volume concluído em um único dia
+                <p className="text-[10px] text-slate-400 font-medium">
+                  Maior número real de tanques concluídos em um único dia
                 </p>
               </div>
             </motion.div>
 
-            {/* Card 2: TOTAL DESCONTAMINADO */}
+            {/* Card 3: DIAS PRODUTIVOS */}
             <motion.div 
               whileHover={{ y: -2 }}
               transition={{ type: 'spring', stiffness: 400, damping: 25 }}
-              className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between min-h-[170px]"
+              className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between min-h-[190px]"
             >
               <div>
                 <div className="flex items-center justify-between gap-2 mb-3">
                   <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 bg-blue-500/10 dark:bg-blue-500/20 border border-blue-500/20 dark:border-blue-500/30 rounded-full">
                     <span className="text-[9px] font-black uppercase tracking-widest text-blue-700 dark:text-blue-300">
-                      Volume Real
+                      Dias com Produção
                     </span>
                   </div>
                   <div className="w-8 h-8 bg-blue-500/10 text-blue-600 dark:text-blue-400 rounded-xl flex items-center justify-center border border-blue-500/20 shrink-0">
-                    <CheckCircle2 className="w-4 h-4" />
+                    <CalendarCheck2 className="w-4 h-4" />
                   </div>
                 </div>
 
                 <h3 className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                  Total Descontaminado
+                  Dias Produtivos
                 </h3>
 
                 <div className="mt-2 flex items-baseline gap-2 flex-wrap">
                   <span className="text-4xl font-black text-blue-600 dark:text-blue-400 tracking-tight leading-none">
-                    {productivityData.totalDescontaminado}
+                    {productivityData.productiveDays}
                   </span>
                   <span className="text-xs font-black uppercase text-blue-700 dark:text-blue-300">
-                    tanques
+                    dias produtivos
                   </span>
                 </div>
               </div>
 
-              <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800">
+              <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 space-y-0.5">
                 <p className="text-[11px] font-bold text-slate-700 dark:text-slate-300 truncate">
-                  Período: {productivityData.currentPeriodLabel}
+                  {productivityData.productiveDays === 1 
+                    ? '1 dia com operação concluída' 
+                    : `${productivityData.productiveDays} dias com operações concluídas`}
                 </p>
-                <p className="text-[10px] text-slate-400 mt-0.5 font-medium">
-                  Volume total concluído no período
-                </p>
-              </div>
-            </motion.div>
-
-            {/* Card 3: MÉDIA DE PRODUÇÃO */}
-            <motion.div 
-              whileHover={{ y: -2 }}
-              transition={{ type: 'spring', stiffness: 400, damping: 25 }}
-              className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between min-h-[170px]"
-            >
-              <div>
-                <div className="flex items-center justify-between gap-2 mb-3">
-                  <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 bg-indigo-500/10 dark:bg-indigo-500/20 border border-indigo-500/20 dark:border-indigo-500/30 rounded-full">
-                    <span className="text-[9px] font-black uppercase tracking-widest text-indigo-700 dark:text-indigo-300">
-                      Média Histórica
-                    </span>
-                  </div>
-                  <div className="w-8 h-8 bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 rounded-xl flex items-center justify-center border border-indigo-500/20 shrink-0">
-                    <BarChart3 className="w-4 h-4" />
-                  </div>
-                </div>
-
-                <h3 className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                  Média de Produção
-                </h3>
-
-                <div className="mt-2 flex items-baseline gap-2 flex-wrap">
-                  <span className="text-4xl font-black text-indigo-600 dark:text-indigo-400 tracking-tight leading-none">
-                    {formatDailyAverage(productivityData.avgProductionPerPeriod)}
-                  </span>
-                  <span className="text-xs font-black uppercase text-indigo-700 dark:text-indigo-300">
-                    tanques
-                  </span>
-                </div>
-              </div>
-
-              <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800">
-                <p className="text-[11px] font-bold text-slate-700 dark:text-slate-300 truncate">
-                  Média {productivityData.periodUnitLabel}
-                </p>
-                <p className="text-[10px] text-slate-400 mt-0.5 font-medium">
-                  Produção média observada
-                </p>
-              </div>
-            </motion.div>
-
-            {/* Card 4: VARIAÇÃO DA PRODUTIVIDADE */}
-            <motion.div 
-              whileHover={{ y: -2 }}
-              transition={{ type: 'spring', stiffness: 400, damping: 25 }}
-              className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between min-h-[170px]"
-            >
-              <div>
-                <div className="flex items-center justify-between gap-2 mb-3">
-                  <div className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full border text-[9px] font-black uppercase tracking-widest ${
-                    productivityData.variation.direction === 'up'
-                      ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/20'
-                      : productivityData.variation.direction === 'down'
-                      ? 'bg-rose-500/10 text-rose-700 dark:text-rose-300 border-rose-500/20'
-                      : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-300 dark:border-slate-700'
-                  }`}>
-                    {productivityData.variation.direction === 'up' && <ArrowUpRight className="w-3 h-3" />}
-                    {productivityData.variation.direction === 'down' && <ArrowDownRight className="w-3 h-3" />}
-                    {productivityData.variation.direction === 'stable' && <Minus className="w-3 h-3" />}
-                    <span>{productivityData.variation.label}</span>
-                  </div>
-                  <div className={`w-8 h-8 rounded-xl flex items-center justify-center border shrink-0 ${
-                    productivityData.variation.direction === 'up'
-                      ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
-                      : productivityData.variation.direction === 'down'
-                      ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20'
-                      : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-300 dark:border-slate-700'
-                  }`}>
-                    <Activity className="w-4 h-4" />
-                  </div>
-                </div>
-
-                <h3 className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                  Variação da Produtividade
-                </h3>
-
-                <div className="mt-2 flex items-baseline gap-2 flex-wrap">
-                  <span className={`text-3xl font-black tracking-tight leading-none ${
-                    productivityData.variation.direction === 'up'
-                      ? 'text-emerald-600 dark:text-emerald-400'
-                      : productivityData.variation.direction === 'down'
-                      ? 'text-rose-600 dark:text-rose-400'
-                      : 'text-slate-700 dark:text-slate-300'
-                  }`}>
-                    {productivityData.variation.formattedDiff}
-                  </span>
-                </div>
-              </div>
-
-              <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800">
-                <p className="text-[11px] font-bold text-slate-700 dark:text-slate-300">
-                  {productivityData.variation.hasSufficientData ? 'Comparado ao período anterior' : 'Histórico em formação'}
-                </p>
-                <p className="text-[10px] text-slate-400 mt-0.5 font-medium">
-                  {productivityData.variation.label}
+                <p className="text-[10px] text-slate-400 font-medium">
+                  Dias com pelo menos uma descontaminação concluída
                 </p>
               </div>
             </motion.div>
           </div>
 
-          {/* GRÁFICO DE PRODUÇÃO */}
+          {/* GRÁFICO DE EVOLUÇÃO DA PRODUTIVIDADE */}
           <div className="bg-white dark:bg-slate-900 rounded-[32px] border border-slate-200/50 dark:border-slate-800/50 p-6 md:p-8 shadow-sm space-y-6">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-200/80 dark:border-slate-800 pb-6">
               <div>
                 <h2 className="text-lg font-black uppercase tracking-tight text-slate-900 dark:text-white flex items-center gap-2.5">
                   <BarChart3 className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
-                  Acompanhamento da Produção de Descontaminação
+                  Evolução da Produtividade
                 </h2>
                 <p className="text-xs text-slate-500 dark:text-slate-400 font-bold mt-0.5">
-                  Volume real de tanques finalizados em cada período
+                  Quantidade de tanques produzidos em cada período ({productivityData.currentPeriodLabel})
                 </p>
               </div>
             </div>
@@ -1551,7 +1492,7 @@ export function DecontaminationManagement({
                 </div>
               ) : (
                 <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={productivityData.chartData} margin={{ top: 15, right: 30, left: -10, bottom: 5 }}>
+                  <LineChart data={productivityData.chartData} margin={{ top: 20, right: 30, left: -10, bottom: 5 }}>
                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#334155" opacity={0.15} />
                     <XAxis 
                       dataKey="label" 
@@ -1562,7 +1503,14 @@ export function DecontaminationManagement({
                     <YAxis 
                       allowDecimals={false} 
                       tick={{ fontSize: 11, fontWeight: 700 }} 
-                      domain={[0, (dataMax: number) => Math.max(3, Math.ceil(dataMax * 1.25))]}
+                      domain={[0, (dataMax: number) => Math.max(3, Math.ceil((dataMax + 0.5) * 1.25))]}
+                      label={{ 
+                        value: 'Tanques produzidos', 
+                        angle: -90, 
+                        position: 'insideLeft', 
+                        offset: 15,
+                        style: { fontSize: 10, fontWeight: 800, fill: '#64748b' } 
+                      }}
                     />
                     <Tooltip 
                       contentStyle={{ 
@@ -1587,13 +1535,13 @@ export function DecontaminationManagement({
                                 )}
                               </div>
                               <div className="text-sm font-black text-emerald-400 flex items-center justify-between gap-2 pt-1">
-                                <span>Finalizados:</span>
+                                <span>Tanques Produzidos:</span>
                                 <span className="text-base font-black text-white">{data.finalizados} {data.finalizados === 1 ? 'tanque' : 'tanques'}</span>
                               </div>
                               {data.isPeak && (
                                 <div className="pt-1 border-t border-slate-800">
                                   <span className="text-[9px] font-black bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30">
-                                    PICO DE VOLUME
+                                    MAIOR PRODUÇÃO
                                   </span>
                                 </div>
                               )}
@@ -1606,16 +1554,86 @@ export function DecontaminationManagement({
                     <Line 
                       type="monotone" 
                       dataKey="finalizados" 
-                      name="Tanques Descontaminados" 
+                      name="Tanques Produzidos" 
                       stroke="#10b981" 
                       strokeWidth={3.5} 
-                      dot={{ r: 4.5, stroke: '#10b981', strokeWidth: 2, fill: '#ffffff' }}
-                      activeDot={{ r: 7, stroke: '#047857', strokeWidth: 2.5, fill: '#34d399' }}
+                      dot={{ r: 5, stroke: '#10b981', strokeWidth: 2, fill: '#ffffff' }}
+                      activeDot={{ r: 8, stroke: '#047857', strokeWidth: 2.5, fill: '#34d399' }}
+                      label={{
+                        position: 'top',
+                        fill: '#059669',
+                        fontSize: 11,
+                        fontWeight: 800,
+                        offset: 8,
+                        formatter: (val: any) => (val !== undefined && val !== null ? `${val}` : '')
+                      }}
                     />
                   </LineChart>
                 </ResponsiveContainer>
               )}
             </div>
+
+            {/* DADOS DETALHADOS DE PRODUÇÃO POR PERÍODO */}
+            {productivityData.chartData.length > 0 && (
+              <div className="pt-6 border-t border-slate-100 dark:border-slate-800 space-y-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-xs font-black uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-2">
+                    <Calendar className="w-3.5 h-3.5 text-emerald-500" />
+                    Dados da Produção por Período Analisado
+                  </h3>
+                  <span className="text-[11px] font-bold text-slate-400">
+                    {productivityData.chartData.length} {productivityData.chartData.length === 1 ? 'período analisado' : 'períodos analisados'}
+                  </span>
+                </div>
+
+                <div className="overflow-x-auto rounded-2xl border border-slate-200/80 dark:border-slate-800">
+                  <table className="w-full text-left text-xs border-collapse">
+                    <thead>
+                      <tr className="bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200/80 dark:border-slate-800 text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                        <th className="py-3 px-4">Período</th>
+                        <th className="py-3 px-4 text-right">Tanques Descontaminados</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 font-semibold bg-white dark:bg-slate-900">
+                      {productivityData.chartData.map((item) => (
+                        <tr 
+                          key={item.key} 
+                          className={`hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors ${
+                            item.isCurrent ? 'bg-emerald-50/50 dark:bg-emerald-950/20' : ''
+                          }`}
+                        >
+                          <td className="py-3.5 px-4">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="font-black text-slate-900 dark:text-white font-mono text-[13px]">
+                                {item.fullPeriodLabel || item.label}
+                              </span>
+                              {item.isCurrent && (
+                                <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                                  Atual
+                                </span>
+                              )}
+                              {item.isPeak && (
+                                <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
+                                  Maior Produção
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="py-3.5 px-4 text-right">
+                            <span className="inline-flex items-baseline gap-1 font-black text-sm text-emerald-600 dark:text-emerald-400">
+                              <span className="text-base">{item.finalizados}</span>
+                              <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400">
+                                {item.finalizados === 1 ? 'tanque' : 'tanques'}
+                              </span>
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

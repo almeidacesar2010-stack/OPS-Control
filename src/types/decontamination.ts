@@ -136,7 +136,7 @@ export interface DecontaminationOperation {
   updatedAt?: Timestamp | any;
 }
 
-export type FilterPeriod = 'all' | 'today' | 'week' | 'month' | 'quarter' | 'semester' | 'year' | 'custom';
+export type FilterPeriod = 'days' | 'weeks' | 'all' | 'custom' | 'today' | 'week' | 'month' | 'quarter' | 'semester' | 'year';
 
 export interface DecontaminationFilter {
   period: FilterPeriod;

@@ -18,7 +18,7 @@ import {
 import { ptBR } from 'date-fns/locale';
 import { DecontaminationOperation, DecontaminationStatus, FilterPeriod } from '../types/decontamination';
 
-export type DeconFilterPeriod = 'all' | 'week' | 'month' | 'quarter' | 'semester' | 'custom';
+export type DeconFilterPeriod = 'days' | 'weeks' | 'all' | 'custom' | 'week' | 'month' | 'quarter' | 'semester';
 
 /**
  * Calculates Easter date for a given year using Meeus/Jones/Butcher algorithm
@@ -129,7 +129,7 @@ export function countBusinessDays(startDate: Date, endDate: Date): number {
 }
 
 /**
- * Calculates duration in business days between two YYYY-MM-DD or ISO dates
+ * Calculates duration in days between two YYYY-MM-DD or ISO dates: endDate - startDate
  */
 export function calculateDurationDays(startDateStr?: string, endDateStr?: string): number | null {
   if (!startDateStr || !endDateStr) return null;
@@ -138,10 +138,7 @@ export function calculateDurationDays(startDateStr?: string, endDateStr?: string
     const end = startOfDay(parseISO(endDateStr.slice(0, 10)));
     if (isNaN(start.getTime()) || isNaN(end.getTime())) return null;
     if (start.getTime() > end.getTime()) return 0;
-    
-    // Início e Fim no mesmo dia contam como 0 dias de duração (ou 0 dias úteis decorridos)
-    const bDays = countCalendarBusinessDays(start, end);
-    return Math.max(0, bDays - 1);
+    return Math.round((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
   } catch {
     return null;
   }
@@ -209,6 +206,66 @@ export function computeAverage(arr: (number | null)[]): number | null {
 }
 
 /**
+ * Data mínima de corte para o módulo e indicadores de descontaminação: 03/08/2026
+ */
+export const DECON_MIN_DATE = '2026-08-03';
+export const DECON_MIN_DATE_OBJ = new Date(2026, 7, 3); // 03 de Agosto de 2026 (Segunda-feira)
+
+/**
+ * Helper para interpretar strings de data nos formatos YYYY-MM-DD, ISO ou DD/MM/YYYY
+ */
+export function parseDateStringToDate(str?: string | null): Date | null {
+  if (!str) return null;
+  const trimmed = str.trim();
+  if (!trimmed) return null;
+
+  if (/^\d{2}\/\d{2}\/\d{4}/.test(trimmed)) {
+    const [d, m, y] = trimmed.split('/');
+    const parsed = new Date(Number(y), Number(m) - 1, Number(d));
+    return isNaN(parsed.getTime()) ? null : startOfDay(parsed);
+  }
+
+  try {
+    const parsed = startOfDay(parseISO(trimmed.slice(0, 10)));
+    return isNaN(parsed.getTime()) ? null : parsed;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Verifica se a operação de descontaminação pertence ao período a partir de 03/08/2026 em diante
+ */
+export function isOpOnOrAfterMinDate(
+  op: DecontaminationOperation,
+  minDate: Date = DECON_MIN_DATE_OBJ
+): boolean {
+  // Para concluídas, prioriza a data de conclusão
+  const dateStr = op.status === 'completed'
+    ? (op.endDate || op.startDate || op.arrivalDate)
+    : (op.arrivalDate || op.startDate || op.endDate);
+
+  const parsed = parseDateStringToDate(dateStr);
+  if (parsed) {
+    return parsed.getTime() >= startOfDay(minDate).getTime();
+  }
+
+  // Fallback createdAt
+  if (op.createdAt) {
+    try {
+      const cDate = typeof op.createdAt === 'string'
+        ? parseDateStringToDate(op.createdAt)
+        : (op.createdAt.toDate ? startOfDay(op.createdAt.toDate()) : null);
+      if (cDate) {
+        return cDate.getTime() >= startOfDay(minDate).getTime();
+      }
+    } catch {}
+  }
+
+  return true;
+}
+
+/**
  * Verifies if an operation's date falls within a period filter
  */
 export function isOperationInPeriod(
@@ -218,13 +275,16 @@ export function isOperationInPeriod(
   customEnd?: string,
   referenceDate: Date = new Date()
 ): boolean {
-  if (period === 'all') return true;
+  // Considerar apenas a partir de 03/08/2026 em diante
+  if (!isOpOnOrAfterMinDate(op, DECON_MIN_DATE_OBJ)) return false;
+
+  if (period === 'all' || period === 'days' || period === 'weeks') return true;
   const opDateStr = op.arrivalDate || op.startDate || op.endDate;
   if (!opDateStr) return false;
 
   try {
-    const opDate = startOfDay(parseISO(opDateStr.slice(0, 10)));
-    if (isNaN(opDate.getTime())) return false;
+    const opDate = parseDateStringToDate(opDateStr);
+    if (!opDate) return false;
 
     const now = referenceDate;
 
@@ -262,9 +322,9 @@ export function isOperationInPeriod(
       });
     }
     if (period === 'custom' && customStart && customEnd) {
-      const start = startOfDay(parseISO(customStart));
-      const end = endOfDay(parseISO(customEnd));
-      return isWithinInterval(opDate, { start, end });
+      const start = parseDateStringToDate(customStart) || DECON_MIN_DATE_OBJ;
+      const end = parseDateStringToDate(customEnd) || endOfDay(new Date());
+      return isWithinInterval(opDate, { start, end: endOfDay(end) });
     }
   } catch {
     return false;
@@ -273,19 +333,32 @@ export function isOperationInPeriod(
 }
 
 /**
+ * Gets real completion date of a completed decontamination operation
+ * Priority: 1. endDate, 2. startDate, 3. arrivalDate
+ * Exclui qualquer registro antes de 03/08/2026
+ */
+export function getOpCompletionDate(op: DecontaminationOperation): Date | null {
+  if (op.status !== 'completed') return null;
+  const dateStr = op.endDate || op.startDate || op.arrivalDate;
+  if (!dateStr) return null;
+  try {
+    const d = parseDateStringToDate(dateStr);
+    if (!d) return null;
+    // Considerar apenas a partir de 03/08/2026 em diante
+    if (d.getTime() < startOfDay(DECON_MIN_DATE_OBJ).getTime()) return null;
+    return d;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Checks if an operation has been FINALIZED within a specific Date interval [start, end]
  */
 export function isOpFinalizedInDateRange(op: DecontaminationOperation, start: Date, end: Date): boolean {
-  if (op.status !== 'completed') return false;
-  const dateStr = op.endDate || op.startDate || op.arrivalDate;
-  if (!dateStr) return false;
-  try {
-    const d = startOfDay(parseISO(dateStr.slice(0, 10)));
-    if (isNaN(d.getTime())) return false;
-    return d.getTime() >= startOfDay(start).getTime() && d.getTime() <= endOfDay(end).getTime();
-  } catch {
-    return false;
-  }
+  const d = getOpCompletionDate(op);
+  if (!d) return false;
+  return d.getTime() >= startOfDay(start).getTime() && d.getTime() <= endOfDay(end).getTime();
 }
 
 export interface PeriodInterval {
@@ -296,21 +369,62 @@ export interface PeriodInterval {
 
 /**
  * Gets exact current and immediately previous equivalent period bounds
+ * GERAL spans exclusively from the first real operation date to the last real operation date
  */
 export function getDeconPeriodBounds(
   period: DeconFilterPeriod,
   customStart?: string,
   customEnd?: string,
-  referenceDate: Date = new Date()
+  referenceDate: Date = new Date(),
+  allOperations?: DecontaminationOperation[]
 ): { current: PeriodInterval; previous: PeriodInterval | null } {
   const ref = startOfDay(referenceDate);
 
-  if (period === 'all') {
+  if (period === 'all' || period === 'days' || period === 'weeks') {
+    let earliestDate: Date | null = null;
+    let latestDate: Date | null = null;
+
+    if (allOperations && allOperations.length > 0) {
+      const validOps = allOperations.filter(op => isOpOnOrAfterMinDate(op, DECON_MIN_DATE_OBJ));
+      const completed = validOps.filter(op => op.status === 'completed');
+      const targetList = completed.length > 0 ? completed : validOps;
+      targetList.forEach(op => {
+        const d = op.status === 'completed'
+          ? getOpCompletionDate(op)
+          : parseDateStringToDate(op.startDate || op.arrivalDate || op.endDate);
+        if (d && d.getTime() >= DECON_MIN_DATE_OBJ.getTime()) {
+          if (!earliestDate || d.getTime() < earliestDate.getTime()) earliestDate = d;
+          if (!latestDate || d.getTime() > latestDate.getTime()) latestDate = d;
+        }
+      });
+    }
+
+    if (earliestDate && latestDate) {
+      if (earliestDate.getTime() < DECON_MIN_DATE_OBJ.getTime()) {
+        earliestDate = DECON_MIN_DATE_OBJ;
+      }
+      return {
+        current: {
+          start: earliestDate,
+          end: endOfDay(latestDate),
+          label: format(earliestDate, 'dd/MM/yyyy') === format(latestDate, 'dd/MM/yyyy')
+            ? format(earliestDate, 'dd/MM/yyyy')
+            : `${format(earliestDate, 'dd/MM/yyyy')} a ${format(latestDate, 'dd/MM/yyyy')}`
+        },
+        previous: null
+      };
+    }
+
+    let defaultLabel = 'Histórico Geral';
+    if (period === 'days') defaultLabel = 'Dia a Dia';
+    if (period === 'weeks') defaultLabel = 'Semana a Semana';
+    if (period === 'all') defaultLabel = 'Todo o Período';
+
     return {
       current: {
-        start: new Date(2020, 0, 1),
-        end: new Date(2099, 11, 31),
-        label: 'Todo o Histórico'
+        start: startOfMonth(ref),
+        end: endOfMonth(ref),
+        label: defaultLabel
       },
       previous: null
     };
@@ -461,7 +575,7 @@ export function calculateMainIndicators(
   customEnd?: string,
   referenceDate: Date = new Date()
 ): MainIndicatorsData {
-  const bounds = getDeconPeriodBounds(period, customStart, customEnd, referenceDate);
+  const bounds = getDeconPeriodBounds(period, customStart, customEnd, referenceDate, allOperations);
   const currentInterval = bounds.current;
 
   // 1. TANQUES DESCONTAMINADOS (Volume puro de finalizados no período selecionado)
@@ -524,7 +638,7 @@ export function computePercentageVariation(
     return {
       percent: 0,
       direction: 'insufficient',
-      label: 'Sem histórico suficiente',
+      label: 'Histórico em formação',
       formattedDiff: '—',
       hasSufficientData: false
     };
@@ -538,16 +652,16 @@ export function computePercentageVariation(
     return {
       percent,
       direction: 'up',
-      label: metricType === 'RITMO' ? 'AUMENTO DO RITMO' : 'AUMENTO DA PRODUTIVIDADE',
-      formattedDiff: `+${percent.toFixed(1).replace('.', ',')}%`,
+      label: 'AUMENTO',
+      formattedDiff: `↑ ${percent.toFixed(1).replace('.', ',')}%`,
       hasSufficientData: true
     };
   } else if (rawPercent < -0.05) {
     return {
       percent,
       direction: 'down',
-      label: metricType === 'RITMO' ? 'QUEDA DO RITMO' : 'QUEDA DA PRODUTIVIDADE',
-      formattedDiff: `-${percent.toFixed(1).replace('.', ',')}%`,
+      label: 'QUEDA',
+      formattedDiff: `↓ ${percent.toFixed(1).replace('.', ',')}%`,
       hasSufficientData: true
     };
   } else {
@@ -568,6 +682,7 @@ export function computePercentageVariation(
 export interface RhythmChartPoint {
   key: string;
   label: string;
+  periodRange: string; // e.g. "03/08–09/08"
   fullPeriodLabel: string;
   completedCount: number;
   businessDays: number;
@@ -579,13 +694,202 @@ export interface RhythmChartPoint {
 
 export interface RhythmDashboardData {
   chartData: RhythmChartPoint[];
-  currentPace: number;          // RITMO ATUAL
-  maxPace: number;              // MAIOR RITMO
+  currentPace: number;          // RITMO MÉDIO ATUAL
+  maxPace: number;              // MELHOR RITMO
   maxPacePeriod: string | null;
-  minPace: number;              // MENOR RITMO
+  minPace: number;              // PIOR RITMO
   minPacePeriod: string | null;
   variation: VariationResult;   // VARIAÇÃO DO RITMO
+  previousPace: number | null;  // Ritmo do período anterior para exibição do valor absoluto
+  previousPeriodLabel: string | null;
   currentPeriodLabel: string;
+  completedInCurrent: number;   // Tanques concluídos no período
+  currentBusinessDays: number;  // Dias úteis do período
+}
+
+/**
+ * Comparable period bucket definition
+ * Every bucket represents a real period containing at least one real completed operation
+ */
+export interface DeconComparableBucket {
+  key: string;
+  label: string;
+  periodRange: string;
+  fullPeriodLabel: string;
+  start: Date;
+  end: Date;
+  businessDays: number;
+}
+
+export function getDeconComparableBuckets(
+  allOperations: DecontaminationOperation[],
+  period: DeconFilterPeriod,
+  currentInterval: PeriodInterval,
+  customStart?: string,
+  customEnd?: string
+): DeconComparableBucket[] {
+  const completedOps = allOperations.filter(op => op.status === 'completed' && isOpOnOrAfterMinDate(op, DECON_MIN_DATE_OBJ));
+
+  if (completedOps.length === 0) {
+    return [];
+  }
+
+  // Operations that fall strictly within the selected interval
+  // For 'all', 'days', and 'weeks', scopedOps covers all completed operations in the system.
+  // For 'custom', scopedOps covers operations completed strictly between customStart and customEnd.
+  const scopedOps = (period === 'all' || period === 'days' || period === 'weeks')
+    ? completedOps
+    : completedOps.filter(op => isOpFinalizedInDateRange(op, currentInterval.start, currentInterval.end));
+
+  if (scopedOps.length === 0) {
+    return [];
+  }
+
+  // 1. Helper: DIA A DIA (agrupa por dias com operações concluídas reais)
+  const buildDailyBuckets = (ops: DecontaminationOperation[]) => {
+    const dayMap = new Map<string, Date>();
+    ops.forEach(op => {
+      const d = getOpCompletionDate(op);
+      if (d) {
+        const k = format(d, 'yyyy-MM-dd');
+        if (!dayMap.has(k)) dayMap.set(k, d);
+      }
+    });
+
+    const sortedDays = Array.from(dayMap.values()).sort((a, b) => a.getTime() - b.getTime());
+    return sortedDays.map(d => ({
+      key: format(d, 'yyyy-MM-dd'),
+      label: format(d, 'dd/MM'),
+      periodRange: format(d, 'dd/MM/yyyy'),
+      fullPeriodLabel: format(d, "dd/MM/yyyy"),
+      start: startOfDay(d),
+      end: endOfDay(d),
+      businessDays: 1 // Cada dia com operações concluídas = 1 dia útil
+    }));
+  };
+
+  // 2. Helper: SEMANA A SEMANA (agrupa por semanas com operações concluídas reais)
+  const buildWeeklyBuckets = (ops: DecontaminationOperation[]) => {
+    const weekMap = new Map<string, { start: Date; end: Date; ops: DecontaminationOperation[] }>();
+    ops.forEach(op => {
+      const d = getOpCompletionDate(op);
+      if (d) {
+        const wStart = startOfWeek(d, { weekStartsOn: 1 });
+        const wEnd = endOfWeek(d, { weekStartsOn: 1 });
+        const key = format(wStart, 'yyyy-MM-dd');
+        if (!weekMap.has(key)) {
+          weekMap.set(key, { start: wStart, end: wEnd, ops: [] });
+        }
+        weekMap.get(key)!.ops.push(op);
+      }
+    });
+
+    const sortedWeeks = Array.from(weekMap.values()).sort((a, b) => a.start.getTime() - b.start.getTime());
+    return sortedWeeks.map((w, idx) => {
+      const now = new Date();
+      const effectiveEnd = w.end.getTime() > now.getTime() ? now : w.end;
+      const bDays = Math.max(1, countCalendarBusinessDays(w.start, effectiveEnd));
+
+      const weekLabel = `Semana ${idx + 1}`;
+      const rangeStr = `${format(w.start, 'dd/MM')}–${format(w.end, 'dd/MM')}`;
+
+      return {
+        key: format(w.start, 'yyyy-MM-dd'),
+        label: weekLabel,
+        periodRange: `${weekLabel} (${rangeStr})`,
+        fullPeriodLabel: `${weekLabel} (${format(w.start, 'dd/MM')} a ${format(w.end, 'dd/MM/yyyy')})`,
+        start: w.start,
+        end: w.end,
+        businessDays: bDays
+      };
+    });
+  };
+
+  // 3. Helper: MÊS A MÊS (agrupa por meses com operações concluídas reais)
+  const buildMonthlyBuckets = (ops: DecontaminationOperation[]) => {
+    const monthMap = new Map<string, { start: Date; end: Date; ops: DecontaminationOperation[] }>();
+    ops.forEach(op => {
+      const d = getOpCompletionDate(op);
+      if (d) {
+        const mStart = startOfMonth(d);
+        const mEnd = endOfMonth(d);
+        const key = format(mStart, 'yyyy-MM');
+        if (!monthMap.has(key)) {
+          monthMap.set(key, { start: mStart, end: mEnd, ops: [] });
+        }
+        monthMap.get(key)!.ops.push(op);
+      }
+    });
+
+    const sortedMonths = Array.from(monthMap.values()).sort((a, b) => a.start.getTime() - b.start.getTime());
+    return sortedMonths.map(m => {
+      const now = new Date();
+      const effectiveEnd = m.end.getTime() > now.getTime() ? now : m.end;
+      const bDays = Math.max(1, countCalendarBusinessDays(m.start, effectiveEnd));
+
+      return {
+        key: format(m.start, 'yyyy-MM'),
+        label: format(m.start, 'MM/yy'),
+        periodRange: format(m.start, 'MMMM/yyyy', { locale: ptBR }),
+        fullPeriodLabel: format(m.start, 'MMMM/yyyy', { locale: ptBR }),
+        start: m.start,
+        end: m.end,
+        businessDays: bDays
+      };
+    });
+  };
+
+  // =========================================================================
+  // NOVO FILTRO: COMPARATIVO
+  // [ DIAS ]          -> DIA A DIA
+  // [ SEMANAS ]       -> SEMANA A SEMANA
+  // [ TODO O PERÍODO] -> MÊS A MÊS
+  // [ PERSONALIZADO ] -> AUTOMÁTICO (curto <= 31 dias: DIA A DIA | > 31 dias: SEMANA A SEMANA)
+  // =========================================================================
+
+  if (period === 'days') {
+    return buildDailyBuckets(scopedOps);
+  }
+
+  if (period === 'weeks') {
+    return buildWeeklyBuckets(scopedOps);
+  }
+
+  if (period === 'all') {
+    return buildMonthlyBuckets(scopedOps);
+  }
+
+  if (period === 'custom') {
+    let cStart = currentInterval.start;
+    let cEnd = currentInterval.end;
+    if (customStart && customEnd) {
+      try {
+        cStart = startOfDay(parseISO(customStart));
+        cEnd = endOfDay(parseISO(customEnd));
+      } catch {}
+    }
+
+    const daysDiff = Math.ceil((cEnd.getTime() - cStart.getTime()) / (1000 * 60 * 60 * 24));
+
+    if (daysDiff <= 31) {
+      return buildDailyBuckets(scopedOps);
+    } else {
+      return buildWeeklyBuckets(scopedOps);
+    }
+  }
+
+  // Compatibilidade legada
+  if (period === 'week' || period === 'month') {
+    return buildDailyBuckets(scopedOps);
+  }
+  if (period === 'quarter') {
+    return buildWeeklyBuckets(scopedOps);
+  }
+  if (period === 'semester') {
+    return buildMonthlyBuckets(scopedOps);
+  }
+
+  return [];
 }
 
 export function generateRhythmDashboardData(
@@ -596,247 +900,100 @@ export function generateRhythmDashboardData(
   referenceDate: Date = new Date()
 ): RhythmDashboardData {
   const ref = startOfDay(referenceDate);
-  const bounds = getDeconPeriodBounds(period, customStart, customEnd, ref);
+  const bounds = getDeconPeriodBounds(period, customStart, customEnd, ref, allOperations);
 
-  interface BucketDef {
-    key: string;
-    label: string;
-    fullPeriodLabel: string;
-    start: Date;
-    end: Date;
-  }
+  // 1. Gera os buckets da evolução baseados exclusivamente em operações concluídas reais no período
+  const buckets = getDeconComparableBuckets(allOperations, period, bounds.current, customStart, customEnd);
 
-  const buckets: BucketDef[] = [];
-
-  // Find earliest completed operation date registered in the system
-  let earliestCompletedDate: Date | null = null;
-  allOperations.filter(op => op.status === 'completed').forEach(op => {
-    const dStr = op.endDate || op.startDate || op.arrivalDate;
-    if (dStr) {
-      try {
-        const d = startOfDay(parseISO(dStr.slice(0, 10)));
-        if (!isNaN(d.getTime())) {
-          if (!earliestCompletedDate || d.getTime() < earliestCompletedDate.getTime()) {
-            earliestCompletedDate = d;
-          }
-        }
-      } catch {}
-    }
-  });
-
-  if (period === 'week') {
-    // Generate chronological weeks up to current week, starting strictly from the first registered completed operation
-    const minWeekStart = earliestCompletedDate 
-      ? startOfWeek(earliestCompletedDate, { weekStartsOn: 1 }) 
-      : startOfWeek(ref, { weekStartsOn: 1 });
-    let cur = minWeekStart;
-    const endTarget = endOfWeek(ref, { weekStartsOn: 1 });
-    let guard = 0;
-    while (cur.getTime() <= endTarget.getTime() && guard < 52) {
-      guard++;
-      const bStart = startOfWeek(cur, { weekStartsOn: 1 });
-      const bEnd = endOfWeek(cur, { weekStartsOn: 1 });
-      buckets.push({
-        key: format(bStart, 'yyyy-MM-dd'),
-        label: `Sem ${format(bStart, 'dd/MM')}`,
-        fullPeriodLabel: `Semana de ${format(bStart, 'dd/MM/yyyy')} a ${format(bEnd, 'dd/MM/yyyy')}`,
-        start: bStart,
-        end: bEnd
-      });
-      cur = new Date(cur.getTime() + 7 * 24 * 60 * 60 * 1000);
-    }
-  } else if (period === 'month' || period === 'all') {
-    // Generate chronological months starting strictly from first completed operation
-    const minMonthStart = earliestCompletedDate
-      ? startOfMonth(earliestCompletedDate)
-      : startOfMonth(ref);
-    let cur = minMonthStart;
-    const endTarget = endOfMonth(ref);
-    let guard = 0;
-    while (cur.getTime() <= endTarget.getTime() && guard < 24) {
-      guard++;
-      const bStart = startOfMonth(cur);
-      const bEnd = endOfMonth(cur);
-      buckets.push({
-        key: format(bStart, 'yyyy-MM'),
-        label: format(bStart, 'MMM/yy', { locale: ptBR }).toUpperCase(),
-        fullPeriodLabel: format(bStart, 'MMMM yyyy', { locale: ptBR }),
-        start: bStart,
-        end: bEnd
-      });
-      cur = new Date(cur.getFullYear(), cur.getMonth() + 1, 1);
-    }
-  } else if (period === 'quarter') {
-    // Generate chronological quarters starting strictly from first completed operation
-    const minQuarterStart = earliestCompletedDate
-      ? startOfQuarter(earliestCompletedDate)
-      : startOfQuarter(ref);
-    let cur = minQuarterStart;
-    const endTarget = endOfQuarter(ref);
-    let guard = 0;
-    while (cur.getTime() <= endTarget.getTime() && guard < 12) {
-      guard++;
-      const bStart = startOfQuarter(cur);
-      const bEnd = endOfQuarter(cur);
-      const q = Math.floor(cur.getMonth() / 3) + 1;
-      buckets.push({
-        key: `${cur.getFullYear()}-Q${q}`,
-        label: `T${q}/${format(cur, 'yy')}`,
-        fullPeriodLabel: `${q}º Trimestre de ${cur.getFullYear()}`,
-        start: bStart,
-        end: bEnd
-      });
-      cur = new Date(cur.getFullYear(), cur.getMonth() + 3, 1);
-    }
-  } else if (period === 'semester') {
-    // Generate chronological semesters
-    let curYear = earliestCompletedDate ? earliestCompletedDate.getFullYear() : ref.getFullYear();
-    const endYear = ref.getFullYear();
-    for (let y = curYear; y <= endYear; y++) {
-      for (let s = 1; s <= 2; s++) {
-        const bStart = new Date(y, s === 1 ? 0 : 6, 1);
-        const bEnd = endOfMonth(new Date(y, s === 1 ? 5 : 11, 1));
-        if (bStart.getTime() <= ref.getTime() && (!earliestCompletedDate || bEnd.getTime() >= earliestCompletedDate.getTime())) {
-          buckets.push({
-            key: `${y}-S${s}`,
-            label: `S${s}/${String(y).slice(-2)}`,
-            fullPeriodLabel: `${s}º Semestre de ${y}`,
-            start: bStart,
-            end: bEnd
-          });
-        }
-      }
-    }
-  } else if (period === 'custom' && customStart && customEnd) {
-    try {
-      const cStart = startOfDay(parseISO(customStart));
-      const cEnd = endOfDay(parseISO(customEnd));
-      const daysDiff = Math.ceil((cEnd.getTime() - cStart.getTime()) / (1000 * 60 * 60 * 24));
-
-      if (daysDiff <= 14) {
-        // Daily breakdown
-        let cur = new Date(cStart);
-        while (cur.getTime() <= cEnd.getTime()) {
-          const dStart = startOfDay(cur);
-          const dEnd = endOfDay(cur);
-          buckets.push({
-            key: format(dStart, 'yyyy-MM-dd'),
-            label: format(dStart, 'dd/MM'),
-            fullPeriodLabel: format(dStart, 'dd/MM/yyyy'),
-            start: dStart,
-            end: dEnd
-          });
-          cur.setDate(cur.getDate() + 1);
-        }
-      } else {
-        // Weekly breakdown inside custom range
-        let cur = startOfWeek(cStart, { weekStartsOn: 1 });
-        let guard = 0;
-        while (cur.getTime() <= cEnd.getTime() && guard < 52) {
-          guard++;
-          const bStart = cur.getTime() < cStart.getTime() ? cStart : cur;
-          const wEnd = endOfWeek(cur, { weekStartsOn: 1 });
-          const bEnd = wEnd.getTime() > cEnd.getTime() ? cEnd : wEnd;
-          buckets.push({
-            key: format(bStart, 'yyyy-MM-dd'),
-            label: `Sem ${format(bStart, 'dd/MM')}`,
-            fullPeriodLabel: `${format(bStart, 'dd/MM/yyyy')} a ${format(bEnd, 'dd/MM/yyyy')}`,
-            start: bStart,
-            end: bEnd
-          });
-          cur = new Date(cur.getTime() + 7 * 24 * 60 * 60 * 1000);
-        }
-      }
-    } catch {
-      // Fallback to single bucket
-      buckets.push({
-        key: 'custom-period',
-        label: 'Período',
-        fullPeriodLabel: bounds.current.label,
-        start: bounds.current.start,
-        end: bounds.current.end
-      });
-    }
-  }
-
-  // Calculate Rhythm for each bucket: Tanques Descontaminados ÷ Dias Úteis de Calendário do Período
-  const initialPoints: RhythmChartPoint[] = buckets.map((b) => {
-    const completedOps = allOperations.filter(op => isOpFinalizedInDateRange(op, b.start, b.end));
-    const completedCount = completedOps.length;
-    const businessDays = Math.max(1, countCalendarBusinessDays(b.start, b.end));
-    const ritmo = Number((completedCount / businessDays).toFixed(1));
+  let points: RhythmChartPoint[] = buckets.map((b, idx) => {
+    const wOps = allOperations.filter(op => isOpFinalizedInDateRange(op, b.start, b.end));
+    const completedCount = wOps.length;
+    const businessDays = b.businessDays;
+    const ritmo = businessDays > 0 ? Number((completedCount / businessDays).toFixed(1)) : completedCount;
+    const isCurrent = (b.start.getTime() <= ref.getTime() && b.end.getTime() >= ref.getTime()) || (idx === buckets.length - 1);
 
     return {
       key: b.key,
       label: b.label,
+      periodRange: b.periodRange,
       fullPeriodLabel: b.fullPeriodLabel,
       completedCount,
       businessDays,
       ritmo,
-      isCurrent: false,
+      isCurrent,
       isMax: false,
       isMin: false
     };
   });
 
-  // ONLY periods with at least 1 completed operation can appear in the chart and metrics
-  let points: RhythmChartPoint[] = initialPoints.filter(p => p.completedCount > 0);
-
-  if (points.length === 0) {
-    points = [{
-      key: 'current',
-      label: 'Atual',
-      fullPeriodLabel: bounds.current.label,
-      completedCount: 0,
-      businessDays: Math.max(1, countCalendarBusinessDays(bounds.current.start, bounds.current.end)),
-      ritmo: 0,
-      isCurrent: true,
-      isMax: false,
-      isMin: false
-    }];
-  }
+  // 2. O card "RITMO MÉDIO" usa EXATAMENTE os mesmos dados apresentados na tabela e no gráfico:
+  // - completedInCurrent = soma dos tanques concluídos dos pontos analisados
+  // - currentBusinessDays = soma dos dias úteis dos pontos analisados
+  // - currentPace = completedInCurrent ÷ currentBusinessDays
+  // Nunca divide por dias úteis futuros ou fora dos pontos analisados.
+  const completedInCurrent = points.reduce((acc, p) => acc + p.completedCount, 0);
+  const currentBusinessDays = points.reduce((acc, p) => acc + p.businessDays, 0);
+  const currentPace = currentBusinessDays > 0
+    ? Number((completedInCurrent / currentBusinessDays).toFixed(1))
+    : 0;
 
   let maxPace = 0;
   let maxPacePeriod: string | null = null;
   let minPace = Infinity;
   let minPacePeriod: string | null = null;
 
-  points.forEach((p, idx) => {
-    p.isCurrent = idx === points.length - 1;
+  points.forEach(p => {
     if (p.completedCount > 0 && p.ritmo > maxPace) {
       maxPace = p.ritmo;
-      maxPacePeriod = p.label;
+      maxPacePeriod = p.fullPeriodLabel || p.label;
     }
     if (p.completedCount > 0 && p.ritmo < minPace) {
       minPace = p.ritmo;
-      minPacePeriod = p.label;
+      minPacePeriod = p.fullPeriodLabel || p.label;
     }
   });
 
   if (minPace === Infinity) {
-    minPace = 0;
+    minPace = maxPace;
+    minPacePeriod = maxPacePeriod;
   }
 
   points.forEach(p => {
     if (maxPace > 0 && p.ritmo === maxPace) p.isMax = true;
-    if (minPace > 0 && p.ritmo === minPace) p.isMin = true;
+    if (minPace > 0 && p.ritmo === minPace && points.length > 1) p.isMin = true;
   });
 
-  // Calculate current period pace and previous period pace for variation
-  const currentCompleted = allOperations.filter(op => isOpFinalizedInDateRange(op, bounds.current.start, bounds.current.end)).length;
-  const currentBusinessDays = Math.max(1, countCalendarBusinessDays(bounds.current.start, bounds.current.end));
-  const currentPace = Number((currentCompleted / currentBusinessDays).toFixed(1));
+  let previousPace: number | null = null;
+  let previousPeriodLabel: string | null = bounds.previous ? bounds.previous.label : null;
+  let variation: VariationResult;
 
-  let prevPace: number | null = null;
   if (bounds.previous) {
-    const prevCompleted = allOperations.filter(op => isOpFinalizedInDateRange(op, bounds.previous!.start, bounds.previous!.end)).length;
-    const prevBusinessDays = Math.max(1, countCalendarBusinessDays(bounds.previous.start, bounds.previous.end));
+    const prevBuckets = getDeconComparableBuckets(allOperations, period, bounds.previous, customStart, customEnd);
+    const prevCompleted = prevBuckets.reduce((acc, b) => {
+      return acc + allOperations.filter(op => isOpFinalizedInDateRange(op, b.start, b.end)).length;
+    }, 0);
+    const prevBusinessDays = prevBuckets.reduce((acc, b) => acc + b.businessDays, 0);
     if (prevCompleted > 0 && prevBusinessDays > 0) {
-      prevPace = prevCompleted / prevBusinessDays;
+      previousPace = Number((prevCompleted / prevBusinessDays).toFixed(1));
+      variation = computePercentageVariation(currentPace, previousPace, 'RITMO');
+    } else if (points.length >= 2) {
+      const lastPoint = points[points.length - 1];
+      const prevPoint = points[points.length - 2];
+      previousPace = prevPoint.ritmo;
+      previousPeriodLabel = prevPoint.fullPeriodLabel || prevPoint.label;
+      variation = computePercentageVariation(lastPoint.ritmo, prevPoint.ritmo, 'RITMO');
+    } else {
+      variation = computePercentageVariation(currentPace, null, 'RITMO');
     }
+  } else if (points.length >= 2) {
+    const lastPoint = points[points.length - 1];
+    const prevPoint = points[points.length - 2];
+    previousPace = prevPoint.ritmo;
+    previousPeriodLabel = prevPoint.fullPeriodLabel || prevPoint.label;
+    variation = computePercentageVariation(lastPoint.ritmo, prevPoint.ritmo, 'RITMO');
+  } else {
+    variation = computePercentageVariation(currentPace, null, 'RITMO');
   }
-
-  const variation = computePercentageVariation(currentPace, prevPace, 'RITMO');
 
   return {
     chartData: points,
@@ -846,14 +1003,18 @@ export function generateRhythmDashboardData(
     minPace,
     minPacePeriod,
     variation,
-    currentPeriodLabel: bounds.current.label
+    previousPace,
+    previousPeriodLabel,
+    currentPeriodLabel: bounds.current.label,
+    completedInCurrent,
+    currentBusinessDays
   };
 }
 
 /**
  * PRODUCTIVITY DASHBOARD DATA (Parte 5)
  * Mostra a capacidade produtiva real observada:
- * - Pico de Produção Diária (Maior quantidade finalizada em um único dia)
+ * - Capacidade Máxima Observada em um Dia (Pico de Produção Diária)
  * - Total Descontaminado no período
  * - Média de Produção por Período
  * - Variação da Produtividade
@@ -870,12 +1031,14 @@ export interface ProductivityChartPoint {
 
 export interface ProductivityDashboardData {
   chartData: ProductivityChartPoint[];
-  totalDescontaminado: number;          // TOTAL DESCONTAMINADO
-  peakDailyCount: number;               // PICO DE PRODUÇÃO DIÁRIA
+  totalDescontaminado: number;          // Total descontaminado (usado internamente no gráfico e variações)
+  peakDailyCount: number;               // MAIOR PRODUÇÃO EM 1 DIA
   peakDailyDate: string | null;         // Data do pico
-  avgProductionPerPeriod: number;       // MÉDIA DE PRODUÇÃO POR PERÍODO
-  periodUnitLabel: string;              // "por semana", "por mês", "por trimestre", "por semestre"
-  variation: VariationResult;          // VARIAÇÃO DA PRODUTIVIDADE
+  avgProductionPerPeriod: number;       // MÉDIA DE PRODUÇÃO
+  periodUnitLabel: string;              // "tanques / dia", "tanques / semana", "tanques / mês"
+  periodSubLabel: string;               // "Média por dia analisado", "Média por semana", "Média mensal"
+  productiveDays: number;               // DIAS PRODUTIVOS (dias com pelo menos 1 operação concluída)
+  variation: VariationResult;           // VARIAÇÃO DA PRODUTIVIDADE
   currentPeriodLabel: string;
 }
 
@@ -887,20 +1050,39 @@ export function generateProductivityDashboardData(
   referenceDate: Date = new Date()
 ): ProductivityDashboardData {
   const ref = startOfDay(referenceDate);
-  const bounds = getDeconPeriodBounds(period, customStart, customEnd, ref);
+  const bounds = getDeconPeriodBounds(period, customStart, customEnd, ref, allOperations);
 
-  // 1. Operations finalized in current selected period
-  const completedInCurrentPeriod = allOperations.filter(op => 
-    isOpFinalizedInDateRange(op, bounds.current.start, bounds.current.end)
-  );
-  const totalDescontaminado = completedInCurrentPeriod.length;
+  // 1. Build comparable buckets (utiliza EXATAMENTE os mesmos buckets do Ritmo)
+  const buckets = getDeconComparableBuckets(allOperations, period, bounds.current, customStart, customEnd);
 
-  // 2. Daily completion map to find REAL PEAK in a single calendar day
+  let points: ProductivityChartPoint[] = buckets.map((b, idx) => {
+    const wOps = allOperations.filter(op => isOpFinalizedInDateRange(op, b.start, b.end));
+    const finalizados = wOps.length;
+    const isCurrent = (b.start.getTime() <= ref.getTime() && b.end.getTime() >= ref.getTime()) || (idx === buckets.length - 1);
+
+    return {
+      key: b.key,
+      label: b.label,
+      fullPeriodLabel: b.fullPeriodLabel,
+      finalizados,
+      isCurrent,
+      isPeak: false
+    };
+  });
+
+  // Total Descontaminado é a soma exata dos pontos apresentados na evolução
+  const totalDescontaminado = points.reduce((acc, p) => acc + p.finalizados, 0);
+
+  // 2. Pico diário considerando as operações concluídas do período selecionado
   const dailyMap = new Map<string, number>();
-  completedInCurrentPeriod.forEach(op => {
-    const dStr = op.endDate || op.startDate || op.arrivalDate;
-    if (dStr) {
-      const cleanDate = dStr.slice(0, 10);
+  const scopedOps = period === 'all'
+    ? allOperations.filter(op => op.status === 'completed' && isOpOnOrAfterMinDate(op, DECON_MIN_DATE_OBJ))
+    : allOperations.filter(op => isOpFinalizedInDateRange(op, bounds.current.start, bounds.current.end));
+
+  scopedOps.forEach(op => {
+    const d = getOpCompletionDate(op);
+    if (d) {
+      const cleanDate = format(d, 'yyyy-MM-dd');
       dailyMap.set(cleanDate, (dailyMap.get(cleanDate) || 0) + 1);
     }
   });
@@ -914,198 +1096,8 @@ export function generateProductivityDashboardData(
     }
   });
 
-  // 3. Build chronological buckets for the Line Chart (same granularity)
-  // Find earliest completed operation date registered in the system
-  let earliestCompletedDate: Date | null = null;
-  allOperations.filter(op => op.status === 'completed').forEach(op => {
-    const dStr = op.endDate || op.startDate || op.arrivalDate;
-    if (dStr) {
-      try {
-        const d = startOfDay(parseISO(dStr.slice(0, 10)));
-        if (!isNaN(d.getTime())) {
-          if (!earliestCompletedDate || d.getTime() < earliestCompletedDate.getTime()) {
-            earliestCompletedDate = d;
-          }
-        }
-      } catch {}
-    }
-  });
-
-  interface BucketDef {
-    key: string;
-    label: string;
-    fullPeriodLabel: string;
-    start: Date;
-    end: Date;
-  }
-  const buckets: BucketDef[] = [];
-
-  let periodUnitLabel = 'por período';
-
-  if (period === 'week') {
-    periodUnitLabel = 'por semana';
-    const minWeekStart = earliestCompletedDate 
-      ? startOfWeek(earliestCompletedDate, { weekStartsOn: 1 }) 
-      : startOfWeek(ref, { weekStartsOn: 1 });
-    let cur = minWeekStart;
-    const endTarget = endOfWeek(ref, { weekStartsOn: 1 });
-    let guard = 0;
-    while (cur.getTime() <= endTarget.getTime() && guard < 52) {
-      guard++;
-      const bStart = startOfWeek(cur, { weekStartsOn: 1 });
-      const bEnd = endOfWeek(cur, { weekStartsOn: 1 });
-      buckets.push({
-        key: format(bStart, 'yyyy-MM-dd'),
-        label: `Sem ${format(bStart, 'dd/MM')}`,
-        fullPeriodLabel: `Semana de ${format(bStart, 'dd/MM/yyyy')} a ${format(bEnd, 'dd/MM/yyyy')}`,
-        start: bStart,
-        end: bEnd
-      });
-      cur = new Date(cur.getTime() + 7 * 24 * 60 * 60 * 1000);
-    }
-  } else if (period === 'month' || period === 'all') {
-    periodUnitLabel = 'por mês';
-    const minMonthStart = earliestCompletedDate
-      ? startOfMonth(earliestCompletedDate)
-      : startOfMonth(ref);
-    let cur = minMonthStart;
-    const endTarget = endOfMonth(ref);
-    let guard = 0;
-    while (cur.getTime() <= endTarget.getTime() && guard < 24) {
-      guard++;
-      const bStart = startOfMonth(cur);
-      const bEnd = endOfMonth(cur);
-      buckets.push({
-        key: format(bStart, 'yyyy-MM'),
-        label: format(bStart, 'MMM/yy', { locale: ptBR }).toUpperCase(),
-        fullPeriodLabel: format(bStart, 'MMMM yyyy', { locale: ptBR }),
-        start: bStart,
-        end: bEnd
-      });
-      cur = new Date(cur.getFullYear(), cur.getMonth() + 1, 1);
-    }
-  } else if (period === 'quarter') {
-    periodUnitLabel = 'por trimestre';
-    const minQuarterStart = earliestCompletedDate
-      ? startOfQuarter(earliestCompletedDate)
-      : startOfQuarter(ref);
-    let cur = minQuarterStart;
-    const endTarget = endOfQuarter(ref);
-    let guard = 0;
-    while (cur.getTime() <= endTarget.getTime() && guard < 12) {
-      guard++;
-      const bStart = startOfQuarter(cur);
-      const bEnd = endOfQuarter(cur);
-      const q = Math.floor(cur.getMonth() / 3) + 1;
-      buckets.push({
-        key: `${cur.getFullYear()}-Q${q}`,
-        label: `T${q}/${format(cur, 'yy')}`,
-        fullPeriodLabel: `${q}º Trimestre de ${cur.getFullYear()}`,
-        start: bStart,
-        end: bEnd
-      });
-      cur = new Date(cur.getFullYear(), cur.getMonth() + 3, 1);
-    }
-  } else if (period === 'semester') {
-    periodUnitLabel = 'por semestre';
-    let curYear = earliestCompletedDate ? earliestCompletedDate.getFullYear() : ref.getFullYear();
-    const endYear = ref.getFullYear();
-    for (let y = curYear; y <= endYear; y++) {
-      for (let s = 1; s <= 2; s++) {
-        const bStart = new Date(y, s === 1 ? 0 : 6, 1);
-        const bEnd = endOfMonth(new Date(y, s === 1 ? 5 : 11, 1));
-        if (bStart.getTime() <= ref.getTime() && (!earliestCompletedDate || bEnd.getTime() >= earliestCompletedDate.getTime())) {
-          buckets.push({
-            key: `${y}-S${s}`,
-            label: `S${s}/${String(y).slice(-2)}`,
-            fullPeriodLabel: `${s}º Semestre de ${y}`,
-            start: bStart,
-            end: bEnd
-          });
-        }
-      }
-    }
-  } else if (period === 'custom' && customStart && customEnd) {
-    periodUnitLabel = 'no intervalo';
-    try {
-      const cStart = startOfDay(parseISO(customStart));
-      const cEnd = endOfDay(parseISO(customEnd));
-      const daysDiff = Math.ceil((cEnd.getTime() - cStart.getTime()) / (1000 * 60 * 60 * 24));
-
-      if (daysDiff <= 14) {
-        periodUnitLabel = 'por dia';
-        let cur = new Date(cStart);
-        while (cur.getTime() <= cEnd.getTime()) {
-          const dStart = startOfDay(cur);
-          const dEnd = endOfDay(cur);
-          buckets.push({
-            key: format(dStart, 'yyyy-MM-dd'),
-            label: format(dStart, 'dd/MM'),
-            fullPeriodLabel: format(dStart, 'dd/MM/yyyy'),
-            start: dStart,
-            end: dEnd
-          });
-          cur.setDate(cur.getDate() + 1);
-        }
-      } else {
-        periodUnitLabel = 'por semana';
-        let cur = startOfWeek(cStart, { weekStartsOn: 1 });
-        let guard = 0;
-        while (cur.getTime() <= cEnd.getTime() && guard < 52) {
-          guard++;
-          const bStart = cur.getTime() < cStart.getTime() ? cStart : cur;
-          const wEnd = endOfWeek(cur, { weekStartsOn: 1 });
-          const bEnd = wEnd.getTime() > cEnd.getTime() ? cEnd : wEnd;
-          buckets.push({
-            key: format(bStart, 'yyyy-MM-dd'),
-            label: `Sem ${format(bStart, 'dd/MM')}`,
-            fullPeriodLabel: `${format(bStart, 'dd/MM/yyyy')} a ${format(bEnd, 'dd/MM/yyyy')}`,
-            start: bStart,
-            end: bEnd
-          });
-          cur = new Date(cur.getTime() + 7 * 24 * 60 * 60 * 1000);
-        }
-      }
-    } catch {
-      buckets.push({
-        key: 'custom-period',
-        label: 'Período',
-        fullPeriodLabel: bounds.current.label,
-        start: bounds.current.start,
-        end: bounds.current.end
-      });
-    }
-  }
-
-  const initialPoints: ProductivityChartPoint[] = buckets.map((b) => {
-    const finalized = allOperations.filter(op => isOpFinalizedInDateRange(op, b.start, b.end)).length;
-    return {
-      key: b.key,
-      label: b.label,
-      fullPeriodLabel: b.fullPeriodLabel,
-      finalizados: finalized,
-      isCurrent: false,
-      isPeak: false
-    };
-  });
-
-  // ONLY periods with at least 1 finalized operation can appear in the chart and metrics
-  let points: ProductivityChartPoint[] = initialPoints.filter(p => p.finalizados > 0);
-
-  if (points.length === 0) {
-    points = [{
-      key: 'current',
-      label: 'Atual',
-      fullPeriodLabel: bounds.current.label,
-      finalizados: totalDescontaminado,
-      isCurrent: true,
-      isPeak: false
-    }];
-  }
-
   let highestBucketCount = 0;
-  points.forEach((p, idx) => {
-    p.isCurrent = idx === points.length - 1;
+  points.forEach(p => {
     if (p.finalizados > highestBucketCount) {
       highestBucketCount = p.finalizados;
     }
@@ -1115,22 +1107,73 @@ export function generateProductivityDashboardData(
     p.isPeak = (highestBucketCount > 0 && p.finalizados === highestBucketCount);
   });
 
-  // 4. Média de produção por unidade da granularidade selecionada (apenas períodos válidos)
-  const sumCompletedInBuckets = points.reduce((acc, p) => acc + p.finalizados, 0);
-  const avgProductionPerPeriod = points.length > 0
-    ? Number((sumCompletedInBuckets / points.length).toFixed(1))
-    : totalDescontaminado;
+  // 3. Dias produtivos: dias com pelo menos uma operação de descontaminação concluída no período
+  const productiveDays = dailyMap.size;
 
-  // 5. Variação da Produtividade comparando período atual com período anterior equivalente
-  let prevCompletedCount: number | null = null;
-  if (bounds.previous) {
-    const prevOps = allOperations.filter(op => isOpFinalizedInDateRange(op, bounds.previous!.start, bounds.previous!.end));
-    if (prevOps.length > 0) {
-      prevCompletedCount = prevOps.length;
-    }
+  // 4. Média de produção por período (pontos analisados da tabela/gráfico)
+  const avgProductionPerPeriod = points.length > 0
+    ? Number((totalDescontaminado / points.length).toFixed(1))
+    : 0;
+
+  // IMPORTANTE: Produtividade é VOLUME por período analisado (nunca usar "dia útil")
+  let periodUnitLabel = 'tanques / período';
+  let periodSubLabel = 'Média por período analisado';
+  if (period === 'days') {
+    periodUnitLabel = 'tanques / dia';
+    periodSubLabel = 'Média por dia analisado';
+  } else if (period === 'weeks') {
+    periodUnitLabel = 'tanques / semana';
+    periodSubLabel = 'Média por semana';
+  } else if (period === 'all') {
+    periodUnitLabel = 'tanques / mês';
+    periodSubLabel = 'Média mensal';
+  } else if (period === 'custom' && customStart && customEnd) {
+    try {
+      const cStart = startOfDay(parseISO(customStart));
+      const cEnd = endOfDay(parseISO(customEnd));
+      const daysDiff = Math.ceil((cEnd.getTime() - cStart.getTime()) / (1000 * 60 * 60 * 24));
+      if (daysDiff <= 31) {
+        periodUnitLabel = 'tanques / dia';
+        periodSubLabel = 'Média por dia analisado';
+      } else {
+        periodUnitLabel = 'tanques / semana';
+        periodSubLabel = 'Média por semana';
+      }
+    } catch {}
+  } else if (period === 'week' || period === 'month') {
+    periodUnitLabel = 'tanques / dia';
+    periodSubLabel = 'Média por dia analisado';
+  } else if (period === 'quarter') {
+    periodUnitLabel = 'tanques / semana';
+    periodSubLabel = 'Média por semana';
+  } else if (period === 'semester') {
+    periodUnitLabel = 'tanques / mês';
+    periodSubLabel = 'Média mensal';
   }
 
-  const variation = computePercentageVariation(totalDescontaminado, prevCompletedCount, 'PRODUTIVIDADE');
+  // 5. Variação da Produtividade comparando período atual com período anterior equivalente
+  let variation: VariationResult;
+  if (bounds.previous) {
+    const prevBuckets = getDeconComparableBuckets(allOperations, period, bounds.previous, customStart, customEnd);
+    const prevCompleted = prevBuckets.reduce((acc, b) => {
+      return acc + allOperations.filter(op => isOpFinalizedInDateRange(op, b.start, b.end)).length;
+    }, 0);
+    if (prevCompleted > 0) {
+      variation = computePercentageVariation(totalDescontaminado, prevCompleted, 'PRODUTIVIDADE');
+    } else if (points.length >= 2) {
+      const lastPoint = points[points.length - 1];
+      const prevPoint = points[points.length - 2];
+      variation = computePercentageVariation(lastPoint.finalizados, prevPoint.finalizados, 'PRODUTIVIDADE');
+    } else {
+      variation = computePercentageVariation(totalDescontaminado, null, 'PRODUTIVIDADE');
+    }
+  } else if (points.length >= 2) {
+    const lastPoint = points[points.length - 1];
+    const prevPoint = points[points.length - 2];
+    variation = computePercentageVariation(lastPoint.finalizados, prevPoint.finalizados, 'PRODUTIVIDADE');
+  } else {
+    variation = computePercentageVariation(totalDescontaminado, null, 'PRODUTIVIDADE');
+  }
 
   return {
     chartData: points,
@@ -1139,6 +1182,8 @@ export function generateProductivityDashboardData(
     peakDailyDate,
     avgProductionPerPeriod,
     periodUnitLabel,
+    periodSubLabel,
+    productiveDays,
     variation,
     currentPeriodLabel: bounds.current.label
   };

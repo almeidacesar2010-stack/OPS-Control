@@ -44,8 +44,7 @@ import {
   ArrowDownRight,
   X,
   Eye,
-  ExternalLink,
-  CalendarCheck2
+  ExternalLink
 } from 'lucide-react';
 import { 
   BarChart, 
@@ -89,15 +88,14 @@ import {
   calculateDurationDays,
   isOperationInPeriod, 
   calculateMainIndicators,
-  generateRhythmDashboardData,
-  generateProductivityDashboardData,
+  generatePerformanceDashboardData,
+  PerformanceDashboardData,
+  PerformanceChartPoint,
   computePercentageVariation,
   calculateClientIndicators, 
   calculateModelIndicators, 
   calculateContaminationIndicators,
   DeconFilterPeriod,
-  RhythmDashboardData,
-  ProductivityDashboardData,
   MainIndicatorsData,
   DECON_MIN_DATE,
   DECON_MIN_DATE_OBJ,
@@ -339,10 +337,7 @@ export function DecontaminationManagement({
     }
   };
 
-  // Dashboard View Switcher: 'ritmo' | 'produtividade'
-  const [activeDashboard, setActiveDashboard] = useState<'ritmo' | 'produtividade'>('ritmo');
-
-  // Filter Period: [ DIAS ] [ SEMANAS ] [ PERSONALIZADO ]
+  // Filter Period: [ DIAS ] [ SEMANAS ] [ TODO O PERÍODO ] [ PERSONALIZADO ]
   const [filterPeriod, setFilterPeriod] = useState<DeconFilterPeriod>('weeks');
   const [referenceDate, setReferenceDate] = useState<Date>(new Date());
   const [customStartDate, setCustomStartDate] = useState('');
@@ -402,14 +397,9 @@ export function DecontaminationManagement({
     return calculateMainIndicators(operations, filterPeriod, customStartDate, customEndDate, referenceDate);
   }, [operations, filterPeriod, customStartDate, customEndDate, referenceDate]);
 
-  // 2. GENERATE RHYTHM DASHBOARD DATA (Parte 2)
-  const rhythmData = useMemo<RhythmDashboardData>(() => {
-    return generateRhythmDashboardData(operations, filterPeriod, customStartDate, customEndDate, referenceDate);
-  }, [operations, filterPeriod, customStartDate, customEndDate, referenceDate]);
-
-  // 3. GENERATE PRODUCTIVITY DASHBOARD DATA (Parte 3)
-  const productivityData = useMemo<ProductivityDashboardData>(() => {
-    return generateProductivityDashboardData(operations, filterPeriod, customStartDate, customEndDate, referenceDate);
+  // 2. GENERATE UNIFIED PERFORMANCE DASHBOARD DATA (PRODUÇÃO & RITMO)
+  const performanceData = useMemo<PerformanceDashboardData>(() => {
+    return generatePerformanceDashboardData(operations, filterPeriod, customStartDate, customEndDate, referenceDate);
   }, [operations, filterPeriod, customStartDate, customEndDate, referenceDate]);
 
   // Filter operations by date range period for lower sections & tables
@@ -905,738 +895,325 @@ export function DecontaminationManagement({
       </div>
 
       {/* ========================================================== */}
-      {/* SELETOR DE DASHBOARD & FILTRO DE PERÍODO                   */}
+      {/* ÁREA DE RITMO DA DESCONTAMINAÇÃO                          */}
       {/* ========================================================== */}
-      <div className="bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl p-5 sm:p-6 rounded-[28px] border border-slate-200/60 dark:border-slate-800/60 shadow-sm space-y-4">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-          {/* Dashboard Switcher (RITMO / PRODUTIVIDADE) */}
-          <div className="flex items-center gap-3">
-            <span className="text-xs font-black uppercase tracking-wider text-slate-400 hidden sm:inline">
-              Visualização:
-            </span>
-            <div className="flex items-center p-1.5 bg-slate-100 dark:bg-slate-800/90 rounded-2xl border border-slate-200/70 dark:border-slate-700/60 w-full sm:w-auto">
-              <button
-                type="button"
-                onClick={() => setActiveDashboard('ritmo')}
-                className={`flex-1 sm:flex-none px-5 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center justify-center gap-2 ${
-                  activeDashboard === 'ritmo'
-                    ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                }`}
-              >
-                <TrendingUp className="w-4 h-4" />
-                <span>Ritmo</span>
-                <span className={`text-[9px] px-1.5 py-0.5 rounded font-black tracking-normal uppercase ${
-                  activeDashboard === 'ritmo'
-                    ? 'bg-blue-700/60 text-blue-100'
-                    : 'bg-slate-200 dark:bg-slate-700 text-slate-500 dark:text-slate-400'
-                }`}>
-                  Velocidade
-                </span>
-              </button>
+      <div className="space-y-6">
+        {/* BARRA DE TÍTULO E FILTRO COMPARAR POR */}
+        <div className="bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl p-6 sm:p-7 rounded-[32px] border border-slate-200/80 dark:border-slate-800 shadow-sm space-y-4">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-5">
+            <div className="flex items-center gap-3.5">
+              <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-blue-600 via-indigo-600 to-blue-500 text-white flex items-center justify-center shadow-lg shadow-blue-500/25 shrink-0">
+                <Activity className="w-6 h-6" />
+              </div>
+              <div>
+                <h2 className="text-lg sm:text-xl font-black text-slate-900 dark:text-white uppercase tracking-tight flex items-center gap-2">
+                  Ritmo da Descontaminação
+                </h2>
+                <p className="text-xs text-slate-500 dark:text-slate-400 font-semibold mt-0.5">
+                  Acompanhamento da velocidade operacional e do máximo diário realizado
+                </p>
+              </div>
+            </div>
 
-              <button
-                type="button"
-                onClick={() => setActiveDashboard('produtividade')}
-                className={`flex-1 sm:flex-none px-5 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center justify-center gap-2 ${
-                  activeDashboard === 'produtividade'
-                    ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-600/30'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                }`}
-              >
-                <BarChart3 className="w-4 h-4" />
-                <span>Produtividade</span>
-                <span className={`text-[9px] px-1.5 py-0.5 rounded font-black tracking-normal uppercase ${
-                  activeDashboard === 'produtividade'
-                    ? 'bg-emerald-700/60 text-emerald-100'
-                    : 'bg-slate-200 dark:bg-slate-700 text-slate-500 dark:text-slate-400'
-                }`}>
-                  Volume
-                </span>
-              </button>
+            {/* COMPARAR POR: [ DIAS ] [ SEMANAS ] [ TODO O PERÍODO ] [ PERSONALIZADO ] */}
+            <div className="flex items-center gap-2.5 flex-wrap">
+              <div className="flex items-center gap-1.5 text-xs font-black uppercase tracking-wider text-slate-400">
+                <Filter className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                <span>Comparar por:</span>
+              </div>
+              <div className="flex flex-wrap items-center gap-1 bg-slate-100/90 dark:bg-slate-800/90 p-1.5 rounded-2xl border border-slate-200/70 dark:border-slate-700/60 shadow-inner">
+                {[
+                  { id: 'days', label: 'Dias' },
+                  { id: 'weeks', label: 'Semanas' },
+                  { id: 'all', label: 'Todo o Período' },
+                  { id: 'custom', label: 'Personalizado' }
+                ].map(p => {
+                  const isActive = filterPeriod === p.id;
+                  return (
+                    <button
+                      key={p.id}
+                      type="button"
+                      id={`btn-comparar-por-${p.id}`}
+                      onClick={() => {
+                        setFilterPeriod(p.id as DeconFilterPeriod);
+                        if (p.id === 'custom' && !customStartDate) {
+                          setCustomStartDate(DECON_MIN_DATE);
+                        }
+                      }}
+                      className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all duration-200 ${
+                        isActive
+                          ? 'bg-blue-600 text-white shadow-md shadow-blue-500/30 scale-[1.02]'
+                          : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200/60 dark:hover:bg-slate-700/50'
+                      }`}
+                    >
+                      {p.label}
+                    </button>
+                  );
+                })}
+              </div>
+              <span className="text-[11px] font-bold text-slate-400 dark:text-slate-500 hidden xl:inline">
+                · A partir de 03/08/2026
+              </span>
             </div>
           </div>
 
-          {/* COMPARATIVO FILTER */}
-          <div className="flex items-center gap-2 flex-wrap">
-            <div className="flex items-center gap-1.5 text-xs font-black uppercase tracking-wider text-slate-400 mr-1">
-              <Calendar className="w-4 h-4 text-blue-600 dark:text-blue-400" />
-              <span className="hidden sm:inline">Comparativo:</span>
+          {/* Custom Date Pickers (somente quando filterPeriod === 'custom') */}
+          {filterPeriod === 'custom' && (
+            <div className="pt-4 border-t border-slate-100 dark:border-slate-800 space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-[11px] font-black uppercase text-slate-500 dark:text-slate-400 mb-1.5">
+                    Data Inicial (mínimo: 03/08/2026)
+                  </label>
+                  <input
+                    type="date"
+                    id="input-custom-start-date"
+                    min="2026-08-03"
+                    value={customStartDate || DECON_MIN_DATE}
+                    onChange={e => setCustomStartDate(e.target.value)}
+                    className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-black uppercase text-slate-500 dark:text-slate-400 mb-1.5">
+                    Data Final
+                  </label>
+                  <input
+                    type="date"
+                    id="input-custom-end-date"
+                    min="2026-08-03"
+                    value={customEndDate}
+                    onChange={e => setCustomEndDate(e.target.value)}
+                    className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all outline-none"
+                  />
+                </div>
+              </div>
+              <div className="flex items-center gap-2 text-xs font-semibold text-blue-600 dark:text-blue-400 bg-blue-50/70 dark:bg-blue-950/40 px-3.5 py-2 rounded-xl border border-blue-200/60 dark:border-blue-800/40">
+                <Info className="w-3.5 h-3.5 shrink-0" />
+                <span>Granularidade automática: <strong>{performanceData.granularityLabel}</strong> (até 31 dias: Diário · 32 a 180 dias: Semanal · acima de 180 dias: Mensal)</span>
+              </div>
             </div>
-            {/* COMPARATIVO: [ DIAS ] [ SEMANAS ] [ PERSONALIZADO ] */}
-            <div className="flex flex-wrap items-center gap-1 bg-slate-100 dark:bg-slate-800 p-1.5 rounded-2xl border border-slate-200/60 dark:border-slate-700/60">
-              {[
-                { id: 'days', label: 'Dias' },
-                { id: 'weeks', label: 'Semanas' },
-                { id: 'custom', label: 'Personalizado' }
-              ].map(p => (
-                <button
-                  key={p.id}
-                  type="button"
-                  id={`btn-comparativo-${p.id}`}
-                  onClick={() => {
-                    setFilterPeriod(p.id as DeconFilterPeriod);
-                    if (p.id === 'custom' && !customStartDate) {
-                      setCustomStartDate(DECON_MIN_DATE);
-                    }
-                  }}
-                  className={`px-3.5 py-2 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all ${
-                    filterPeriod === p.id
-                      ? activeDashboard === 'ritmo'
-                        ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20'
-                        : 'bg-emerald-600 text-white shadow-md shadow-emerald-500/20'
-                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                  }`}
-                >
-                  {p.label}
-                </button>
-              ))}
+          )}
+        </div>
+
+        {/* 2 INDICADORES DE DESEMPENHO: RITMO MÉDIO E MÁXIMO FEITO EM 1 DIA */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5 sm:gap-6">
+          {/* CARD 1: RITMO MÉDIO */}
+          <div className="group relative bg-gradient-to-br from-white via-white to-blue-50/40 dark:from-slate-900 dark:via-slate-900 dark:to-blue-950/30 p-6 sm:p-8 rounded-[32px] border-2 border-blue-500/40 dark:border-blue-500/40 shadow-md shadow-blue-500/5 hover:shadow-xl hover:shadow-blue-500/10 transition-all duration-300 flex flex-col justify-between overflow-hidden">
+            {/* Top Accent Line */}
+            <div className="absolute top-0 inset-x-0 h-1.5 bg-gradient-to-r from-blue-600 via-indigo-500 to-blue-400 opacity-100" />
+
+            <div>
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-[10px] font-black uppercase tracking-wider px-3.5 py-1.5 rounded-xl bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border border-blue-200/70 dark:border-blue-800/60 flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-blue-600 dark:bg-blue-400 animate-pulse" />
+                  Ritmo Operacional
+                </span>
+                <div className="w-12 h-12 rounded-2xl bg-blue-600 text-white flex items-center justify-center shadow-lg shadow-blue-500/30 group-hover:scale-110 transition-transform">
+                  <TrendingUp className="w-6 h-6" />
+                </div>
+              </div>
+
+              <div className="mt-6">
+                <p className="text-xs font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                  1. Ritmo Médio
+                </p>
+                <div className="flex items-baseline gap-2.5 mt-2.5 flex-wrap">
+                  <span className="text-5xl sm:text-6xl font-black text-slate-900 dark:text-white tracking-tight leading-none">
+                    {formatDailyAverage(performanceData.rhythmAverage)}
+                  </span>
+                  <span className="text-sm sm:text-base font-black text-blue-600 dark:text-blue-400 uppercase tracking-wide">
+                    tanques / dia útil
+                  </span>
+                </div>
+                <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-300 font-medium mt-3 flex items-center gap-1.5">
+                  <span className="font-bold text-blue-700 dark:text-blue-300">
+                    {performanceData.totalCompleted} {performanceData.totalCompleted === 1 ? 'tanque concluído' : 'tanques concluídos'}
+                  </span>
+                  <span className="text-slate-400">÷</span>
+                  <span className="font-bold text-slate-700 dark:text-slate-300">
+                    {performanceData.totalBusinessDays} {performanceData.totalBusinessDays === 1 ? 'dia útil' : 'dias úteis'}
+                  </span>
+                </p>
+              </div>
             </div>
-            <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500 hidden xl:inline">
-              (A partir de 03/08/2026)
-            </span>
+
+            <div className="text-xs font-semibold text-slate-400 dark:text-slate-500 border-t border-slate-100 dark:border-slate-800/80 pt-4 mt-6 flex items-center gap-1.5">
+              <span>Média de tanques concluídos por dia útil no período analisado</span>
+            </div>
+          </div>
+
+          {/* CARD 2: MÁXIMO FEITO EM 1 DIA */}
+          <div className="group relative bg-gradient-to-br from-white via-white to-amber-50/30 dark:from-slate-900 dark:via-slate-900 dark:to-amber-950/20 p-6 sm:p-8 rounded-[32px] border border-slate-200/80 dark:border-slate-800 hover:border-amber-500/40 shadow-sm hover:shadow-xl hover:shadow-amber-500/5 transition-all duration-300 flex flex-col justify-between overflow-hidden">
+            {/* Top Accent Line */}
+            <div className="absolute top-0 inset-x-0 h-1.5 bg-gradient-to-r from-amber-400 via-orange-400 to-amber-600 opacity-90" />
+
+            <div>
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-[10px] font-black uppercase tracking-wider px-3.5 py-1.5 rounded-xl bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border border-amber-200/70 dark:border-amber-800/60">
+                  Recorde Diário
+                </span>
+                <div className="w-12 h-12 rounded-2xl bg-amber-500/10 dark:bg-amber-500/20 text-amber-600 dark:text-amber-400 flex items-center justify-center border border-amber-500/20 group-hover:scale-110 transition-transform">
+                  <Zap className="w-6 h-6" />
+                </div>
+              </div>
+
+              <div className="mt-6">
+                <p className="text-xs font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                  2. Máximo Feito em 1 Dia
+                </p>
+                <div className="flex items-baseline gap-2.5 mt-2.5 flex-wrap">
+                  <span className="text-5xl sm:text-6xl font-black text-slate-900 dark:text-white tracking-tight leading-none">
+                    {performanceData.peakDailyVolume}
+                  </span>
+                  <span className="text-sm sm:text-base font-black text-amber-600 dark:text-amber-400 uppercase tracking-wide">
+                    {performanceData.peakDailyVolume === 1 ? 'tanque' : 'tanques'}
+                  </span>
+                </div>
+                <p className="text-xs sm:text-sm text-amber-800 dark:text-amber-300 font-bold mt-3 flex items-center gap-2">
+                  <Calendar className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                  <span>
+                    Data: {performanceData.peakDailyDate ? formatDateDisplay(performanceData.peakDailyDate) : 'Sem registros'}
+                  </span>
+                </p>
+              </div>
+            </div>
+
+            <div className="text-xs font-semibold text-slate-400 dark:text-slate-500 border-t border-slate-100 dark:border-slate-800/80 pt-4 mt-6 flex items-center gap-1.5">
+              <span>Maior quantidade real de tanques concluídos em um único dia no período selecionado</span>
+            </div>
           </div>
         </div>
 
-        {/* Custom Date Pickers (only when filterPeriod === 'custom') */}
-        {filterPeriod === 'custom' && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-3 border-t border-slate-200/60 dark:border-slate-800">
+        {/* GRÁFICO ÚNICO: EVOLUÇÃO DO RITMO */}
+        <div className="bg-white dark:bg-slate-900 p-6 sm:p-8 rounded-[32px] border border-slate-200/80 dark:border-slate-800 shadow-sm space-y-6">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 dark:border-slate-800 pb-5">
             <div>
-              <label className="block text-[10px] font-black uppercase text-slate-400 mb-1">Data Inicial (mínimo: 03/08/2026)</label>
-              <input
-                type="date"
-                id="input-custom-start-date"
-                min="2026-08-03"
-                value={customStartDate || DECON_MIN_DATE}
-                onChange={e => setCustomStartDate(e.target.value)}
-                className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white"
-              />
-            </div>
-            <div>
-              <label className="block text-[10px] font-black uppercase text-slate-400 mb-1">Data Final</label>
-              <input
-                type="date"
-                id="input-custom-end-date"
-                min="2026-08-03"
-                value={customEndDate}
-                onChange={e => setCustomEndDate(e.target.value)}
-                className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white"
-              />
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* ========================================================== */}
-      {/* DASHBOARD 1: RITMO (Velocidade da Operação)                */}
-      {/* ========================================================== */}
-      {activeDashboard === 'ritmo' && (
-        <div className="space-y-6 animate-fade-in">
-          {/* BANNER CONCEITUAL RITMO */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-5 py-3.5 rounded-2xl bg-blue-50/80 dark:bg-blue-950/30 border border-blue-200/70 dark:border-blue-800/50">
-            <div className="flex items-center gap-2.5">
-              <div className="w-7 h-7 rounded-xl bg-blue-600 text-white flex items-center justify-center shrink-0 shadow-sm shadow-blue-600/30">
-                <TrendingUp className="w-3.5 h-3.5" />
-              </div>
-              <div>
-                <p className="text-xs font-black uppercase tracking-wider text-blue-950 dark:text-blue-200">
-                  Ritmo da Operação: <span className="font-bold text-blue-700 dark:text-blue-300 normal-case tracking-normal">“Qual é a velocidade da nossa operação?”</span>
-                </p>
-                <p className="text-[10px] font-semibold text-blue-600 dark:text-blue-400">
-                  Fórmula: tanques ÷ dias úteis (velocidade operacional)
-                </p>
-              </div>
-            </div>
-            <span className="self-start sm:self-center text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-full bg-blue-600 text-white shadow-sm">
-              Velocidade
-            </span>
-          </div>
-
-          {/* CARDS DE APOIO DE RITMO */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-5 items-stretch">
-            {/* Card 1: RITMO MÉDIO */}
-            <motion.div 
-              whileHover={{ y: -2 }}
-              transition={{ type: 'spring', stiffness: 400, damping: 25 }}
-              className="bg-gradient-to-br from-slate-900 via-slate-900 to-blue-950 text-white p-6 rounded-3xl border-2 border-blue-500/50 shadow-xl shadow-blue-950/20 relative overflow-hidden flex flex-col justify-between min-h-[190px]"
-            >
-              <div className="absolute top-0 right-0 -mr-12 -mt-12 w-36 h-36 bg-blue-500/10 rounded-full blur-2xl pointer-events-none" />
-
-              <div>
-                <div className="flex items-center justify-between gap-2 mb-3">
-                  <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 bg-blue-500/20 border border-blue-500/30 rounded-full">
-                    <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
-                    <span className="text-[9px] font-black uppercase tracking-widest text-blue-300">
-                      Velocidade Média
-                    </span>
-                  </div>
-                  <div className="w-8 h-8 bg-blue-500/20 text-blue-300 rounded-xl flex items-center justify-center border border-blue-500/30 shrink-0">
-                    <TrendingUp className="w-4 h-4" />
-                  </div>
-                </div>
-
-                <h3 className="text-[11px] font-black uppercase tracking-wider text-blue-200">
-                  Ritmo Médio
-                </h3>
-
-                <div className="mt-2 flex items-baseline gap-2 flex-wrap">
-                  <span className="text-4xl font-black text-white tracking-tight leading-none">
-                    {formatDailyAverage(rhythmData.currentPace)}
-                  </span>
-                  <span className="text-xs font-black uppercase text-blue-300">
-                    tanques / dia útil
-                  </span>
-                </div>
-              </div>
-
-              <div className="mt-4 pt-3 border-t border-slate-800/80 space-y-0.5">
-                <p className="text-[11px] text-blue-200 font-bold">
-                  {rhythmData.completedInCurrent} tanques ÷ {rhythmData.currentBusinessDays} dias úteis
-                </p>
-                <p className="text-[10px] text-slate-400 font-medium truncate">
-                  Quantidade média de tanques descontaminados por dia útil
-                </p>
-              </div>
-            </motion.div>
-
-            {/* Card 2: MELHOR RITMO */}
-            <motion.div 
-              whileHover={{ y: -2 }}
-              transition={{ type: 'spring', stiffness: 400, damping: 25 }}
-              className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between min-h-[190px]"
-            >
-              <div>
-                <div className="flex items-center justify-between gap-2 mb-3">
-                  <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 bg-emerald-500/10 dark:bg-emerald-500/20 border border-emerald-500/20 dark:border-emerald-500/30 rounded-full">
-                    <span className="text-[9px] font-black uppercase tracking-widest text-emerald-700 dark:text-emerald-300">
-                      Maior Velocidade
-                    </span>
-                  </div>
-                  <div className="w-8 h-8 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 rounded-xl flex items-center justify-center border border-emerald-500/20 shrink-0">
-                    <Award className="w-4 h-4" />
-                  </div>
-                </div>
-
-                <h3 className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                  Melhor Ritmo
-                </h3>
-
-                <div className="mt-2 flex items-baseline gap-2 flex-wrap">
-                  <span className="text-4xl font-black text-emerald-600 dark:text-emerald-400 tracking-tight leading-none">
-                    {formatDailyAverage(rhythmData.maxPace)}
-                  </span>
-                  <span className="text-xs font-black uppercase text-emerald-700 dark:text-emerald-300">
-                    tanques / dia útil
-                  </span>
-                </div>
-              </div>
-
-              <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 space-y-0.5">
-                <p className="text-[11px] font-bold text-slate-700 dark:text-slate-300 truncate">
-                  {rhythmData.maxPacePeriod ? `Registrado em ${rhythmData.maxPacePeriod}` : 'Período analisado'}
-                </p>
-                <p className="text-[10px] text-slate-400 font-medium">
-                  Maior ritmo encontrado entre os períodos analisados
-                </p>
-              </div>
-            </motion.div>
-
-            {/* Card 3: PIOR RITMO */}
-            <motion.div 
-              whileHover={{ y: -2 }}
-              transition={{ type: 'spring', stiffness: 400, damping: 25 }}
-              className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between min-h-[190px]"
-            >
-              <div>
-                <div className="flex items-center justify-between gap-2 mb-3">
-                  <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 bg-amber-500/10 dark:bg-amber-500/20 border border-amber-500/20 dark:border-amber-500/30 rounded-full">
-                    <span className="text-[9px] font-black uppercase tracking-widest text-amber-700 dark:text-amber-300">
-                      Menor Velocidade
-                    </span>
-                  </div>
-                  <div className="w-8 h-8 bg-amber-500/10 text-amber-600 dark:text-amber-400 rounded-xl flex items-center justify-center border border-amber-500/20 shrink-0">
-                    <Gauge className="w-4 h-4" />
-                  </div>
-                </div>
-
-                <h3 className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                  Pior Ritmo
-                </h3>
-
-                <div className="mt-2 flex items-baseline gap-2 flex-wrap">
-                  <span className="text-4xl font-black text-amber-600 dark:text-amber-400 tracking-tight leading-none">
-                    {formatDailyAverage(rhythmData.minPace)}
-                  </span>
-                  <span className="text-xs font-black uppercase text-amber-700 dark:text-amber-300">
-                    tanques / dia útil
-                  </span>
-                </div>
-              </div>
-
-              <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 space-y-0.5">
-                <p className="text-[11px] font-bold text-slate-700 dark:text-slate-300 truncate">
-                  {rhythmData.minPacePeriod ? `Registrado em ${rhythmData.minPacePeriod}` : 'Período analisado'}
-                </p>
-                <p className="text-[10px] text-slate-400 font-medium">
-                  Menor ritmo encontrado entre os períodos analisados
-                </p>
-              </div>
-            </motion.div>
-          </div>
-
-          {/* GRÁFICO DE EVOLUÇÃO DO RITMO */}
-          <div className="bg-white dark:bg-slate-900 rounded-[32px] border border-slate-200/50 dark:border-slate-800/50 p-6 md:p-8 shadow-sm space-y-6">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-200/80 dark:border-slate-800 pb-6">
-              <div>
-                <h2 className="text-lg font-black uppercase tracking-tight text-slate-900 dark:text-white flex items-center gap-2.5">
+              <div className="flex items-center gap-2.5 flex-wrap">
+                <h3 className="text-base sm:text-lg font-black text-slate-900 dark:text-white uppercase tracking-tight flex items-center gap-2.5">
                   <TrendingUp className="w-5 h-5 text-blue-600 dark:text-blue-400" />
                   Evolução do Ritmo
-                </h2>
-                <p className="text-xs text-slate-500 dark:text-slate-400 font-bold mt-0.5">
-                  Evolução da velocidade operacional: tanques descontaminados por dia útil ({rhythmData.currentPeriodLabel})
-                </p>
+                </h3>
+                <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 normal-case tracking-normal px-2.5 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700">
+                  {performanceData.granularityLabel}
+                </span>
               </div>
+              <p className="text-xs text-slate-500 dark:text-slate-400 font-semibold mt-0.5">
+                Média móvel dos últimos 5 dias úteis
+              </p>
             </div>
 
-            <div className="h-80 w-full pt-2">
-              {rhythmData.chartData.length === 0 ? (
-                <div className="h-full flex flex-col items-center justify-center text-slate-400 bg-slate-50/50 dark:bg-slate-800/20 rounded-2xl border border-dashed border-slate-200 dark:border-slate-800">
-                  <BarChart3 className="w-10 h-10 mb-2 opacity-50" />
-                  <p className="text-xs font-bold">Nenhum dado de ritmo para o período selecionado.</p>
-                </div>
-              ) : (
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={rhythmData.chartData} margin={{ top: 20, right: 30, left: -10, bottom: 5 }}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#334155" opacity={0.15} />
-                    <XAxis 
-                      dataKey="label" 
-                      tick={{ fontSize: 11, fontWeight: 700 }}
-                      interval="preserveStartEnd"
-                      minTickGap={12}
-                    />
-                    <YAxis 
-                      allowDecimals={true} 
-                      tick={{ fontSize: 11, fontWeight: 700 }} 
-                      domain={[0, (dataMax: number) => Math.max(2, Math.ceil((dataMax + 0.5) * 1.25))]}
-                      label={{ 
-                        value: 'Tanques por dia útil', 
-                        angle: -90, 
-                        position: 'insideLeft', 
-                        offset: 15,
-                        style: { fontSize: 10, fontWeight: 800, fill: '#64748b' } 
-                      }}
-                    />
-                    <Tooltip 
-                      contentStyle={{ 
-                        backgroundColor: '#0f172a', 
-                        borderRadius: '16px', 
-                        border: '1px solid #334155',
-                        color: '#fff',
-                        fontWeight: 'bold',
-                        fontSize: '12px'
-                      }}
-                      content={({ active, payload }) => {
-                        if (active && payload && payload.length) {
-                          const data = payload[0].payload as any;
-                          return (
-                            <div className="p-3.5 bg-slate-950 text-white rounded-2xl border border-slate-800 shadow-2xl space-y-2 min-w-[230px]">
-                              <div className="text-[11px] font-black uppercase text-slate-400 border-b border-slate-800 pb-1.5 flex items-center justify-between gap-3">
-                                <span>{data.fullPeriodLabel}</span>
-                                {data.isCurrent && (
-                                  <span className="text-[9px] bg-blue-500/20 text-blue-300 px-1.5 py-0.5 rounded">
-                                    ATUAL
-                                  </span>
-                                )}
-                              </div>
-                              
-                              <div className="space-y-1">
-                                <div className="text-sm font-black text-blue-400 flex items-center justify-between gap-2">
-                                  <span>Ritmo:</span>
-                                  <span className="text-base font-black text-white">{formatDailyAverage(data.ritmo)} tanques/dia útil</span>
-                                </div>
-                                <div className="text-[11px] font-medium text-slate-300 flex items-center justify-between gap-2">
-                                  <span>Tanques Concluídos:</span>
-                                  <span className="font-bold text-white">{data.completedCount} tanques</span>
-                                </div>
-                                <div className="text-[11px] font-medium text-slate-300 flex items-center justify-between gap-2">
-                                  <span>Dias Úteis:</span>
-                                  <span className="font-bold text-white">{data.businessDays} dias úteis</span>
-                                </div>
-                              </div>
+            {/* Badge de identificação da linha do gráfico */}
+            <div className="flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-blue-50 dark:bg-blue-950/40 border border-blue-200/70 dark:border-blue-800/50 text-blue-800 dark:text-blue-300 text-xs font-bold shrink-0 self-start sm:self-auto">
+              <span className="w-2.5 h-2.5 rounded-full bg-blue-600 ring-2 ring-blue-500/20" />
+              <span>Ritmo: <strong>Tanques / dia útil</strong></span>
+            </div>
+          </div>
 
-                              {(data.isMax || data.isMin) && (
-                                <div className="pt-1.5 border-t border-slate-800/80 flex items-center gap-2">
-                                  {data.isMax && (
-                                    <span className="text-[9px] font-black bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded border border-emerald-500/30">
-                                      MELHOR RITMO
-                                    </span>
-                                  )}
-                                  {data.isMin && (
-                                    <span className="text-[9px] font-black bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30">
-                                      PIOR RITMO
-                                    </span>
-                                  )}
-                                </div>
-                              )}
+          {/* Gráfico Recharts - Eixo Único (Ritmo em Tanques / Dia Útil) */}
+          <div className="w-full h-80 sm:h-[400px]">
+            {performanceData.chartData.length === 0 ? (
+              <div className="h-full flex flex-col items-center justify-center text-slate-400 gap-2">
+                <BarChart3 className="w-8 h-8 opacity-40" />
+                <p className="text-xs font-bold">Nenhuma operação concluída encontrada no período selecionado.</p>
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={performanceData.chartData} margin={{ top: 25, right: 30, left: 10, bottom: 25 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#94a3b8" strokeOpacity={0.15} vertical={false} />
+                  
+                  <XAxis 
+                    dataKey="label" 
+                    stroke="#64748b" 
+                    tick={{ fontSize: 11, fontWeight: 700 }}
+                    tickLine={false}
+                    axisLine={{ stroke: '#cbd5e1', strokeOpacity: 0.5 }}
+                    dy={10}
+                  />
+                  
+                  {/* EIXO Y ÚNICO: Tanques / dia útil */}
+                  <YAxis 
+                    stroke="#2563eb" 
+                    tick={{ fontSize: 11, fontWeight: 700, fill: '#2563eb' }}
+                    domain={[0, (dataMax: number) => Math.max(2, Math.ceil((dataMax + 0.5) * 1.25))]}
+                    label={{ 
+                      value: 'Tanques / dia útil', 
+                      angle: -90, 
+                      position: 'insideLeft', 
+                      offset: 10,
+                      style: { fontSize: 10, fontWeight: 800, fill: '#2563eb' } 
+                    }}
+                    tickFormatter={(val: number) => formatDailyAverage(val)}
+                  />
+
+                  <Tooltip 
+                    content={({ active, payload }) => {
+                      if (active && payload && payload.length) {
+                        const data = payload[0].payload as PerformanceChartPoint;
+                        return (
+                          <div className="p-4 bg-slate-950/95 backdrop-blur-md text-white rounded-2xl border border-slate-800 shadow-2xl space-y-2.5 min-w-[240px]">
+                            <div className="text-[11px] font-black uppercase text-slate-400 border-b border-slate-800 pb-2 flex items-center justify-between gap-3">
+                              <span>{data.fullPeriodLabel || data.label}</span>
                             </div>
-                          );
-                        }
-                        return null;
-                      }}
-                    />
-                    <Line 
-                      type="monotone" 
-                      dataKey="ritmo" 
-                      name="Ritmo (Tanques / Dia Útil)" 
-                      stroke="#2563eb" 
-                      strokeWidth={3.5} 
-                      dot={{ r: 5, stroke: '#2563eb', strokeWidth: 2, fill: '#ffffff' }}
-                      activeDot={{ r: 8, stroke: '#1d4ed8', strokeWidth: 2.5, fill: '#60a5fa' }}
-                      label={{
-                        position: 'top',
-                        fill: '#2563eb',
-                        fontSize: 11,
-                        fontWeight: 800,
-                        offset: 8,
-                        formatter: (val: any) => (val !== undefined && val !== null ? formatDailyAverage(Number(val)) : '')
-                      }}
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ========================================================== */}
-      {/* DASHBOARD 2: PRODUTIVIDADE (Volume de Produção)            */}
-      {/* ========================================================== */}
-      {activeDashboard === 'produtividade' && (
-        <div className="space-y-6 animate-fade-in">
-          {/* BANNER CONCEITUAL PRODUTIVIDADE */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-5 py-3.5 rounded-2xl bg-emerald-50/80 dark:bg-emerald-950/30 border border-emerald-200/70 dark:border-emerald-800/50">
-            <div className="flex items-center gap-2.5">
-              <div className="w-7 h-7 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-sm shadow-emerald-600/30">
-                <BarChart3 className="w-3.5 h-3.5" />
-              </div>
-              <div>
-                <p className="text-xs font-black uppercase tracking-wider text-emerald-950 dark:text-emerald-200">
-                  Produtividade da Operação: <span className="font-bold text-emerald-700 dark:text-emerald-300 normal-case tracking-normal">“Qual é o volume que conseguimos produzir?”</span>
-                </p>
-                <p className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400">
-                  Foco: quantidade total de tanques produzidos (volume real de entrega)
-                </p>
-              </div>
-            </div>
-            <span className="self-start sm:self-center text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-full bg-emerald-600 text-white shadow-sm">
-              Volume
-            </span>
-          </div>
-
-          {/* CARDS DE APOIO DE PRODUTIVIDADE (3 INDICADORES EXCLUSIVOS) */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-5 items-stretch">
-            {/* Card 1: MÉDIA DE PRODUÇÃO */}
-            <motion.div 
-              whileHover={{ y: -2 }}
-              transition={{ type: 'spring', stiffness: 400, damping: 25 }}
-              className="bg-gradient-to-br from-slate-900 via-slate-900 to-emerald-950 text-white p-6 rounded-3xl border-2 border-emerald-500/50 shadow-xl shadow-emerald-950/20 relative overflow-hidden flex flex-col justify-between min-h-[190px]"
-            >
-              <div className="absolute top-0 right-0 -mr-12 -mt-12 w-36 h-36 bg-emerald-500/10 rounded-full blur-2xl pointer-events-none" />
-
-              <div>
-                <div className="flex items-center justify-between gap-2 mb-3">
-                  <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 bg-emerald-500/20 border border-emerald-500/30 rounded-full">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                    <span className="text-[9px] font-black uppercase tracking-widest text-emerald-300">
-                      Volume Médio
-                    </span>
-                  </div>
-                  <div className="w-8 h-8 bg-emerald-500/20 text-emerald-300 rounded-xl flex items-center justify-center border border-emerald-500/30 shrink-0">
-                    <BarChart3 className="w-4 h-4" />
-                  </div>
-                </div>
-
-                <h3 className="text-[11px] font-black uppercase tracking-wider text-emerald-200">
-                  Média de Produção
-                </h3>
-
-                <div className="mt-2 flex items-baseline gap-2 flex-wrap">
-                  <span className="text-4xl font-black text-white tracking-tight leading-none">
-                    {formatDailyAverage(productivityData.avgProductionPerPeriod)}
-                  </span>
-                  <span className="text-xs font-black uppercase text-emerald-300">
-                    {productivityData.periodUnitLabel}
-                  </span>
-                </div>
-              </div>
-
-              <div className="mt-4 pt-3 border-t border-slate-800/80 space-y-0.5">
-                <p className="text-[11px] font-bold text-slate-300 truncate">
-                  {productivityData.periodSubLabel}
-                </p>
-                <p className="text-[10px] text-slate-400 font-medium">
-                  Quantidade média de tanques produzidos por período analisado
-                </p>
-              </div>
-            </motion.div>
-
-            {/* Card 2: MAIOR PRODUÇÃO EM 1 DIA */}
-            <motion.div 
-              whileHover={{ y: -2 }}
-              transition={{ type: 'spring', stiffness: 400, damping: 25 }}
-              className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between min-h-[190px]"
-            >
-              <div>
-                <div className="flex items-center justify-between gap-2 mb-3">
-                  <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 bg-amber-500/10 dark:bg-amber-500/20 border border-amber-500/20 dark:border-amber-500/30 rounded-full">
-                    <span className="text-[9px] font-black uppercase tracking-widest text-amber-700 dark:text-amber-300">
-                      Recorde Diário
-                    </span>
-                  </div>
-                  <div className="w-8 h-8 bg-amber-500/10 text-amber-600 dark:text-amber-400 rounded-xl flex items-center justify-center border border-amber-500/20 shrink-0">
-                    <Zap className="w-4 h-4" />
-                  </div>
-                </div>
-
-                <h3 className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                  Maior Produção em 1 Dia
-                </h3>
-
-                <div className="mt-2 flex items-baseline gap-2 flex-wrap">
-                  <span className="text-4xl font-black text-amber-600 dark:text-amber-400 tracking-tight leading-none">
-                    {productivityData.peakDailyCount}
-                  </span>
-                  <span className="text-xs font-black uppercase text-amber-700 dark:text-amber-300">
-                    tanques em 1 dia
-                  </span>
-                </div>
-              </div>
-
-              <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 space-y-0.5">
-                <p className="text-[11px] font-bold text-slate-700 dark:text-slate-300 truncate">
-                  {productivityData.peakDailyDate 
-                    ? `Pico em ${formatDateDisplay(productivityData.peakDailyDate)}` 
-                    : 'Nenhum tanque no período'}
-                </p>
-                <p className="text-[10px] text-slate-400 font-medium">
-                  Maior número real de tanques concluídos em um único dia
-                </p>
-              </div>
-            </motion.div>
-
-            {/* Card 3: DIAS PRODUTIVOS */}
-            <motion.div 
-              whileHover={{ y: -2 }}
-              transition={{ type: 'spring', stiffness: 400, damping: 25 }}
-              className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between min-h-[190px]"
-            >
-              <div>
-                <div className="flex items-center justify-between gap-2 mb-3">
-                  <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 bg-blue-500/10 dark:bg-blue-500/20 border border-blue-500/20 dark:border-blue-500/30 rounded-full">
-                    <span className="text-[9px] font-black uppercase tracking-widest text-blue-700 dark:text-blue-300">
-                      Dias com Produção
-                    </span>
-                  </div>
-                  <div className="w-8 h-8 bg-blue-500/10 text-blue-600 dark:text-blue-400 rounded-xl flex items-center justify-center border border-blue-500/20 shrink-0">
-                    <CalendarCheck2 className="w-4 h-4" />
-                  </div>
-                </div>
-
-                <h3 className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                  Dias Produtivos
-                </h3>
-
-                <div className="mt-2 flex items-baseline gap-2 flex-wrap">
-                  <span className="text-4xl font-black text-blue-600 dark:text-blue-400 tracking-tight leading-none">
-                    {productivityData.productiveDays}
-                  </span>
-                  <span className="text-xs font-black uppercase text-blue-700 dark:text-blue-300">
-                    dias produtivos
-                  </span>
-                </div>
-              </div>
-
-              <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 space-y-0.5">
-                <p className="text-[11px] font-bold text-slate-700 dark:text-slate-300 truncate">
-                  {productivityData.productiveDays === 1 
-                    ? '1 dia com operação concluída' 
-                    : `${productivityData.productiveDays} dias com operações concluídas`}
-                </p>
-                <p className="text-[10px] text-slate-400 font-medium">
-                  Dias com pelo menos uma descontaminação concluída
-                </p>
-              </div>
-            </motion.div>
-          </div>
-
-          {/* GRÁFICO DE EVOLUÇÃO DA PRODUTIVIDADE */}
-          <div className="bg-white dark:bg-slate-900 rounded-[32px] border border-slate-200/50 dark:border-slate-800/50 p-6 md:p-8 shadow-sm space-y-6">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-200/80 dark:border-slate-800 pb-6">
-              <div>
-                <h2 className="text-lg font-black uppercase tracking-tight text-slate-900 dark:text-white flex items-center gap-2.5">
-                  <BarChart3 className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
-                  Evolução da Produtividade
-                </h2>
-                <p className="text-xs text-slate-500 dark:text-slate-400 font-bold mt-0.5">
-                  Quantidade de tanques produzidos em cada período ({productivityData.currentPeriodLabel})
-                </p>
-              </div>
-            </div>
-
-            <div className="h-80 w-full pt-2">
-              {productivityData.chartData.length === 0 ? (
-                <div className="h-full flex flex-col items-center justify-center text-slate-400 bg-slate-50/50 dark:bg-slate-800/20 rounded-2xl border border-dashed border-slate-200 dark:border-slate-800">
-                  <BarChart3 className="w-10 h-10 mb-2 opacity-50" />
-                  <p className="text-xs font-bold">Nenhum registro de produção para o período selecionado.</p>
-                </div>
-              ) : (
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={productivityData.chartData} margin={{ top: 20, right: 30, left: -10, bottom: 5 }}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#334155" opacity={0.15} />
-                    <XAxis 
-                      dataKey="label" 
-                      tick={{ fontSize: 11, fontWeight: 700 }}
-                      interval="preserveStartEnd"
-                      minTickGap={12}
-                    />
-                    <YAxis 
-                      allowDecimals={false} 
-                      tick={{ fontSize: 11, fontWeight: 700 }} 
-                      domain={[0, (dataMax: number) => Math.max(3, Math.ceil((dataMax + 0.5) * 1.25))]}
-                      label={{ 
-                        value: 'Tanques produzidos', 
-                        angle: -90, 
-                        position: 'insideLeft', 
-                        offset: 15,
-                        style: { fontSize: 10, fontWeight: 800, fill: '#64748b' } 
-                      }}
-                    />
-                    <Tooltip 
-                      contentStyle={{ 
-                        backgroundColor: '#0f172a', 
-                        borderRadius: '16px', 
-                        border: '1px solid #334155',
-                        color: '#fff',
-                        fontWeight: 'bold',
-                        fontSize: '12px'
-                      }}
-                      content={({ active, payload }) => {
-                        if (active && payload && payload.length) {
-                          const data = payload[0].payload as any;
-                          return (
-                            <div className="p-3.5 bg-slate-950 text-white rounded-2xl border border-slate-800 shadow-2xl space-y-1.5 min-w-[200px]">
-                              <div className="text-[11px] font-black uppercase text-slate-400 flex items-center justify-between gap-3 border-b border-slate-800 pb-1">
-                                <span>{data.fullPeriodLabel}</span>
-                                {data.isCurrent && (
-                                  <span className="text-[9px] bg-emerald-500/20 text-emerald-300 px-1.5 py-0.5 rounded">
-                                    ATUAL
-                                  </span>
-                                )}
-                              </div>
-                              <div className="text-sm font-black text-emerald-400 flex items-center justify-between gap-2 pt-1">
-                                <span>Tanques Produzidos:</span>
-                                <span className="text-base font-black text-white">{data.finalizados} {data.finalizados === 1 ? 'tanque' : 'tanques'}</span>
-                              </div>
-                              {data.isPeak && (
-                                <div className="pt-1 border-t border-slate-800">
-                                  <span className="text-[9px] font-black bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30">
-                                    MAIOR PRODUÇÃO
-                                  </span>
+                            
+                            <div className="space-y-2">
+                              {/* RITMO */}
+                              <div className="flex items-center justify-between gap-3">
+                                <div className="flex items-center gap-2">
+                                  <span className="w-2.5 h-2.5 rounded-full bg-blue-500 ring-2 ring-blue-500/30" />
+                                  <span className="text-xs font-bold text-slate-300">Ritmo:</span>
                                 </div>
-                              )}
-                            </div>
-                          );
-                        }
-                        return null;
-                      }}
-                    />
-                    <Line 
-                      type="monotone" 
-                      dataKey="finalizados" 
-                      name="Tanques Produzidos" 
-                      stroke="#10b981" 
-                      strokeWidth={3.5} 
-                      dot={{ r: 5, stroke: '#10b981', strokeWidth: 2, fill: '#ffffff' }}
-                      activeDot={{ r: 8, stroke: '#047857', strokeWidth: 2.5, fill: '#34d399' }}
-                      label={{
-                        position: 'top',
-                        fill: '#059669',
-                        fontSize: 11,
-                        fontWeight: 800,
-                        offset: 8,
-                        formatter: (val: any) => (val !== undefined && val !== null ? `${val}` : '')
-                      }}
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
-              )}
-            </div>
-
-            {/* DADOS DETALHADOS DE PRODUÇÃO POR PERÍODO */}
-            {productivityData.chartData.length > 0 && (
-              <div className="pt-6 border-t border-slate-100 dark:border-slate-800 space-y-3">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-xs font-black uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-2">
-                    <Calendar className="w-3.5 h-3.5 text-emerald-500" />
-                    Dados da Produção por Período Analisado
-                  </h3>
-                  <span className="text-[11px] font-bold text-slate-400">
-                    {productivityData.chartData.length} {productivityData.chartData.length === 1 ? 'período analisado' : 'períodos analisados'}
-                  </span>
-                </div>
-
-                <div className="overflow-x-auto rounded-2xl border border-slate-200/80 dark:border-slate-800">
-                  <table className="w-full text-left text-xs border-collapse">
-                    <thead>
-                      <tr className="bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200/80 dark:border-slate-800 text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                        <th className="py-3 px-4">Período</th>
-                        <th className="py-3 px-4 text-right">Tanques Descontaminados</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 font-semibold bg-white dark:bg-slate-900">
-                      {productivityData.chartData.map((item) => (
-                        <tr 
-                          key={item.key} 
-                          className={`hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors ${
-                            item.isCurrent ? 'bg-emerald-50/50 dark:bg-emerald-950/20' : ''
-                          }`}
-                        >
-                          <td className="py-3.5 px-4">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <span className="font-black text-slate-900 dark:text-white font-mono text-[13px]">
-                                {item.fullPeriodLabel || item.label}
-                              </span>
-                              {item.isCurrent && (
-                                <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
-                                  Atual
+                                <span className="text-sm font-black text-blue-400">
+                                  {formatDailyAverage(data.ritmo)} tanques/dia útil
                                 </span>
-                              )}
-                              {item.isPeak && (
-                                <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
-                                  Maior Produção
+                              </div>
+
+                              {/* CONTEXTO */}
+                              <div className="text-[11px] text-slate-400 pt-2 border-t border-slate-800/80 flex items-center justify-between">
+                                <span>{data.rhythmNote ? 'Contexto de Ritmo:' : 'Dias úteis no período:'}</span>
+                                <span className="font-bold text-slate-200">
+                                  {data.rhythmNote || `${data.businessDays} dias úteis`}
                                 </span>
-                              )}
+                              </div>
                             </div>
-                          </td>
-                          <td className="py-3.5 px-4 text-right">
-                            <span className="inline-flex items-baseline gap-1 font-black text-sm text-emerald-600 dark:text-emerald-400">
-                              <span className="text-base">{item.finalizados}</span>
-                              <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400">
-                                {item.finalizados === 1 ? 'tanque' : 'tanques'}
-                              </span>
-                            </span>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
+                          </div>
+                        );
+                      }
+                      return null;
+                    }}
+                  />
+
+                  <Legend 
+                    verticalAlign="top" 
+                    align="right"
+                    wrapperStyle={{ paddingBottom: '20px', fontSize: '11px', fontWeight: 800 }}
+                  />
+
+                  {/* LINHA ÚNICA: RITMO (Tanques / Dia Útil) */}
+                  <Line 
+                    type="monotone" 
+                    dataKey="ritmo" 
+                    name="Ritmo (Tanques / Dia Útil)" 
+                    stroke="#2563eb" 
+                    strokeWidth={3.5} 
+                    dot={{ r: 5, stroke: '#2563eb', strokeWidth: 2.5, fill: '#ffffff' }}
+                    activeDot={{ r: 8, stroke: '#1d4ed8', strokeWidth: 3, fill: '#60a5fa' }}
+                    label={{
+                      position: 'top',
+                      fill: '#2563eb',
+                      fontSize: 11,
+                      fontWeight: 800,
+                      offset: 8,
+                      formatter: (val: any) => (val !== undefined && val !== null ? formatDailyAverage(Number(val)) : '')
+                    }}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
             )}
           </div>
         </div>
-      )}
+      </div>
+
 
       {/* INDICADORES & RANKINGS SECTION */}
       <div className="bg-white dark:bg-slate-900 rounded-[32px] border border-slate-200/50 dark:border-slate-800/50 p-6 md:p-8 shadow-sm space-y-6">

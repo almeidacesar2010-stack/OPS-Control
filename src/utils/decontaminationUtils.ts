@@ -13,7 +13,8 @@ import {
   endOfQuarter, 
   subMonths, 
   startOfYear, 
-  endOfYear 
+  endOfYear,
+  differenceInCalendarDays 
 } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { DecontaminationOperation, DecontaminationStatus, FilterPeriod } from '../types/decontamination';
@@ -694,17 +695,24 @@ export interface RhythmChartPoint {
 
 export interface RhythmDashboardData {
   chartData: RhythmChartPoint[];
-  currentPace: number;          // RITMO MÉDIO ATUAL
-  maxPace: number;              // MELHOR RITMO
+  averagePace: number;          // 1. RITMO MÉDIO: tanques concluídos ÷ dias úteis
+  currentPace: number;          // 2. RITMO ATUAL: ritmo do período mais recente
+  currentPaceLabel: string;     // Período do ritmo atual
+  bestPace: number;             // 3. MELHOR RITMO: maior ritmo real encontrado
+  bestPacePeriod: string | null;// Período onde ocorreu o melhor ritmo
+  // Compatibilidade e dados complementares
+  maxPace: number;
   maxPacePeriod: string | null;
-  minPace: number;              // PIOR RITMO
+  minPace: number;
   minPacePeriod: string | null;
-  variation: VariationResult;   // VARIAÇÃO DO RITMO
-  previousPace: number | null;  // Ritmo do período anterior para exibição do valor absoluto
-  previousPeriodLabel: string | null;
   currentPeriodLabel: string;
-  completedInCurrent: number;   // Tanques concluídos no período
-  currentBusinessDays: number;  // Dias úteis do período
+  completedInCurrent: number;   // Total tanques concluídos analisados
+  currentBusinessDays: number;  // Total dias úteis analisados
+  totalCompleted: number;
+  totalBusinessDays: number;
+  variation?: VariationResult;
+  previousPace?: number | null;
+  previousPeriodLabel?: string | null;
 }
 
 /**
@@ -721,7 +729,13 @@ export interface DeconComparableBucket {
   businessDays: number;
 }
 
-export function getDeconComparableBuckets(
+/**
+ * RHYTHM COMPARABLE BUCKETS
+ * REGRA FUNDAMENTAL: NUNCA utilizar a quantidade produzida em um único dia como “ritmo”.
+ * Ritmo deve representar a VELOCIDADE MÉDIA da operação em períodos agrupados (preferencialmente semanais).
+ * Fórmula: tanques produzidos no período ÷ dias úteis do período.
+ */
+export function getRhythmComparableBuckets(
   allOperations: DecontaminationOperation[],
   period: DeconFilterPeriod,
   currentInterval: PeriodInterval,
@@ -734,9 +748,6 @@ export function getDeconComparableBuckets(
     return [];
   }
 
-  // Operations that fall strictly within the selected interval
-  // For 'all', 'days', and 'weeks', scopedOps covers all completed operations in the system.
-  // For 'custom', scopedOps covers operations completed strictly between customStart and customEnd.
   const scopedOps = (period === 'all' || period === 'days' || period === 'weeks')
     ? completedOps
     : completedOps.filter(op => isOpFinalizedInDateRange(op, currentInterval.start, currentInterval.end));
@@ -745,31 +756,8 @@ export function getDeconComparableBuckets(
     return [];
   }
 
-  // 1. Helper: DIA A DIA (agrupa por dias com operações concluídas reais)
-  const buildDailyBuckets = (ops: DecontaminationOperation[]) => {
-    const dayMap = new Map<string, Date>();
-    ops.forEach(op => {
-      const d = getOpCompletionDate(op);
-      if (d) {
-        const k = format(d, 'yyyy-MM-dd');
-        if (!dayMap.has(k)) dayMap.set(k, d);
-      }
-    });
-
-    const sortedDays = Array.from(dayMap.values()).sort((a, b) => a.getTime() - b.getTime());
-    return sortedDays.map(d => ({
-      key: format(d, 'yyyy-MM-dd'),
-      label: format(d, 'dd/MM'),
-      periodRange: format(d, 'dd/MM/yyyy'),
-      fullPeriodLabel: format(d, "dd/MM/yyyy"),
-      start: startOfDay(d),
-      end: endOfDay(d),
-      businessDays: 1 // Cada dia com operações concluídas = 1 dia útil
-    }));
-  };
-
-  // 2. Helper: SEMANA A SEMANA (agrupa por semanas com operações concluídas reais)
-  const buildWeeklyBuckets = (ops: DecontaminationOperation[]) => {
+  // Agrupa semanas com contagem de dias úteis reais (Segunda a Sexta, sem feriados)
+  const buildWeeklyRhythmBuckets = (ops: DecontaminationOperation[]) => {
     const weekMap = new Map<string, { start: Date; end: Date; ops: DecontaminationOperation[] }>();
     ops.forEach(op => {
       const d = getOpCompletionDate(op);
@@ -788,10 +776,11 @@ export function getDeconComparableBuckets(
     return sortedWeeks.map((w, idx) => {
       const now = new Date();
       const effectiveEnd = w.end.getTime() > now.getTime() ? now : w.end;
+      // Dias úteis reais da semana (segunda a sexta, excluindo feriados)
       const bDays = Math.max(1, countCalendarBusinessDays(w.start, effectiveEnd));
 
       const weekLabel = `Semana ${idx + 1}`;
-      const rangeStr = `${format(w.start, 'dd/MM')}–${format(w.end, 'dd/MM')}`;
+      const rangeStr = `${format(w.start, 'dd/MM')} a ${format(w.end, 'dd/MM')}`;
 
       return {
         key: format(w.start, 'yyyy-MM-dd'),
@@ -805,7 +794,127 @@ export function getDeconComparableBuckets(
     });
   };
 
-  // 3. Helper: MÊS A MÊS (agrupa por meses com operações concluídas reais)
+  // Para 'days', 'weeks' e 'all', o Ritmo é SEMPRE avaliado por períodos agrupados (semanais)
+  if (period === 'days' || period === 'weeks' || period === 'all') {
+    return buildWeeklyRhythmBuckets(scopedOps);
+  }
+
+  if (period === 'custom') {
+    let cStart = currentInterval.start;
+    let cEnd = currentInterval.end;
+    if (customStart && customEnd) {
+      try {
+        cStart = startOfDay(parseISO(customStart));
+        cEnd = endOfDay(parseISO(customEnd));
+      } catch {}
+    }
+
+    const daysDiff = Math.ceil((cEnd.getTime() - cStart.getTime()) / (1000 * 60 * 60 * 24));
+    if (daysDiff >= 7) {
+      return buildWeeklyRhythmBuckets(scopedOps);
+    } else {
+      const bDays = Math.max(1, countCalendarBusinessDays(cStart, cEnd));
+      return [{
+        key: format(cStart, 'yyyy-MM-dd'),
+        label: `${format(cStart, 'dd/MM')}–${format(cEnd, 'dd/MM')}`,
+        periodRange: `${format(cStart, 'dd/MM')} a ${format(cEnd, 'dd/MM')}`,
+        fullPeriodLabel: `${format(cStart, 'dd/MM/yyyy')} a ${format(cEnd, 'dd/MM/yyyy')}`,
+        start: cStart,
+        end: cEnd,
+        businessDays: bDays
+      }];
+    }
+  }
+
+  return buildWeeklyRhythmBuckets(scopedOps);
+}
+
+/**
+ * PRODUCTIVITY COMPARABLE BUCKETS
+ * PRODUTIVIDADE = VOLUME (QUANTOS TANQUES FORAM PRODUZIDOS)
+ * - 'days': dia a dia real com produção (04/08 → 1, 06/08 → 6, 07/08 → 8, etc.)
+ * - 'weeks': semana a semana
+ * - 'all': mês a mês
+ * - 'custom': dia a dia (<=31 dias) ou semana a semana (>31 dias)
+ */
+export function getProductivityComparableBuckets(
+  allOperations: DecontaminationOperation[],
+  period: DeconFilterPeriod,
+  currentInterval: PeriodInterval,
+  customStart?: string,
+  customEnd?: string
+): DeconComparableBucket[] {
+  const completedOps = allOperations.filter(op => op.status === 'completed' && isOpOnOrAfterMinDate(op, DECON_MIN_DATE_OBJ));
+
+  if (completedOps.length === 0) {
+    return [];
+  }
+
+  const scopedOps = (period === 'all' || period === 'days' || period === 'weeks')
+    ? completedOps
+    : completedOps.filter(op => isOpFinalizedInDateRange(op, currentInterval.start, currentInterval.end));
+
+  if (scopedOps.length === 0) {
+    return [];
+  }
+
+  // 1. DIA A DIA: volume produzido em cada data
+  const buildDailyBuckets = (ops: DecontaminationOperation[]) => {
+    const dayMap = new Map<string, Date>();
+    ops.forEach(op => {
+      const d = getOpCompletionDate(op);
+      if (d) {
+        const k = format(d, 'yyyy-MM-dd');
+        if (!dayMap.has(k)) dayMap.set(k, d);
+      }
+    });
+
+    const sortedDays = Array.from(dayMap.values()).sort((a, b) => a.getTime() - b.getTime());
+    return sortedDays.map(d => ({
+      key: format(d, 'yyyy-MM-dd'),
+      label: format(d, 'dd/MM'),
+      periodRange: format(d, 'dd/MM/yyyy'),
+      fullPeriodLabel: format(d, 'dd/MM/yyyy'),
+      start: startOfDay(d),
+      end: endOfDay(d),
+      businessDays: 1
+    }));
+  };
+
+  // 2. SEMANA A SEMANA: volume produzido em cada semana
+  const buildWeeklyBuckets = (ops: DecontaminationOperation[]) => {
+    const weekMap = new Map<string, { start: Date; end: Date; ops: DecontaminationOperation[] }>();
+    ops.forEach(op => {
+      const d = getOpCompletionDate(op);
+      if (d) {
+        const wStart = startOfWeek(d, { weekStartsOn: 1 });
+        const wEnd = endOfWeek(d, { weekStartsOn: 1 });
+        const key = format(wStart, 'yyyy-MM-dd');
+        if (!weekMap.has(key)) {
+          weekMap.set(key, { start: wStart, end: wEnd, ops: [] });
+        }
+        weekMap.get(key)!.ops.push(op);
+      }
+    });
+
+    const sortedWeeks = Array.from(weekMap.values()).sort((a, b) => a.start.getTime() - b.start.getTime());
+    return sortedWeeks.map((w, idx) => {
+      const weekLabel = `Semana ${idx + 1}`;
+      const rangeStr = `${format(w.start, 'dd/MM')} a ${format(w.end, 'dd/MM')}`;
+
+      return {
+        key: format(w.start, 'yyyy-MM-dd'),
+        label: weekLabel,
+        periodRange: `${weekLabel} (${rangeStr})`,
+        fullPeriodLabel: `${weekLabel} (${format(w.start, 'dd/MM')} a ${format(w.end, 'dd/MM/yyyy')})`,
+        start: w.start,
+        end: w.end,
+        businessDays: 1
+      };
+    });
+  };
+
+  // 3. MÊS A MÊS: volume produzido em cada mês
   const buildMonthlyBuckets = (ops: DecontaminationOperation[]) => {
     const monthMap = new Map<string, { start: Date; end: Date; ops: DecontaminationOperation[] }>();
     ops.forEach(op => {
@@ -822,30 +931,16 @@ export function getDeconComparableBuckets(
     });
 
     const sortedMonths = Array.from(monthMap.values()).sort((a, b) => a.start.getTime() - b.start.getTime());
-    return sortedMonths.map(m => {
-      const now = new Date();
-      const effectiveEnd = m.end.getTime() > now.getTime() ? now : m.end;
-      const bDays = Math.max(1, countCalendarBusinessDays(m.start, effectiveEnd));
-
-      return {
-        key: format(m.start, 'yyyy-MM'),
-        label: format(m.start, 'MM/yy'),
-        periodRange: format(m.start, 'MMMM/yyyy', { locale: ptBR }),
-        fullPeriodLabel: format(m.start, 'MMMM/yyyy', { locale: ptBR }),
-        start: m.start,
-        end: m.end,
-        businessDays: bDays
-      };
-    });
+    return sortedMonths.map(m => ({
+      key: format(m.start, 'yyyy-MM'),
+      label: format(m.start, 'MM/yy'),
+      periodRange: format(m.start, 'MMMM/yyyy', { locale: ptBR }),
+      fullPeriodLabel: format(m.start, 'MMMM/yyyy', { locale: ptBR }),
+      start: m.start,
+      end: m.end,
+      businessDays: 1
+    }));
   };
-
-  // =========================================================================
-  // NOVO FILTRO: COMPARATIVO
-  // [ DIAS ]          -> DIA A DIA
-  // [ SEMANAS ]       -> SEMANA A SEMANA
-  // [ TODO O PERÍODO] -> MÊS A MÊS
-  // [ PERSONALIZADO ] -> AUTOMÁTICO (curto <= 31 dias: DIA A DIA | > 31 dias: SEMANA A SEMANA)
-  // =========================================================================
 
   if (period === 'days') {
     return buildDailyBuckets(scopedOps);
@@ -870,7 +965,6 @@ export function getDeconComparableBuckets(
     }
 
     const daysDiff = Math.ceil((cEnd.getTime() - cStart.getTime()) / (1000 * 60 * 60 * 24));
-
     if (daysDiff <= 31) {
       return buildDailyBuckets(scopedOps);
     } else {
@@ -878,18 +972,18 @@ export function getDeconComparableBuckets(
     }
   }
 
-  // Compatibilidade legada
-  if (period === 'week' || period === 'month') {
-    return buildDailyBuckets(scopedOps);
-  }
-  if (period === 'quarter') {
-    return buildWeeklyBuckets(scopedOps);
-  }
-  if (period === 'semester') {
-    return buildMonthlyBuckets(scopedOps);
-  }
+  return buildDailyBuckets(scopedOps);
+}
 
-  return [];
+// Wrapper para compatibilidade retroativa
+export function getDeconComparableBuckets(
+  allOperations: DecontaminationOperation[],
+  period: DeconFilterPeriod,
+  currentInterval: PeriodInterval,
+  customStart?: string,
+  customEnd?: string
+): DeconComparableBucket[] {
+  return getProductivityComparableBuckets(allOperations, period, currentInterval, customStart, customEnd);
 }
 
 export function generateRhythmDashboardData(
@@ -902,8 +996,8 @@ export function generateRhythmDashboardData(
   const ref = startOfDay(referenceDate);
   const bounds = getDeconPeriodBounds(period, customStart, customEnd, ref, allOperations);
 
-  // 1. Gera os buckets da evolução baseados exclusivamente em operações concluídas reais no período
-  const buckets = getDeconComparableBuckets(allOperations, period, bounds.current, customStart, customEnd);
+  // 1. Gera os buckets da evolução baseados exclusivamente em períodos agrupados de ritmo (semanais)
+  const buckets = getRhythmComparableBuckets(allOperations, period, bounds.current, customStart, customEnd);
 
   let points: RhythmChartPoint[] = buckets.map((b, idx) => {
     const wOps = allOperations.filter(op => isOpFinalizedInDateRange(op, b.start, b.end));
@@ -926,103 +1020,62 @@ export function generateRhythmDashboardData(
     };
   });
 
-  // 2. O card "RITMO MÉDIO" usa EXATAMENTE os mesmos dados apresentados na tabela e no gráfico:
-  // - completedInCurrent = soma dos tanques concluídos dos pontos analisados
-  // - currentBusinessDays = soma dos dias úteis dos pontos analisados
-  // - currentPace = completedInCurrent ÷ currentBusinessDays
-  // Nunca divide por dias úteis futuros ou fora dos pontos analisados.
-  const completedInCurrent = points.reduce((acc, p) => acc + p.completedCount, 0);
-  const currentBusinessDays = points.reduce((acc, p) => acc + p.businessDays, 0);
-  const currentPace = currentBusinessDays > 0
-    ? Number((completedInCurrent / currentBusinessDays).toFixed(1))
+  // 1. RITMO MÉDIO: tanques concluídos ÷ dias úteis
+  const totalCompleted = points.reduce((acc, p) => acc + p.completedCount, 0);
+  const totalBusinessDays = points.reduce((acc, p) => acc + p.businessDays, 0);
+  const averagePace = totalBusinessDays > 0
+    ? Number((totalCompleted / totalBusinessDays).toFixed(1))
     : 0;
 
-  let maxPace = 0;
-  let maxPacePeriod: string | null = null;
-  let minPace = Infinity;
-  let minPacePeriod: string | null = null;
+  // 2. RITMO ATUAL: ritmo do período mais recente disponível
+  const currentPoint = points.length > 0 ? points[points.length - 1] : null;
+  const currentPace = currentPoint ? currentPoint.ritmo : 0;
+  const currentPaceLabel = currentPoint ? (currentPoint.fullPeriodLabel || currentPoint.label) : '-';
+
+  // 3. MELHOR RITMO: maior ritmo real encontrado dentro do intervalo analisado
+  let bestPace = 0;
+  let bestPacePeriod: string | null = null;
 
   points.forEach(p => {
-    if (p.completedCount > 0 && p.ritmo > maxPace) {
-      maxPace = p.ritmo;
-      maxPacePeriod = p.fullPeriodLabel || p.label;
-    }
-    if (p.completedCount > 0 && p.ritmo < minPace) {
-      minPace = p.ritmo;
-      minPacePeriod = p.fullPeriodLabel || p.label;
+    if (p.completedCount > 0 && p.ritmo > bestPace) {
+      bestPace = p.ritmo;
+      bestPacePeriod = p.fullPeriodLabel || p.label;
     }
   });
 
-  if (minPace === Infinity) {
-    minPace = maxPace;
-    minPacePeriod = maxPacePeriod;
-  }
-
   points.forEach(p => {
-    if (maxPace > 0 && p.ritmo === maxPace) p.isMax = true;
-    if (minPace > 0 && p.ritmo === minPace && points.length > 1) p.isMin = true;
+    if (bestPace > 0 && p.ritmo === bestPace) p.isMax = true;
   });
-
-  let previousPace: number | null = null;
-  let previousPeriodLabel: string | null = bounds.previous ? bounds.previous.label : null;
-  let variation: VariationResult;
-
-  if (bounds.previous) {
-    const prevBuckets = getDeconComparableBuckets(allOperations, period, bounds.previous, customStart, customEnd);
-    const prevCompleted = prevBuckets.reduce((acc, b) => {
-      return acc + allOperations.filter(op => isOpFinalizedInDateRange(op, b.start, b.end)).length;
-    }, 0);
-    const prevBusinessDays = prevBuckets.reduce((acc, b) => acc + b.businessDays, 0);
-    if (prevCompleted > 0 && prevBusinessDays > 0) {
-      previousPace = Number((prevCompleted / prevBusinessDays).toFixed(1));
-      variation = computePercentageVariation(currentPace, previousPace, 'RITMO');
-    } else if (points.length >= 2) {
-      const lastPoint = points[points.length - 1];
-      const prevPoint = points[points.length - 2];
-      previousPace = prevPoint.ritmo;
-      previousPeriodLabel = prevPoint.fullPeriodLabel || prevPoint.label;
-      variation = computePercentageVariation(lastPoint.ritmo, prevPoint.ritmo, 'RITMO');
-    } else {
-      variation = computePercentageVariation(currentPace, null, 'RITMO');
-    }
-  } else if (points.length >= 2) {
-    const lastPoint = points[points.length - 1];
-    const prevPoint = points[points.length - 2];
-    previousPace = prevPoint.ritmo;
-    previousPeriodLabel = prevPoint.fullPeriodLabel || prevPoint.label;
-    variation = computePercentageVariation(lastPoint.ritmo, prevPoint.ritmo, 'RITMO');
-  } else {
-    variation = computePercentageVariation(currentPace, null, 'RITMO');
-  }
 
   return {
     chartData: points,
+    averagePace,
     currentPace,
-    maxPace,
-    maxPacePeriod,
-    minPace,
-    minPacePeriod,
-    variation,
-    previousPace,
-    previousPeriodLabel,
+    currentPaceLabel,
+    bestPace,
+    bestPacePeriod,
+    maxPace: bestPace,
+    maxPacePeriod: bestPacePeriod,
+    minPace: 0,
+    minPacePeriod: null,
     currentPeriodLabel: bounds.current.label,
-    completedInCurrent,
-    currentBusinessDays
+    completedInCurrent: totalCompleted,
+    currentBusinessDays: totalBusinessDays,
+    totalCompleted,
+    totalBusinessDays
   };
 }
 
 /**
- * PRODUCTIVITY DASHBOARD DATA (Parte 5)
- * Mostra a capacidade produtiva real observada:
- * - Capacidade Máxima Observada em um Dia (Pico de Produção Diária)
- * - Total Descontaminado no período
- * - Média de Produção por Período
- * - Variação da Produtividade
- * - Gráfico de Linha com quantidade finalizada por período
+ * PRODUCTIVITY DASHBOARD DATA
+ * - PRODUÇÃO MÉDIA: Média de tanques produzidos por período analisado
+ * - PICO DE PRODUÇÃO: Maior quantidade REAL de tanques concluídos em um único dia
+ * - DIAS PRODUTIVOS: Quantidade de dias com pelo menos uma operação concluída
  */
 export interface ProductivityChartPoint {
   key: string;
   label: string;
+  periodRange: string;
   fullPeriodLabel: string;
   finalizados: number; // Volume real de tanques finalizados
   isCurrent: boolean;
@@ -1031,15 +1084,17 @@ export interface ProductivityChartPoint {
 
 export interface ProductivityDashboardData {
   chartData: ProductivityChartPoint[];
-  totalDescontaminado: number;          // Total descontaminado (usado internamente no gráfico e variações)
-  peakDailyCount: number;               // MAIOR PRODUÇÃO EM 1 DIA
-  peakDailyDate: string | null;         // Data do pico
-  avgProductionPerPeriod: number;       // MÉDIA DE PRODUÇÃO
-  periodUnitLabel: string;              // "tanques / dia", "tanques / semana", "tanques / mês"
-  periodSubLabel: string;               // "Média por dia analisado", "Média por semana", "Média mensal"
-  productiveDays: number;               // DIAS PRODUTIVOS (dias com pelo menos 1 operação concluída)
-  variation: VariationResult;           // VARIAÇÃO DA PRODUTIVIDADE
+  avgProduction: number;          // 1. PRODUÇÃO MÉDIA: tanques por período de comparação
+  avgProductionPerPeriod: number; // alias para compatibilidade
+  periodUnitLabel: string;        // "tanques / dia", "tanques / semana", "tanques / mês"
+  periodSubLabel: string;         // "Média diária de produção", "Média semanal de produção", etc.
+  peakDailyVolume: number;        // 2. PICO DE PRODUÇÃO: maior volume real em 1 único dia
+  peakDailyCount: number;         // alias para compatibilidade
+  peakDailyDate: string | null;   // Data do pico
+  productiveDays: number;         // 3. DIAS PRODUTIVOS: contagem de datas com pelo menos 1 operação concluída
   currentPeriodLabel: string;
+  totalDescontaminado?: number;
+  variation?: VariationResult;
 }
 
 export function generateProductivityDashboardData(
@@ -1052,8 +1107,8 @@ export function generateProductivityDashboardData(
   const ref = startOfDay(referenceDate);
   const bounds = getDeconPeriodBounds(period, customStart, customEnd, ref, allOperations);
 
-  // 1. Build comparable buckets (utiliza EXATAMENTE os mesmos buckets do Ritmo)
-  const buckets = getDeconComparableBuckets(allOperations, period, bounds.current, customStart, customEnd);
+  // 1. Gera os buckets da evolução baseados no volume de produção (dia a dia, semana ou mês)
+  const buckets = getProductivityComparableBuckets(allOperations, period, bounds.current, customStart, customEnd);
 
   let points: ProductivityChartPoint[] = buckets.map((b, idx) => {
     const wOps = allOperations.filter(op => isOpFinalizedInDateRange(op, b.start, b.end));
@@ -1063,6 +1118,7 @@ export function generateProductivityDashboardData(
     return {
       key: b.key,
       label: b.label,
+      periodRange: b.periodRange,
       fullPeriodLabel: b.fullPeriodLabel,
       finalizados,
       isCurrent,
@@ -1070,12 +1126,53 @@ export function generateProductivityDashboardData(
     };
   });
 
-  // Total Descontaminado é a soma exata dos pontos apresentados na evolução
-  const totalDescontaminado = points.reduce((acc, p) => acc + p.finalizados, 0);
+  const totalVolume = points.reduce((acc, p) => acc + p.finalizados, 0);
 
-  // 2. Pico diário considerando as operações concluídas do período selecionado
+  // 1. PRODUÇÃO MÉDIA: quantidade média de tanques produzidos por período de comparação
+  const avgProduction = points.length > 0
+    ? Number((totalVolume / points.length).toFixed(1))
+    : 0;
+
+  // Unidade e subtítulo adaptados ao filtro
+  let periodUnitLabel = 'tanques / período';
+  let periodSubLabel = 'Média por período de comparação';
+  if (period === 'days') {
+    periodUnitLabel = 'tanques / dia';
+    periodSubLabel = 'Média diária de produção';
+  } else if (period === 'weeks') {
+    periodUnitLabel = 'tanques / semana';
+    periodSubLabel = 'Média semanal de produção';
+  } else if (period === 'all') {
+    periodUnitLabel = 'tanques / mês';
+    periodSubLabel = 'Média mensal de produção';
+  } else if (period === 'custom' && customStart && customEnd) {
+    try {
+      const cStart = startOfDay(parseISO(customStart));
+      const cEnd = endOfDay(parseISO(customEnd));
+      const daysDiff = Math.ceil((cEnd.getTime() - cStart.getTime()) / (1000 * 60 * 60 * 24));
+      if (daysDiff <= 31) {
+        periodUnitLabel = 'tanques / dia';
+        periodSubLabel = 'Média diária de produção';
+      } else {
+        periodUnitLabel = 'tanques / semana';
+        periodSubLabel = 'Média semanal de produção';
+      }
+    } catch {}
+  } else if (period === 'week' || period === 'month') {
+    periodUnitLabel = 'tanques / dia';
+    periodSubLabel = 'Média diária de produção';
+  } else if (period === 'quarter') {
+    periodUnitLabel = 'tanques / semana';
+    periodSubLabel = 'Média semanal de produção';
+  } else if (period === 'semester') {
+    periodUnitLabel = 'tanques / mês';
+    periodSubLabel = 'Média mensal de produção';
+  }
+
+  // 2. PICO DE PRODUÇÃO & 3. DIAS PRODUTIVOS
+  // Agrupa operações concluídas pela data real de conclusão
   const dailyMap = new Map<string, number>();
-  const scopedOps = period === 'all'
+  const scopedOps = (period === 'all' || period === 'days' || period === 'weeks')
     ? allOperations.filter(op => op.status === 'completed' && isOpOnOrAfterMinDate(op, DECON_MIN_DATE_OBJ))
     : allOperations.filter(op => isOpFinalizedInDateRange(op, bounds.current.start, bounds.current.end));
 
@@ -1087,104 +1184,496 @@ export function generateProductivityDashboardData(
     }
   });
 
-  let peakDailyCount = 0;
+  // Dias produtivos: contagem de datas com pelo menos 1 operação concluída
+  const productiveDays = dailyMap.size;
+
+  // Pico de produção: maior volume real de tanques concluídos em um único dia
+  let peakDailyVolume = 0;
   let peakDailyDate: string | null = null;
   dailyMap.forEach((count, dateKey) => {
-    if (count > peakDailyCount) {
-      peakDailyCount = count;
+    if (count > peakDailyVolume) {
+      peakDailyVolume = count;
       peakDailyDate = dateKey;
     }
   });
 
+  // Identifica o bucket de maior volume no gráfico
   let highestBucketCount = 0;
   points.forEach(p => {
     if (p.finalizados > highestBucketCount) {
       highestBucketCount = p.finalizados;
     }
   });
-
   points.forEach(p => {
     p.isPeak = (highestBucketCount > 0 && p.finalizados === highestBucketCount);
   });
 
-  // 3. Dias produtivos: dias com pelo menos uma operação de descontaminação concluída no período
-  const productiveDays = dailyMap.size;
+  return {
+    chartData: points,
+    avgProduction,
+    avgProductionPerPeriod: avgProduction,
+    periodUnitLabel,
+    periodSubLabel,
+    peakDailyVolume,
+    peakDailyCount: peakDailyVolume,
+    peakDailyDate,
+    productiveDays,
+    totalDescontaminado: totalVolume,
+    currentPeriodLabel: bounds.current.label
+  };
+}
 
-  // 4. Média de produção por período (pontos analisados da tabela/gráfico)
-  const avgProductionPerPeriod = points.length > 0
-    ? Number((totalDescontaminado / points.length).toFixed(1))
-    : 0;
+/**
+ * UNIFIED PERFORMANCE DASHBOARD (DESEMPENHO DA DESCONTAMINAÇÃO)
+ * 1. PRODUÇÃO MÉDIA: Média de tanques concluídos por período analisado
+ * 2. RITMO MÉDIO: Quantidade média de tanques concluídos por dia útil (tanques / dia útil)
+ * 3. PICO DE PRODUÇÃO: Maior quantidade de tanques concluídos em um único dia (com data do pico)
+ * 
+ * GRÁFICO ÚNICO COM DUAS LINHAS:
+ * - LINHA 1 (Eixo Y Esquerdo): PRODUTIVIDADE (Tanques produzidos)
+ * - LINHA 2 (Eixo Y Direito): RITMO (Tanques / dia útil)
+ */
+export interface PerformanceChartPoint {
+  key: string;
+  label: string;
+  periodRange: string;
+  fullPeriodLabel: string;
+  start: Date;
+  end: Date;
+  businessDays: number;
+  produtividade: number; // Volume real de tanques concluídos no período
+  ritmo: number;         // Ritmo médio = velocidade média em tanques / dia útil
+  rhythmNote?: string;   // Contexto explicativo do ritmo (ex: "Semana: 15 tanques ÷ 5 dias úteis")
+  isCurrent: boolean;
+  isPeak: boolean;
+}
 
-  // IMPORTANTE: Produtividade é VOLUME por período analisado (nunca usar "dia útil")
-  let periodUnitLabel = 'tanques / período';
-  let periodSubLabel = 'Média por período analisado';
+export interface PerformanceDashboardData {
+  chartData: PerformanceChartPoint[];
+  avgProduction: number;          // Mantido por compatibilidade técnica
+  periodUnitLabel: string;        // Mantido por compatibilidade técnica
+  periodSubLabel: string;         // Mantido por compatibilidade técnica
+  granularityLabel: string;       // "Visualização diária", "Visualização semanal", "Visualização mensal"
+  granularityType: 'daily' | 'weekly' | 'monthly';
+  rhythmAverage: number;          // CARD 1: RITMO MÉDIO (total tanques ÷ total dias úteis)
+  totalCompleted: number;
+  totalBusinessDays: number;
+  productiveDays: number;         // CARD 2: DIAS PRODUTIVOS (dias com ao menos 1 conclusão)
+  peakDailyVolume: number;        // CARD 3: PICO DE PRODUÇÃO (tanques em 1 único dia)
+  peakDailyDate: string | null;   // Data do pico
+  currentPeriodLabel: string;
+}
+
+export function generatePerformanceDashboardData(
+  allOperations: DecontaminationOperation[],
+  period: DeconFilterPeriod,
+  customStart?: string,
+  customEnd?: string,
+  referenceDate: Date = new Date()
+): PerformanceDashboardData {
+  const ref = startOfDay(referenceDate);
+  const now = new Date();
+  const bounds = getDeconPeriodBounds(period, customStart, customEnd, ref, allOperations);
+
+  // Considerar somente operações concluídas a partir do marco zero operacional (03/08/2026)
+  const completedOps = allOperations.filter(
+    op => op.status === 'completed' && isOpOnOrAfterMinDate(op, DECON_MIN_DATE_OBJ)
+  );
+
+  // Determinar a granularidade e o escopo de operações conforme o filtro
+  let scopedOps: DecontaminationOperation[] = [];
+  let filterRangeStart: Date | null = null;
+  let filterRangeEnd: Date | null = null;
+
+  let granularityType: 'daily' | 'weekly' | 'monthly' = 'weekly';
+  let granularityLabel = 'Visualização semanal';
+
   if (period === 'days') {
-    periodUnitLabel = 'tanques / dia';
-    periodSubLabel = 'Média por dia analisado';
+    granularityType = 'daily';
+    granularityLabel = 'Visualização diária';
+    scopedOps = completedOps;
   } else if (period === 'weeks') {
-    periodUnitLabel = 'tanques / semana';
-    periodSubLabel = 'Média por semana';
+    granularityType = 'weekly';
+    granularityLabel = 'Visualização semanal';
+    scopedOps = completedOps;
   } else if (period === 'all') {
-    periodUnitLabel = 'tanques / mês';
-    periodSubLabel = 'Média mensal';
-  } else if (period === 'custom' && customStart && customEnd) {
-    try {
-      const cStart = startOfDay(parseISO(customStart));
-      const cEnd = endOfDay(parseISO(customEnd));
-      const daysDiff = Math.ceil((cEnd.getTime() - cStart.getTime()) / (1000 * 60 * 60 * 24));
-      if (daysDiff <= 31) {
-        periodUnitLabel = 'tanques / dia';
-        periodSubLabel = 'Média por dia analisado';
-      } else {
-        periodUnitLabel = 'tanques / semana';
-        periodSubLabel = 'Média por semana';
+    granularityType = 'monthly';
+    granularityLabel = 'Visualização mensal';
+    scopedOps = completedOps;
+  } else if (period === 'custom') {
+    if (customStart && customEnd) {
+      try {
+        const parsedStart = startOfDay(parseISO(customStart));
+        const parsedEnd = endOfDay(parseISO(customEnd));
+        filterRangeStart = parsedStart < DECON_MIN_DATE_OBJ ? DECON_MIN_DATE_OBJ : parsedStart;
+        filterRangeEnd = parsedEnd;
+        scopedOps = completedOps.filter(op => isOpFinalizedInDateRange(op, filterRangeStart!, filterRangeEnd!));
+
+        const diffDays = Math.max(1, differenceInCalendarDays(parsedEnd, parsedStart) + 1);
+        if (diffDays <= 31) {
+          granularityType = 'daily';
+          granularityLabel = 'Visualização diária';
+        } else if (diffDays <= 180) {
+          granularityType = 'weekly';
+          granularityLabel = 'Visualização semanal';
+        } else {
+          granularityType = 'monthly';
+          granularityLabel = 'Visualização mensal';
+        }
+      } catch {
+        granularityType = 'weekly';
+        granularityLabel = 'Visualização semanal';
+        scopedOps = completedOps;
       }
-    } catch {}
-  } else if (period === 'week' || period === 'month') {
-    periodUnitLabel = 'tanques / dia';
-    periodSubLabel = 'Média por dia analisado';
-  } else if (period === 'quarter') {
-    periodUnitLabel = 'tanques / semana';
-    periodSubLabel = 'Média por semana';
-  } else if (period === 'semester') {
-    periodUnitLabel = 'tanques / mês';
-    periodSubLabel = 'Média mensal';
+    } else {
+      granularityType = 'weekly';
+      granularityLabel = 'Visualização semanal';
+      scopedOps = completedOps;
+    }
+  } else {
+    granularityType = 'weekly';
+    granularityLabel = 'Visualização semanal';
+    scopedOps = completedOps;
   }
 
-  // 5. Variação da Produtividade comparando período atual com período anterior equivalente
-  let variation: VariationResult;
-  if (bounds.previous) {
-    const prevBuckets = getDeconComparableBuckets(allOperations, period, bounds.previous, customStart, customEnd);
-    const prevCompleted = prevBuckets.reduce((acc, b) => {
-      return acc + allOperations.filter(op => isOpFinalizedInDateRange(op, b.start, b.end)).length;
-    }, 0);
-    if (prevCompleted > 0) {
-      variation = computePercentageVariation(totalDescontaminado, prevCompleted, 'PRODUTIVIDADE');
-    } else if (points.length >= 2) {
-      const lastPoint = points[points.length - 1];
-      const prevPoint = points[points.length - 2];
-      variation = computePercentageVariation(lastPoint.finalizados, prevPoint.finalizados, 'PRODUTIVIDADE');
-    } else {
-      variation = computePercentageVariation(totalDescontaminado, null, 'PRODUTIVIDADE');
-    }
-  } else if (points.length >= 2) {
-    const lastPoint = points[points.length - 1];
-    const prevPoint = points[points.length - 2];
-    variation = computePercentageVariation(lastPoint.finalizados, prevPoint.finalizados, 'PRODUTIVIDADE');
-  } else {
-    variation = computePercentageVariation(totalDescontaminado, null, 'PRODUTIVIDADE');
+  let points: PerformanceChartPoint[] = [];
+
+  // ====================================================
+  // 1. GRANULARIDADE DIÁRIA (DIAS ou PERSONALIZADO <= 31 dias)
+  // Cada ponto representa EXATAMENTE UM DIA
+  // ====================================================
+  if (granularityType === 'daily') {
+    const dayMap = new Map<string, { date: Date; ops: DecontaminationOperation[] }>();
+
+    scopedOps.forEach(op => {
+      const d = getOpCompletionDate(op);
+      if (!d) return;
+
+      const dayKey = format(d, 'yyyy-MM-dd');
+      if (!dayMap.has(dayKey)) {
+        dayMap.set(dayKey, { date: startOfDay(d), ops: [] });
+      }
+      dayMap.get(dayKey)!.ops.push(op);
+    });
+
+    const sortedDays = Array.from(dayMap.values()).sort(
+      (a, b) => a.date.getTime() - b.date.getTime()
+    );
+
+    const minHistoricalDate = DECON_MIN_DATE_OBJ;
+
+    points = sortedDays.map((item, idx) => {
+      const d = item.date;
+      const dayKey = format(d, 'yyyy-MM-dd');
+      const label = format(d, 'dd/MM');
+      const isBusiness = isCalendarBusinessDay(d);
+      const dayOfWeekName = format(d, 'EEEE', { locale: ptBR });
+      const capitalizedDay = dayOfWeekName.charAt(0).toUpperCase() + dayOfWeekName.slice(1);
+      const fullPeriodLabel = `${format(d, 'dd/MM/yyyy')} (${capitalizedDay})`;
+
+      // 1. LINHA VERDE — PRODUÇÃO: Quantidade de tanques concluídos naquele dia
+      const produtividade = item.ops.length;
+
+      // 2. LINHA AZUL — RITMO: RITMO MÉDIO MÓVEL DOS ÚLTIMOS 5 DIAS ÚTEIS
+      // Para cada dia, calcular: tanques concluídos nos últimos 5 dias úteis ÷ 5 dias úteis.
+      // No início do histórico, quando ainda não existirem 5 dias úteis, utilizar os dias úteis disponíveis.
+      const bDaysList: Date[] = [];
+      let cursor = d;
+      while (cursor.getTime() >= minHistoricalDate.getTime() && bDaysList.length < 5) {
+        if (isCalendarBusinessDay(cursor)) {
+          bDaysList.push(cursor);
+        }
+        cursor = subDays(cursor, 1);
+      }
+
+      const bDaysCount = Math.max(1, bDaysList.length);
+      const windowStart = bDaysList.length > 0 ? startOfDay(bDaysList[bDaysList.length - 1]) : startOfDay(d);
+      const windowEnd = endOfDay(d);
+
+      // Quantidade de tanques concluídos nos últimos 5 dias úteis (janela operacional)
+      const windowTanks = completedOps.filter(op => isOpFinalizedInDateRange(op, windowStart, windowEnd)).length;
+      const ritmo = Number((windowTanks / bDaysCount).toFixed(1));
+
+      const rhythmNote = bDaysCount >= 5
+        ? `Média móvel (5 dias úteis): ${windowTanks} tanques ÷ 5 dias úteis = ${ritmo} tanques/dia útil`
+        : `Início do histórico (${bDaysCount} ${bDaysCount === 1 ? 'dia útil' : 'dias úteis'}): ${windowTanks} tanques ÷ ${bDaysCount} = ${ritmo} tanques/dia útil`;
+
+      const isCurrent = format(d, 'yyyy-MM-dd') === format(ref, 'yyyy-MM-dd') || idx === sortedDays.length - 1;
+
+      return {
+        key: dayKey,
+        label,
+        periodRange: format(d, 'dd/MM/yyyy'),
+        fullPeriodLabel,
+        start: d,
+        end: endOfDay(d),
+        businessDays: bDaysCount,
+        produtividade,
+        ritmo,
+        rhythmNote,
+        isCurrent,
+        isPeak: false
+      };
+    });
   }
+
+  // ====================================================
+  // 2. GRANULARIDADE SEMANAL (SEMANAS ou PERSONALIZADO 32..180 dias)
+  // Cada ponto representa EXATAMENTE UMA SEMANA
+  // ====================================================
+  else if (granularityType === 'weekly') {
+    type WeekGroup = {
+      naturalStart: Date;
+      naturalEnd: Date;
+      effectiveStart: Date;
+      effectiveEnd: Date;
+      isPartial: boolean;
+      ops: DecontaminationOperation[];
+    };
+
+    const weekMap = new Map<string, WeekGroup>();
+
+    scopedOps.forEach(op => {
+      const d = getOpCompletionDate(op);
+      if (!d) return;
+
+      const naturalStart = startOfWeek(d, { weekStartsOn: 1 });
+      const naturalEnd = endOfWeek(d, { weekStartsOn: 1 });
+      const key = format(naturalStart, 'yyyy-MM-dd');
+
+      if (!weekMap.has(key)) {
+        let effectiveStart = naturalStart;
+        let effectiveEnd = naturalEnd;
+        let isPartial = false;
+
+        if (filterRangeStart && filterRangeStart.getTime() > naturalStart.getTime()) {
+          effectiveStart = filterRangeStart;
+          isPartial = true;
+        }
+        if (filterRangeEnd && filterRangeEnd.getTime() < naturalEnd.getTime()) {
+          effectiveEnd = filterRangeEnd;
+          isPartial = true;
+        }
+
+        weekMap.set(key, {
+          naturalStart,
+          naturalEnd,
+          effectiveStart,
+          effectiveEnd,
+          isPartial,
+          ops: []
+        });
+      }
+
+      const group = weekMap.get(key)!;
+      if (isOpFinalizedInDateRange(op, group.effectiveStart, group.effectiveEnd)) {
+        group.ops.push(op);
+      }
+    });
+
+    const sortedWeekGroups = Array.from(weekMap.values()).sort(
+      (a, b) => a.effectiveStart.getTime() - b.effectiveStart.getTime()
+    );
+
+    points = sortedWeekGroups.map((w, idx) => {
+      const weekNumber = idx + 1;
+      const weekLabel = w.isPartial ? `Semana ${weekNumber} (parcial)` : `Semana ${weekNumber}`;
+      const rangeStr = `${format(w.effectiveStart, 'dd/MM')} a ${format(w.effectiveEnd, 'dd/MM')}`;
+      const fullPeriodLabel = `${weekLabel} (${format(w.effectiveStart, 'dd/MM')} a ${format(w.effectiveEnd, 'dd/MM/yyyy')})${w.isPartial ? ' · Semana Parcial' : ''}`;
+
+      // PRODUTIVIDADE: total de tanques concluídos naquela semana
+      const produtividade = w.ops.length;
+
+      // DIAS ÚTEIS DA SEMANA (Segunda a Sexta, limitados à data de hoje caso a semana esteja em curso)
+      const cappedEnd = w.effectiveEnd.getTime() > now.getTime() ? now : w.effectiveEnd;
+      const businessDays = Math.max(1, countCalendarBusinessDays(w.effectiveStart, cappedEnd));
+
+      // RITMO: total de tanques concluídos naquela semana ÷ dias úteis da semana
+      const ritmo = Number((produtividade / businessDays).toFixed(1));
+
+      const isCurrent = (w.effectiveStart.getTime() <= ref.getTime() && w.effectiveEnd.getTime() >= ref.getTime()) || (idx === sortedWeekGroups.length - 1);
+      const rhythmNote = w.isPartial
+        ? `Semana parcial: ${produtividade} tanques ÷ ${businessDays} dias úteis = ${ritmo} tanques/dia útil`
+        : `${produtividade} tanques ÷ ${businessDays} dias úteis = ${ritmo} tanques/dia útil`;
+
+      return {
+        key: format(w.effectiveStart, 'yyyy-MM-dd'),
+        label: weekLabel,
+        periodRange: `${weekLabel} (${rangeStr})`,
+        fullPeriodLabel,
+        start: w.effectiveStart,
+        end: w.effectiveEnd,
+        businessDays,
+        produtividade,
+        ritmo,
+        rhythmNote,
+        isCurrent,
+        isPeak: false
+      };
+    });
+  }
+
+  // ====================================================
+  // 3. GRANULARIDADE MENSAL (TODO O PERÍODO ou PERSONALIZADO > 180 dias)
+  // Cada ponto representa EXATAMENTE UM MÊS
+  // ====================================================
+  else {
+    type MonthGroup = {
+      naturalStart: Date;
+      naturalEnd: Date;
+      effectiveStart: Date;
+      effectiveEnd: Date;
+      ops: DecontaminationOperation[];
+    };
+
+    const monthMap = new Map<string, MonthGroup>();
+
+    scopedOps.forEach(op => {
+      const d = getOpCompletionDate(op);
+      if (!d) return;
+
+      const naturalStart = startOfMonth(d);
+      const naturalEnd = endOfMonth(d);
+      const key = format(naturalStart, 'yyyy-MM');
+
+      if (!monthMap.has(key)) {
+        let effectiveStart = naturalStart < DECON_MIN_DATE_OBJ ? DECON_MIN_DATE_OBJ : naturalStart;
+        let effectiveEnd = naturalEnd;
+
+        if (filterRangeStart && filterRangeStart.getTime() > effectiveStart.getTime()) {
+          effectiveStart = filterRangeStart;
+        }
+        if (filterRangeEnd && filterRangeEnd.getTime() < effectiveEnd.getTime()) {
+          effectiveEnd = filterRangeEnd;
+        }
+
+        monthMap.set(key, {
+          naturalStart,
+          naturalEnd,
+          effectiveStart,
+          effectiveEnd,
+          ops: []
+        });
+      }
+
+      const group = monthMap.get(key)!;
+      if (isOpFinalizedInDateRange(op, group.effectiveStart, group.effectiveEnd)) {
+        group.ops.push(op);
+      }
+    });
+
+    const sortedMonthGroups = Array.from(monthMap.values()).sort(
+      (a, b) => a.effectiveStart.getTime() - b.effectiveStart.getTime()
+    );
+
+    points = sortedMonthGroups.map((m, idx) => {
+      const monthRaw = format(m.effectiveStart, 'MMMM/yyyy', { locale: ptBR });
+      const monthLabel = monthRaw.charAt(0).toUpperCase() + monthRaw.slice(1);
+
+      // PRODUTIVIDADE: total de tanques concluídos naquele mês
+      const produtividade = m.ops.length;
+
+      // DIAS ÚTEIS DO MÊS (Segunda a Sexta, limitados à data de hoje caso o mês esteja em curso)
+      const cappedEnd = m.effectiveEnd.getTime() > now.getTime() ? now : m.effectiveEnd;
+      const businessDays = Math.max(1, countCalendarBusinessDays(m.effectiveStart, cappedEnd));
+
+      // RITMO: total de tanques concluídos naquele mês ÷ dias úteis do mês
+      const ritmo = Number((produtividade / businessDays).toFixed(1));
+
+      const isCurrent = (m.effectiveStart.getTime() <= ref.getTime() && m.effectiveEnd.getTime() >= ref.getTime()) || (idx === sortedMonthGroups.length - 1);
+      const rhythmNote = `${produtividade} tanques ÷ ${businessDays} dias úteis = ${ritmo} tanques/dia útil`;
+
+      return {
+        key: format(m.effectiveStart, 'yyyy-MM'),
+        label: monthLabel,
+        periodRange: monthLabel,
+        fullPeriodLabel: monthLabel,
+        start: m.effectiveStart,
+        end: m.effectiveEnd,
+        businessDays,
+        produtividade,
+        ritmo,
+        rhythmNote,
+        isCurrent,
+        isPeak: false
+      };
+    });
+  }
+
+  // Identifica o ponto de maior volume de produção do gráfico
+  let highestProd = 0;
+  points.forEach(p => {
+    if (p.produtividade > highestProd) highestProd = p.produtividade;
+  });
+  points.forEach(p => {
+    p.isPeak = highestProd > 0 && p.produtividade === highestProd;
+  });
+
+  // ==========================================
+  // INDICADORES DE DESEMPENHO (CARDS)
+  // ==========================================
+
+  // 1. PRODUÇÃO MÉDIA: Média de tanques concluídos pelo período de agregação ativo
+  const totalCompleted = points.reduce((acc, p) => acc + p.produtividade, 0);
+  const avgProduction = points.length > 0 ? Number((totalCompleted / points.length).toFixed(1)) : 0;
+
+  let periodUnitLabel = 'tanques / semana';
+  let periodSubLabel = 'Média semanal de produção';
+
+  if (granularityType === 'daily') {
+    periodUnitLabel = 'tanques / dia';
+    periodSubLabel = 'Média diária de produção';
+  } else if (granularityType === 'monthly') {
+    periodUnitLabel = 'tanques / mês';
+    periodSubLabel = 'Média mensal de produção';
+  }
+
+  // 2. RITMO MÉDIO: Total de tanques concluídos ÷ total de dias úteis no período analisado
+  let totalBusinessDays = 0;
+  if (points.length > 0) {
+    const minStart = points[0].start;
+    const maxEnd = points[points.length - 1].end;
+    const effectiveEnd = maxEnd.getTime() > now.getTime() ? now : maxEnd;
+    totalBusinessDays = Math.max(1, countCalendarBusinessDays(minStart, effectiveEnd));
+  }
+  const rhythmAverage = totalBusinessDays > 0 ? Number((totalCompleted / totalBusinessDays).toFixed(1)) : 0;
+
+  // 3. PICO DE PRODUÇÃO: Recorde real em um ÚNICO DIA (com data do pico)
+  // Permanece diário em todos os filtros conforme regra absoluta
+  const dailyMap = new Map<string, number>();
+  scopedOps.forEach(op => {
+    const d = getOpCompletionDate(op);
+    if (d) {
+      const k = format(d, 'yyyy-MM-dd');
+      dailyMap.set(k, (dailyMap.get(k) || 0) + 1);
+    }
+  });
+
+  let peakDailyVolume = 0;
+  let peakDailyDate: string | null = null;
+  dailyMap.forEach((count, dateStr) => {
+    if (count > peakDailyVolume) {
+      peakDailyVolume = count;
+      peakDailyDate = dateStr;
+    }
+  });
+
+  // DIAS PRODUTIVOS: Quantidade de dias em que houve pelo menos uma operação concluída
+  const productiveDays = dailyMap.size;
 
   return {
     chartData: points,
-    totalDescontaminado,
-    peakDailyCount,
-    peakDailyDate,
-    avgProductionPerPeriod,
+    avgProduction,
     periodUnitLabel,
     periodSubLabel,
+    granularityLabel,
+    granularityType,
+    rhythmAverage,
+    totalCompleted,
+    totalBusinessDays,
     productiveDays,
-    variation,
+    peakDailyVolume,
+    peakDailyDate,
     currentPeriodLabel: bounds.current.label
   };
 }

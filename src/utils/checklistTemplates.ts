@@ -368,6 +368,8 @@ export function createDefaultChecklistData(
   const nowStr = new Date().toISOString().split('T')[0];
 
   return {
+    lastVn: initialInfo.lastVn || initialInfo.ultimoVn || '',
+    ultimoVn: initialInfo.ultimoVn || initialInfo.lastVn || '',
     checklistType: initialInfo.checklistType || 'Entrada',
     equipmentFamily: initialInfo.equipmentFamily || (modelType === 'CCU' ? 'CCU' : (modelType === 'TANQUE_1500' ? 'Tanque 1500 LT' : (modelType === 'TANQUE_5000' ? 'Tanque 5000 LT' : (modelType === 'TANQUE_5200' ? 'Tanque 5200 LT' : 'Container Refrigerado')))),
     equipmentModel: initialInfo.equipmentModel || (modelType === 'CCU' ? 'CCU 10\'' : (modelType === 'TANQUE_1500' ? 'Tanque Químico 1500L' : (modelType === 'TANQUE_5000' ? 'Tanque Offshore 5000L' : (modelType === 'TANQUE_5200' ? 'Tanque Inox 5200L' : 'Container Reefer 20\'')))),
@@ -386,7 +388,7 @@ export function createDefaultChecklistData(
     inspectorSignatureUrl: initialInfo.inspectorSignatureUrl || '',
     
     approverName: initialInfo.approverName || '',
-    approverJobTitle: initialInfo.approverJobTitle || 'SUPERVISOR QUALIDADE / PCP',
+    approverJobTitle: initialInfo.approverJobTitle || '',
     approverSignatureUrl: initialInfo.approverSignatureUrl || '',
 
     slingApplicable: template.hasSlingSection,

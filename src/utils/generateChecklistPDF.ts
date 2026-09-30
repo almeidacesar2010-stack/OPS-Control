@@ -42,10 +42,29 @@ export function generateOperationalChecklistPDF(data: OperationalChecklistData, 
   doc.setFontSize(7.5);
   doc.setTextColor(100, 116, 139); // slate-500
   doc.setFont('helvetica', 'normal');
-  doc.text(`TIPO: ${(data.checklistType || 'ENTRADA / SAÍDA').toUpperCase()} • CÓDIGO: ${template.code} • STATUS: ${(data.status || 'CONCLUÍDO').toUpperCase()}`, 14, currentY + 8);
+  doc.text(`TIPO: ${(data.checklistType || 'ENTRADA / SAÍDA').toUpperCase()} • CÓDIGO: ${template.code}`, 14, currentY + 8);
   doc.text(`EQUIPAMENTO: ${(data.equipmentTag || 'S/TAG').toUpperCase()} • CLIENTE: ${(data.clientName || 'NÃO DEFINIDO').toUpperCase()}`, 14, currentY + 12);
 
   currentY += 16;
+
+  // CAMPO: ÚLTIMO VN (no início do documento do checklist, antes das demais informações)
+  const lastVnVal = (data.lastVn || data.ultimoVn || '').trim();
+  doc.setFillColor(248, 250, 252);
+  doc.setDrawColor(203, 213, 225);
+  doc.setLineWidth(0.2);
+  doc.roundedRect(14, currentY, 182, 7.5, 1, 1, 'FD');
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.5);
+  doc.setTextColor(15, 23, 42);
+  doc.text('ÚLTIMO VN:', 18, currentY + 5);
+
+  doc.setFont('helvetica', lastVnVal ? 'bold' : 'normal');
+  doc.setFontSize(7.5);
+  doc.setTextColor(lastVnVal ? 15 : 148, lastVnVal ? 23 : 163, lastVnVal ? 42 : 184);
+  doc.text(lastVnVal ? lastVnVal.toUpperCase() : '', 45, currentY + 5);
+
+  currentY += 11;
 
   // I. DADOS DO CHECKLIST E IDENTIFICAÇÃO DO ATIVO
   doc.setFont('helvetica', 'bold');
@@ -69,11 +88,7 @@ export function generateOperationalChecklistPDF(data: OperationalChecklistData, 
     ],
     [
       'DATA DA INSPEÇÃO:', data.inspectionDate ? format(new Date(data.inspectionDate), 'dd/MM/yyyy') : '-',
-      'RESPONSÁVEL / SOLICITANTE:', (data.inspectionResponsible || data.inspectorName || 'TÉCNICO').toUpperCase()
-    ],
-    [
-      'INSPETOR / TÉCNICO:', (data.inspectorName || 'NÃO INFORMADO').toUpperCase(),
-      'STATUS DO CHECKLIST:', (data.status || 'CONCLUÍDO').toUpperCase()
+      'RESPONSÁVEL:', (data.inspectionResponsible || data.inspectorName || 'NÃO INFORMADO').toUpperCase()
     ]
   ];
 
@@ -300,48 +315,36 @@ export function generateOperationalChecklistPDF(data: OperationalChecklistData, 
   doc.text('ASSINATURAS E LIBERAÇÃO OPERACIONAL', 14, currentY);
   currentY += 4;
 
-  const boxW = 88;
+  const boxW = 182;
   const boxH = 34;
 
-  // Box Inspetor
+  // Box Responsável (ocupa toda a largura, sem deixar espaço vazio)
   doc.setDrawColor(226, 232, 240);
   doc.setLineWidth(0.2);
   doc.rect(14, currentY, boxW, boxH);
 
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.5);
+  doc.setTextColor(71, 85, 105);
+  doc.text('RESPONSÁVEL', 18, currentY + 6);
+
   if (data.inspectorSignatureUrl) {
     try {
-      doc.addImage(data.inspectorSignatureUrl, 'PNG', 18, currentY + 2, 40, 16, undefined, 'FAST');
+      doc.addImage(data.inspectorSignatureUrl, 'PNG', 18, currentY + 8, 45, 13, undefined, 'FAST');
     } catch (e) {}
   }
 
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(7.5);
+  doc.setFontSize(8);
   doc.setTextColor(15, 23, 42);
-  doc.text(data.inspectorName || 'INSPETOR TÉCNICO', 18, currentY + 22);
+  const responsibleDisplay = data.inspectionResponsible || data.inspectorName || 'RESPONSÁVEL';
+  doc.text(responsibleDisplay.toUpperCase(), 18, currentY + 23);
+
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(6.5);
+  doc.setFontSize(7);
   doc.setTextColor(100, 116, 139);
-  doc.text(data.inspectorJobTitle || 'Técnico de Inspeção e Qualidade', 18, currentY + 26);
-  doc.text(`DATA: ${data.inspectionDate ? format(new Date(data.inspectionDate), 'dd/MM/yyyy') : format(new Date(), 'dd/MM/yyyy')}`, 18, currentY + 30);
-
-  // Box Supervisor / Aprovador
-  doc.rect(106, currentY, boxW, boxH);
-
-  if (data.approverSignatureUrl) {
-    try {
-      doc.addImage(data.approverSignatureUrl, 'PNG', 110, currentY + 2, 40, 16, undefined, 'FAST');
-    } catch (e) {}
-  }
-
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(7.5);
-  doc.setTextColor(15, 23, 42);
-  doc.text(data.approverName || 'SUPERVISOR QUALIDADE / PCP', 110, currentY + 22);
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(6.5);
-  doc.setTextColor(100, 116, 139);
-  doc.text(data.approverJobTitle || 'Supervisor de Qualidade e Operações', 110, currentY + 26);
-  doc.text(`STATUS: ${(data.status || 'CONCLUÍDO').toUpperCase()} • LIBERADO`, 110, currentY + 30);
+  doc.text(`CARGO / FUNÇÃO: ${(data.inspectorJobTitle || 'Responsável Operacional').toUpperCase()}`, 18, currentY + 27);
+  doc.text(`DATA DA INSPEÇÃO: ${data.inspectionDate ? format(new Date(data.inspectionDate), 'dd/MM/yyyy') : format(new Date(), 'dd/MM/yyyy')}`, 18, currentY + 31);
 
   // Save / Trigger Download
   const safeTag = (data.equipmentTag || 'EQUIPAMENTO').replace(/[^a-zA-Z0-9_-]/g, '_');

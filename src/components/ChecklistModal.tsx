@@ -22,7 +22,9 @@ import {
   ChecklistModelType, 
   CheckStatus, 
   ChecklistOperationalType, 
-  ChecklistStatus 
+  ChecklistStatus,
+  ChecklistCategory,
+  CHECKLIST_CATEGORIES
 } from '../types/checklists';
 import { Client, FleetEquipment, Equipment } from '../types';
 import { CHECKLIST_TEMPLATES, createDefaultChecklistData, detectChecklistModel } from '../utils/checklistTemplates';
@@ -43,13 +45,20 @@ interface ChecklistModalProps {
   logoUrl?: string | null;
 }
 
-const EQUIPMENT_FAMILIES = [
-  { label: 'CCU (Containers & Baskets)', value: 'CCU', modelType: 'CCU' as ChecklistModelType },
-  { label: 'Tanque 1500 LT', value: 'Tanque 1500 LT', modelType: 'TANQUE_1500' as ChecklistModelType },
-  { label: 'Tanque 5000 LT', value: 'Tanque 5000 LT', modelType: 'TANQUE_5000' as ChecklistModelType },
-  { label: 'Tanque 5200 LT', value: 'Tanque 5200 LT', modelType: 'TANQUE_5200' as ChecklistModelType },
-  { label: 'Container Refrigerado (Reefer)', value: 'Container Refrigerado', modelType: 'REEFER' as ChecklistModelType },
-  { label: 'Outros Modelos', value: 'Outros', modelType: 'CCU' as ChecklistModelType }
+export const CHECKLIST_CATEGORIES_CONFIG: {
+  label: ChecklistCategory;
+  value: ChecklistCategory;
+  modelType: ChecklistModelType;
+  defaultModel: string;
+}[] = [
+  { label: 'CCU', value: 'CCU', modelType: 'CCU', defaultModel: "CCU 10'" },
+  { label: 'Tanque 1500 LT', value: 'Tanque 1500 LT', modelType: 'TANQUE_1500', defaultModel: 'Tanque 1500 LT' },
+  { label: 'Tanque 5000 LT', value: 'Tanque 5000 LT', modelType: 'TANQUE_5000', defaultModel: 'Tanque 5000 LT' },
+  { label: 'Tanque 5200 LT', value: 'Tanque 5200 LT', modelType: 'TANQUE_5200', defaultModel: 'Tanque 5200 LT' },
+  { label: 'Container refrigerado', value: 'Container refrigerado', modelType: 'REEFER', defaultModel: 'Container Refrigerado 20\'' },
+  { label: 'Mobilização Spooling Units', value: 'Mobilização Spooling Units', modelType: 'CCU', defaultModel: 'Spooling Unit' },
+  { label: 'Manutenção Polia (Sheave Wheel)', value: 'Manutenção Polia (Sheave Wheel)', modelType: 'CCU', defaultModel: 'Polia (Sheave Wheel)' },
+  { label: 'Entrada/Saída Spooling Units', value: 'Entrada/Saída Spooling Units', modelType: 'CCU', defaultModel: 'Spooling Unit' }
 ];
 
 const CHECKLIST_TYPES: ChecklistOperationalType[] = [
@@ -88,14 +97,20 @@ export const ChecklistModal: React.FC<ChecklistModalProps> = ({
 
   // Sync quando initialData mudar
   useEffect(() => {
-    if (initialData) {
+    if (initialData && initialData.items && Object.keys(initialData.items).length > 0) {
       setFormData(initialData);
     } else {
-      setFormData(createDefaultChecklistData('CCU', {
+      const targetCat = (initialData?.category || initialData?.equipmentFamily || 'CCU') as ChecklistCategory;
+      const config = CHECKLIST_CATEGORIES_CONFIG.find(c => c.value === targetCat) || CHECKLIST_CATEGORIES_CONFIG[0];
+      setFormData(createDefaultChecklistData(config.modelType, {
         inspectorName: currentUserName,
         inspectorJobTitle: currentUserJobTitle || 'TÉCNICO DE INSPEÇÃO',
         inspectorSignatureUrl: currentUserSignatureUrl || '',
-        inspectionResponsible: currentUserName
+        inspectionResponsible: currentUserName,
+        category: config.value,
+        equipmentFamily: config.value,
+        equipmentModel: config.defaultModel,
+        ...initialData
       }));
     }
     setValidationError(null);
@@ -243,8 +258,8 @@ export const ChecklistModal: React.FC<ChecklistModalProps> = ({
       setActiveTab('identification');
       return;
     }
-    if (!formData.inspectorName?.trim()) {
-      setValidationError('Por favor, informe o Inspetor / Técnico responsável.');
+    if (!formData.inspectionResponsible?.trim() && !formData.inspectorName?.trim()) {
+      setValidationError('Por favor, informe o Responsável.');
       setActiveTab('identification');
       return;
     }
@@ -266,8 +281,11 @@ export const ChecklistModal: React.FC<ChecklistModalProps> = ({
         ? 'Reprovado / Com NC' 
         : (formData.status || 'Concluído');
 
+      const finalCategory = (formData.category || formData.equipmentFamily || 'CCU') as ChecklistCategory;
       const payload: OperationalChecklistData = {
         ...formData,
+        category: finalCategory,
+        equipmentFamily: finalCategory,
         conforme: isConforme,
         ncCount,
         status: calculatedStatus,
@@ -393,6 +411,33 @@ export const ChecklistModal: React.FC<ChecklistModalProps> = ({
           {activeTab === 'identification' && (
             <div className="space-y-6">
               
+              {/* CAMPO: ÚLTIMO VN (NO INÍCIO DO DOCUMENTO DO CHECKLIST) */}
+              <div className="bg-slate-50 dark:bg-slate-800/50 p-4 rounded-xl border border-slate-200 dark:border-slate-800">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="space-y-0.5">
+                    <label className="block text-slate-800 dark:text-slate-100 font-bold text-xs uppercase tracking-wider">
+                      ÚLTIMO VN
+                    </label>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                      Informe o Último VN deste equipamento (deixar em branco se não houver)
+                    </p>
+                  </div>
+                  <div className="w-full sm:w-72">
+                    <input
+                      type="text"
+                      value={formData.lastVn || formData.ultimoVn || ''}
+                      onChange={e => setFormData(prev => ({ 
+                        ...prev, 
+                        lastVn: e.target.value,
+                        ultimoVn: e.target.value 
+                      }))}
+                      placeholder="Preencher ÚLTIMO VN..."
+                      className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-900 dark:text-white font-semibold text-xs outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                </div>
+              </div>
+
               {/* SEÇÃO 2: DADOS DO CHECKLIST */}
               <div className="bg-slate-50 dark:bg-slate-800/40 p-4 rounded-xl border border-slate-200 dark:border-slate-800 space-y-4">
                 <div className="flex items-center gap-2 text-slate-800 dark:text-slate-200 font-bold text-sm border-b border-slate-200 dark:border-slate-700 pb-2">
@@ -418,25 +463,32 @@ export const ChecklistModal: React.FC<ChecklistModalProps> = ({
                     </select>
                   </div>
 
-                  {/* Família / Tipo de Equipamento * */}
+                  {/* Categoria Principal do Checklist * */}
                   <div>
                     <label className="block text-slate-700 dark:text-slate-300 font-semibold mb-1">
-                      Família / Tipo de Equipamento <span className="text-rose-500">*</span>
+                      Categoria Principal <span className="text-rose-500">*</span>
                     </label>
                     <select
-                      value={formData.equipmentFamily}
+                      value={formData.category || formData.equipmentFamily}
                       onChange={e => {
-                        const selectedFam = EQUIPMENT_FAMILIES.find(f => f.value === e.target.value);
-                        if (selectedFam) {
-                          handleModelChange(selectedFam.modelType, selectedFam.value);
+                        const selectedCat = CHECKLIST_CATEGORIES_CONFIG.find(c => c.value === e.target.value);
+                        if (selectedCat) {
+                          const newDefault = createDefaultChecklistData(selectedCat.modelType, {
+                            ...formData,
+                            category: selectedCat.value,
+                            equipmentFamily: selectedCat.value,
+                            equipmentModel: selectedCat.defaultModel,
+                            modelType: selectedCat.modelType
+                          });
+                          setFormData(newDefault);
                         } else {
                           setFormData(prev => ({ ...prev, equipmentFamily: e.target.value }));
                         }
                       }}
                       className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-white font-medium focus:ring-1 focus:ring-blue-500 outline-none"
                     >
-                      {EQUIPMENT_FAMILIES.map(fam => (
-                        <option key={fam.value} value={fam.value}>{fam.label}</option>
+                      {CHECKLIST_CATEGORIES_CONFIG.map(cat => (
+                        <option key={cat.value} value={cat.value}>{cat.label}</option>
                       ))}
                     </select>
                   </div>
@@ -536,30 +588,20 @@ export const ChecklistModal: React.FC<ChecklistModalProps> = ({
                     />
                   </div>
 
-                  {/* Responsável pela Inspeção * */}
+                  {/* Responsável */}
                   <div>
                     <label className="block text-slate-700 dark:text-slate-300 font-semibold mb-1">
-                      Responsável pela Inspeção <span className="text-rose-500">*</span>
+                      Responsável <span className="text-rose-500">*</span>
                     </label>
                     <input
                       type="text"
-                      value={formData.inspectionResponsible || ''}
-                      onChange={e => setFormData(prev => ({ ...prev, inspectionResponsible: e.target.value }))}
-                      placeholder="Nome do responsável técnico..."
-                      className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-white font-medium focus:ring-1 focus:ring-blue-500 outline-none"
-                    />
-                  </div>
-
-                  {/* Inspetor / Técnico responsável */}
-                  <div>
-                    <label className="block text-slate-700 dark:text-slate-300 font-semibold mb-1">
-                      Inspetor / Técnico Responsável <span className="text-rose-500">*</span>
-                    </label>
-                    <input
-                      type="text"
-                      value={formData.inspectorName || ''}
-                      onChange={e => setFormData(prev => ({ ...prev, inspectorName: e.target.value }))}
-                      placeholder="Nome do inspetor..."
+                      value={formData.inspectionResponsible || formData.inspectorName || ''}
+                      onChange={e => setFormData(prev => ({ 
+                        ...prev, 
+                        inspectionResponsible: e.target.value,
+                        inspectorName: e.target.value 
+                      }))}
+                      placeholder="Nome do responsável..."
                       className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-white font-medium focus:ring-1 focus:ring-blue-500 outline-none"
                     />
                   </div>
@@ -1039,20 +1081,24 @@ export const ChecklistModal: React.FC<ChecklistModalProps> = ({
               </div>
 
               {/* ASSINATURAS E LIBERAÇÃO */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="w-full">
                 
-                {/* ASSINATURA DO INSPETOR */}
+                {/* ASSINATURA DO RESPONSÁVEL */}
                 <div className="bg-slate-50 dark:bg-slate-800/40 p-4 rounded-xl border border-slate-200 dark:border-slate-800 space-y-3">
                   <div className="font-bold text-slate-800 dark:text-slate-200 text-xs">
-                    INSPETOR TÉCNICO
+                    RESPONSÁVEL
                   </div>
 
                   <div>
-                    <label className="block text-slate-600 dark:text-slate-400 font-medium mb-1">Nome do Inspetor</label>
+                    <label className="block text-slate-600 dark:text-slate-400 font-medium mb-1">Nome do Responsável</label>
                     <input
                       type="text"
-                      value={formData.inspectorName || ''}
-                      onChange={e => setFormData(prev => ({ ...prev, inspectorName: e.target.value }))}
+                      value={formData.inspectionResponsible || formData.inspectorName || ''}
+                      onChange={e => setFormData(prev => ({ 
+                        ...prev, 
+                        inspectionResponsible: e.target.value,
+                        inspectorName: e.target.value 
+                      }))}
                       className="w-full px-3 py-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-xs"
                     />
                   </div>
@@ -1070,38 +1116,9 @@ export const ChecklistModal: React.FC<ChecklistModalProps> = ({
                   {formData.inspectorSignatureUrl && (
                     <div className="p-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg">
                       <span className="text-[10px] text-slate-400 block mb-1">Assinatura Digital Vinculada</span>
-                      <img src={formData.inspectorSignatureUrl} alt="Assinatura Inspetor" className="h-10 object-contain" />
+                      <img src={formData.inspectorSignatureUrl} alt="Assinatura Responsável" className="h-10 object-contain" />
                     </div>
                   )}
-                </div>
-
-                {/* ASSINATURA DO SUPERVISOR / APROVADOR */}
-                <div className="bg-slate-50 dark:bg-slate-800/40 p-4 rounded-xl border border-slate-200 dark:border-slate-800 space-y-3">
-                  <div className="font-bold text-slate-800 dark:text-slate-200 text-xs">
-                    SUPERVISOR DE QUALIDADE / PCP
-                  </div>
-
-                  <div>
-                    <label className="block text-slate-600 dark:text-slate-400 font-medium mb-1">Nome do Supervisor</label>
-                    <input
-                      type="text"
-                      value={formData.approverName || ''}
-                      onChange={e => setFormData(prev => ({ ...prev, approverName: e.target.value }))}
-                      placeholder="Nome do supervisor responsável..."
-                      className="w-full px-3 py-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-xs"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-slate-600 dark:text-slate-400 font-medium mb-1">Cargo / Função</label>
-                    <input
-                      type="text"
-                      value={formData.approverJobTitle || ''}
-                      onChange={e => setFormData(prev => ({ ...prev, approverJobTitle: e.target.value }))}
-                      placeholder="Ex: Supervisor de Qualidade..."
-                      className="w-full px-3 py-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-xs"
-                    />
-                  </div>
                 </div>
 
               </div>

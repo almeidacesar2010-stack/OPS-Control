@@ -118,11 +118,8 @@ import { hashPassword, findUserByUsernameOrEmail, getUsernameInternalEmail } fro
 import { optimizeSignatureImage, saveUserProfileData } from './utils/userSignatureHelper';
 import { DeleteRequestModal } from './components/DeleteRequestModal';
 import { DeletionRequest, ModuleVisibilityConfig, UserRole, AppUser } from './types';
-import { ChecklistRenderer } from './components/ChecklistRenderer';
 import { ChecklistsModule } from './components/ChecklistsModule';
 import { ChecklistModal } from './components/ChecklistModal';
-import { generateOperationalChecklistPDF } from './utils/generateChecklistPDF';
-import { CHECKLIST_TEMPLATES, detectChecklistModel, createDefaultChecklistData } from './utils/checklistTemplates';
 import { OperationalChecklistData, ChecklistModelType } from './types/checklists';
 
 // Types
@@ -280,7 +277,7 @@ const PRE_REGISTERED_CLIENTS = [
   "UNIFLEX", "ELASA", "FRANK´S", "WEATHERFORD", "WELLBORE", 
   "PETRO RIO", "CIS BRASIL", "DOW", "M-I SWACO", "PINAMAK", "DORF", 
   "CHAMPIONX", "CONSTELLATION", "SNF", "SHELL", "LUBRITECH", "REDA", 
-  "OPEN SEA", "PETROGOTAS", "NOV", "TEJAS WELL", "OIL WELL", "BRAVA ENERGY", "HELIX"
+  "OPEN SEA", "PETROGOTAS", "NOV", "TEJAS WELL", "OIL WELL", "BRAVA ENERGY", "HELIX", "CLARIANT"
 ];
 
 const DEMO_EQUIPMENTS = [
@@ -729,9 +726,6 @@ function AppContent() {
     hingeCheck: { status: 'NA', value: '' } as InspectionCheck,
     reworkCheck: { status: 'NA', value: '' } as InspectionCheck,
   });
-
-  const [activeChecklistData, setActiveChecklistData] = useState<OperationalChecklistData | null>(null);
-  const [osFormMode, setOsFormMode] = useState<'checklist' | 'quick'>('checklist');
 
   const [confirmModal, setConfirmModal] = useState<{
     isOpen: boolean;
@@ -1351,23 +1345,6 @@ function AppContent() {
         rodLockCheck: formData.rodLockCheck,
         hingeCheck: formData.hingeCheck,
         reworkCheck: formData.reworkCheck,
-        checklistModel: activeChecklistData?.modelType || detectChecklistModel(formData.family, formData.subFamily, formData.equipmentNumber),
-        checklistData: activeChecklistData ? {
-          ...activeChecklistData,
-          equipmentTag: formData.equipmentNumber || activeChecklistData.equipmentTag,
-          clientId: formData.clientId || activeChecklistData.clientId,
-          clientName: (clients.find(c => c.id === formData.clientId)?.razaoSocial || activeChecklistData.clientName || 'N/A'),
-          equipmentType: finalFamily || activeChecklistData.equipmentType,
-          subModel: formData.subFamily || activeChecklistData.subModel || '',
-          status: formData.status,
-          priority: formData.priority,
-          inspectorName: formData.maintenanceTechnician || formData.createdBy || activeChecklistData.inspectorName || currentUserName,
-          approverName: formData.closedBy || activeChecklistData.approverName || '',
-          slingNumber: formData.slingCheck?.value || activeChecklistData.slingNumber || '',
-          slingStatus: formData.slingCheck?.status || activeChecklistData.slingStatus || 'OK',
-          reworkRequired: formData.reworkCheck?.status === 'OK',
-          reworkNotes: formData.reworkCheck?.value || activeChecklistData.reworkNotes || '',
-        } : null,
       };
 
       console.log('Attempting to save order with data:', orderData);
@@ -1877,28 +1854,6 @@ function AppContent() {
       reworkCheck: order.reworkCheck || { status: 'NA', value: '' },
     });
 
-    const client = clients.find(c => c.id === order.clientId);
-    const clientName = client?.razaoSocial || (order.clientId === 'na' ? 'NÃO DEFINIDO / N/A' : '');
-    const detectedModel = order.checklistModel || detectChecklistModel(order.family, order.subFamily, order.equipmentNumber);
-    const checklistPayload = order.checklistData || createDefaultChecklistData(detectedModel, {
-      equipmentTag: order.equipmentNumber || '',
-      clientId: order.clientId || '',
-      clientName: clientName,
-      equipmentType: order.family || '',
-      subModel: order.subFamily || '',
-      inspectionDate: order.startDate?.toDate ? format(order.startDate.toDate(), 'yyyy-MM-dd') : format(new Date(), 'yyyy-MM-dd'),
-      expirationDate: order.endDate?.toDate ? format(order.endDate.toDate(), 'yyyy-MM-dd') : '',
-      inspectorName: order.maintenanceTechnician || order.createdBy || currentUserName,
-      approverName: order.closedBy || '',
-      status: order.status || 'Em Manutenção',
-      priority: order.priority || 'Média',
-      slingNumber: order.slingCheck?.value || '',
-      slingStatus: order.slingCheck?.status || 'OK',
-      reworkRequired: order.reworkCheck?.status === 'OK',
-      reworkNotes: order.reworkCheck?.value || ''
-    });
-    setActiveChecklistData(checklistPayload);
-
     setOsModalTab(initialTab);
     setModalType('os');
     setAccessError(null);
@@ -1938,37 +1893,6 @@ function AppContent() {
   };
 
 const generatePDF = (order: any) => {
-    // If order has rich checklist data or is a specialized tank/ccu model, use dedicated operational PDF generator
-    if (order.checklistData) {
-      generateOperationalChecklistPDF(order.checklistData, logoUrl);
-      return;
-    }
-
-    const detectedModel = detectChecklistModel(order.family, order.subFamily, order.equipmentNumber);
-    if (detectedModel !== 'CCU' || order.checklistModel) {
-      const client = clients.find(c => c.id === order.clientId);
-      const clientName = order.clientId === 'na' ? 'NÃO DEFINIDO / N/A' : (client?.razaoSocial || 'N/A');
-      const richData = createDefaultChecklistData(detectedModel, {
-        equipmentTag: order.equipmentNumber,
-        clientId: order.clientId,
-        clientName: clientName,
-        equipmentType: order.family,
-        subModel: order.subFamily,
-        inspectionDate: order.startDate?.toDate ? format(order.startDate.toDate(), 'yyyy-MM-dd') : format(new Date(), 'yyyy-MM-dd'),
-        expirationDate: order.endDate?.toDate ? format(order.endDate.toDate(), 'yyyy-MM-dd') : '',
-        inspectorName: order.maintenanceTechnician || order.createdBy,
-        approverName: order.closedBy,
-        status: order.status,
-        priority: order.priority,
-        slingNumber: order.slingCheck?.value || '',
-        slingStatus: order.slingCheck?.status || 'OK',
-        reworkRequired: order.reworkCheck?.status === 'OK',
-        reworkNotes: order.reworkCheck?.value || ''
-      });
-      generateOperationalChecklistPDF(richData, logoUrl);
-      return;
-    }
-
     const doc = new jsPDF();
     const client = clients.find(c => c.id === order.clientId);
     const clientName = order.clientId === 'na' ? 'NÃO DEFINIDO / N/A' : (client?.razaoSocial || 'N/A');
@@ -4351,14 +4275,7 @@ const generatePDF = (order: any) => {
                       hingeCheck: { status: 'NA', value: '' },
                       reworkCheck: { status: 'NA', value: '' },
                     });
-                    const initialModel = detectChecklistModel('', '', '');
-                    setActiveChecklistData(createDefaultChecklistData(initialModel, {
-                      inspectorName: currentUserName,
-                      inspectionDate: format(new Date(), 'yyyy-MM-dd'),
-                      status: 'Em Manutenção',
-                      priority: 'Média'
-                    }));
-                    setOsFormMode('checklist');
+                    setEditingOrder(null);
                     setModalType('os'); 
                     setAccessError(null); 
                     setIsModalOpen(true); 
@@ -4973,8 +4890,8 @@ const generatePDF = (order: any) => {
                   clients={clients}
                   fleetEquipment={fleetEquipment}
                   canDelete={canDelete}
-                  onNewChecklist={() => {
-                    setEditingChecklist(null);
+                  onNewChecklist={(category?: any) => {
+                    setEditingChecklist(category ? ({ category, equipmentFamily: category } as any) : null);
                     setIsChecklistModalOpen(true);
                   }}
                   onEditChecklist={(item) => {
@@ -6412,34 +6329,9 @@ const generatePDF = (order: any) => {
 
                 {modalType === 'os' && (
                   <div className="flex flex-wrap items-center gap-3">
-                    <div className="flex items-center bg-slate-200/60 dark:bg-slate-800/80 p-1 rounded-2xl border border-slate-300/60 dark:border-slate-700/60 shadow-inner">
-                      <button
-                        type="button"
-                        onClick={() => setOsFormMode('checklist')}
-                        className={cn(
-                          "px-3.5 py-1.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer",
-                          osFormMode === 'checklist' ? "bg-blue-600 text-white shadow-md" : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
-                        )}
-                      >
-                        <ClipboardCheck className="w-3.5 h-3.5" />
-                        <span>Checklist Fiel ao Modelo</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setOsFormMode('quick')}
-                        className={cn(
-                          "px-3.5 py-1.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer",
-                          osFormMode === 'quick' ? "bg-blue-600 text-white shadow-md" : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
-                        )}
-                      >
-                        <FileSpreadsheet className="w-3.5 h-3.5" />
-                        <span>Ficha Rápida</span>
-                      </button>
-                    </div>
-
                     <button
                       type="button"
-                      onClick={() => generatePDF(editingOrder || { ...formData, id: 'preview', checklistData: activeChecklistData, checklistModel: activeChecklistData?.modelType })}
+                      onClick={() => generatePDF(editingOrder || { ...formData, id: 'preview' })}
                       className="px-4 py-2 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/50 rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center gap-2 border border-blue-200 dark:border-blue-800 shadow-sm cursor-pointer"
                       title="Baixar PDF Oficial"
                     >
@@ -6468,76 +6360,6 @@ const generatePDF = (order: any) => {
 
               {modalType === 'os' ? (
                 <div className="flex-1 overflow-y-auto custom-scrollbar p-2 sm:p-4 md:p-6 bg-slate-100/80 dark:bg-slate-950/90">
-                  {osFormMode === 'checklist' ? (
-                    <ChecklistRenderer
-                      data={activeChecklistData || createDefaultChecklistData(detectChecklistModel(formData.family, formData.subFamily, formData.equipmentNumber), {
-                        equipmentTag: formData.equipmentNumber,
-                        clientId: formData.clientId,
-                        clientName: clients.find(c => c.id === formData.clientId)?.razaoSocial || '',
-                        equipmentType: formData.family,
-                        subModel: formData.subFamily,
-                        inspectionDate: formData.startDate,
-                        expirationDate: formData.endDate,
-                        inspectorName: formData.maintenanceTechnician || formData.createdBy || currentUserName,
-                        approverName: formData.closedBy || '',
-                        status: formData.status,
-                        priority: formData.priority,
-                        slingNumber: formData.slingCheck?.value || '',
-                        slingStatus: formData.slingCheck?.status || 'OK',
-                        reworkRequired: formData.reworkCheck?.status === 'OK',
-                        reworkNotes: formData.reworkCheck?.value || '',
-                        inspectorSignatureUrl: currentUserSignatureUrl,
-                      })}
-                      onChange={(updatedData) => {
-                        setActiveChecklistData(updatedData);
-                        setFormData(prev => ({
-                          ...prev,
-                          equipmentNumber: updatedData.equipmentTag || prev.equipmentNumber,
-                          clientId: updatedData.clientId || prev.clientId,
-                          family: updatedData.equipmentType || prev.family,
-                          subFamily: updatedData.subModel || prev.subFamily,
-                          startDate: updatedData.inspectionDate || prev.startDate,
-                          endDate: updatedData.expirationDate || prev.endDate,
-                          status: (updatedData.status === 'Concluído' ? 'Concluído' : 'Em Manutenção') as 'Em Manutenção' | 'Concluído',
-                          priority: (updatedData.priority || prev.priority) as 'Baixa' | 'Média' | 'Alta' | 'Urgente',
-                          maintenanceTechnician: updatedData.inspectorName || prev.maintenanceTechnician,
-                          closedBy: updatedData.approverName || prev.closedBy,
-                          slingCheck: { status: updatedData.slingStatus, value: updatedData.slingNumber || '' },
-                          reworkCheck: { status: updatedData.reworkRequired ? 'OK' : 'NA', value: updatedData.reworkNotes || '' },
-                        }));
-                      }}
-                      onSave={async () => {
-                        const fakeEv = { preventDefault: () => {} } as any;
-                        await handleSubmit(fakeEv);
-                      }}
-                      onPrintPDF={() => {
-                        const dummyOrder = {
-                          ...(editingOrder || {}),
-                          equipmentNumber: activeChecklistData?.equipmentTag || formData.equipmentNumber,
-                          clientId: activeChecklistData?.clientId || formData.clientId,
-                          family: activeChecklistData?.equipmentType || formData.family,
-                          subFamily: activeChecklistData?.subModel || formData.subFamily,
-                          startDate: formData.startDate ? { toDate: () => parseISO(formData.startDate) } : null,
-                          endDate: formData.endDate ? { toDate: () => parseISO(formData.endDate) } : null,
-                          status: activeChecklistData?.status || formData.status,
-                          priority: activeChecklistData?.priority || formData.priority,
-                          checklistModel: activeChecklistData?.modelType,
-                          checklistData: activeChecklistData,
-                        };
-                        generatePDF(dummyOrder);
-                      }}
-                      isSubmitting={isSubmitting}
-                      isReadOnly={osModalTab === 'view'}
-                      clients={clients}
-                      equipments={equipments}
-                      fleetEquipment={fleetEquipment}
-                      currentUser={user}
-                      currentUserName={currentUserName}
-                      currentUserRole={currentUserRole}
-                      currentUserSignatureUrl={currentUserSignatureUrl}
-                      currentUserJobTitle={currentUserJobTitle}
-                    />
-                  ) : (
                   <form onSubmit={handleSubmit} className="w-full max-w-[1140px] mx-auto bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100 rounded-3xl border-2 border-slate-200/90 dark:border-slate-800 shadow-2xl p-6 sm:p-10 md:p-12 space-y-8 font-sans my-1">
                     {/* Document Header Accent Strip */}
                     <div className="h-2.5 bg-slate-800 dark:bg-slate-700 w-full rounded-t -mt-5 sm:-mt-8 md:-mt-12 -mx-5 sm:-mx-8 md:-mx-12 mb-6"></div>
@@ -7034,7 +6856,6 @@ const generatePDF = (order: any) => {
                       </div>
                     </div>
                   </form>
-                  )}
                 </div>
               ) : modalType === 'equipment' ? (
                 <form onSubmit={handleEquipmentSubmit} className="p-8 space-y-6">

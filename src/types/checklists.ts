@@ -1,3 +1,16 @@
+export const CHECKLIST_CATEGORIES = [
+  'CCU',
+  'Tanque 1500 LT',
+  'Tanque 5000 LT',
+  'Tanque 5200 LT',
+  'Container refrigerado',
+  'Mobilização Spooling Units',
+  'Manutenção Polia (Sheave Wheel)',
+  'Entrada/Saída Spooling Units'
+] as const;
+
+export type ChecklistCategory = typeof CHECKLIST_CATEGORIES[number];
+
 export type ChecklistModelType = 
   | 'CCU' 
   | 'TANQUE_1500' 
@@ -44,8 +57,11 @@ export interface OperationalChecklistData {
   reportNumber?: string;
   
   // 1. DADOS DO CHECKLIST
+  lastVn?: string; // ÚLTIMO VN (no início do documento)
+  ultimoVn?: string;
   checklistType: ChecklistOperationalType;
-  equipmentFamily: string; // Ex: 'CCU', 'Tanques de 1500L', 'Tanques de 5000/5200L', 'Container Refrigerado', 'Outros'
+  category?: ChecklistCategory;
+  equipmentFamily: string; // Ex: 'CCU', 'Tanque 1500 LT', etc.
   equipmentType?: string;  // Alias for equipmentFamily
   equipmentModel: string;  // Ex: 'CCU 6\'', 'CCU 10\'', 'Tanque 1500 LT', 'Tanque 5000 LT', 'Tanque 5200 LT', 'Reefer 20\''
   subModel?: string;       // Alias for equipmentModel

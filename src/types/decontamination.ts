@@ -12,7 +12,8 @@ export const TANK_CLIENTS = [
   'EQUINOR RAIA',
   'PRIO',
   'HELIX',
-  'BRAVA ENERGY'
+  'BRAVA ENERGY',
+  'CLARIANT'
 ] as const;
 
 export type DecontaminationStatus = 'waiting' | 'in_progress' | 'completed';

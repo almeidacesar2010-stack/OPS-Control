@@ -168,6 +168,28 @@ export const ChecklistRenderer: React.FC<ChecklistRendererProps> = ({
         </div>
       </div>
 
+      {/* CAMPO: ÚLTIMO VN */}
+      <div className="bg-slate-50 dark:bg-slate-800/40 p-4 rounded-2xl border border-slate-200 dark:border-slate-700 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="space-y-0.5">
+          <label className="block text-slate-800 dark:text-slate-100 font-bold text-xs uppercase tracking-wider">
+            ÚLTIMO VN
+          </label>
+          <span className="text-[11px] text-slate-500 dark:text-slate-400">
+            Identificação / número do último VN
+          </span>
+        </div>
+        <div className="w-full sm:w-72">
+          <input
+            type="text"
+            disabled={!effectiveCanEdit}
+            value={data.lastVn || data.ultimoVn || ''}
+            onChange={e => onChange({ ...data, lastVn: e.target.value, ultimoVn: e.target.value })}
+            placeholder="Preencher ÚLTIMO VN..."
+            className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-600 rounded-xl text-slate-900 dark:text-white font-semibold text-xs outline-none focus:ring-2 focus:ring-blue-500"
+          />
+        </div>
+      </div>
+
       {/* Tabs Navigation */}
       <div className="flex border-b border-slate-200 dark:border-slate-800 gap-2">
         <button
@@ -708,19 +730,23 @@ export const ChecklistRenderer: React.FC<ChecklistRendererProps> = ({
             <p className="text-xs text-slate-400">Preencha os responsáveis pela inspeção e liberação operacional do ativo</p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-xs">
+          <div className="w-full text-xs">
             <div className="p-5 bg-slate-50 dark:bg-slate-800/40 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-3">
               <span className="text-[10px] font-black uppercase text-blue-600 dark:text-blue-400 tracking-wider block">
-                INSPETOR / TÉCNICO EXECUTANTE
+                RESPONSÁVEL
               </span>
               <div>
                 <label className="font-bold text-slate-500 uppercase text-[10px] block">Nome Completo</label>
                 <input
                   type="text"
                   disabled={!effectiveCanEdit}
-                  placeholder="Nome do inspetor..."
-                  value={data.inspectorName || ''}
-                  onChange={e => onChange({ ...data, inspectorName: e.target.value })}
+                  placeholder="Nome do responsável..."
+                  value={data.inspectionResponsible || data.inspectorName || ''}
+                  onChange={e => onChange({ 
+                    ...data, 
+                    inspectionResponsible: e.target.value,
+                    inspectorName: e.target.value 
+                  })}
                   className="w-full mt-1 px-3 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white uppercase font-bold text-xs"
                 />
               </div>
@@ -732,34 +758,6 @@ export const ChecklistRenderer: React.FC<ChecklistRendererProps> = ({
                   placeholder="Ex: TÉCNICO DE INSPEÇÃO"
                   value={data.inspectorJobTitle || ''}
                   onChange={e => onChange({ ...data, inspectorJobTitle: e.target.value })}
-                  className="w-full mt-1 px-3 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white uppercase text-xs"
-                />
-              </div>
-            </div>
-
-            <div className="p-5 bg-slate-50 dark:bg-slate-800/40 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-3">
-              <span className="text-[10px] font-black uppercase text-emerald-600 dark:text-emerald-400 tracking-wider block">
-                APROVADOR / SUPERVISOR QUALIDADE
-              </span>
-              <div>
-                <label className="font-bold text-slate-500 uppercase text-[10px] block">Nome do Responsável</label>
-                <input
-                  type="text"
-                  disabled={!effectiveCanEdit}
-                  placeholder="Nome do supervisor..."
-                  value={data.approverName || ''}
-                  onChange={e => onChange({ ...data, approverName: e.target.value })}
-                  className="w-full mt-1 px-3 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white uppercase font-bold text-xs"
-                />
-              </div>
-              <div>
-                <label className="font-bold text-slate-500 uppercase text-[10px] block">Cargo / Função</label>
-                <input
-                  type="text"
-                  disabled={!effectiveCanEdit}
-                  placeholder="Ex: SUPERVISOR PCP / QUALIDADE"
-                  value={data.approverJobTitle || ''}
-                  onChange={e => onChange({ ...data, approverJobTitle: e.target.value })}
                   className="w-full mt-1 px-3 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white uppercase text-xs"
                 />
               </div>
